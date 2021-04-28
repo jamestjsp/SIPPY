@@ -12,11 +12,8 @@ setuptools.setup(
 	long_description_content_type='text/markdown',
 	url="https://github.com/CPCLAB-UNIPI/sippy",
 	packages=setuptools.find_packages(),
-<<<<<<< HEAD
 	python_requires=">=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,<=3.7.*", 
-=======
-	python_requires="==2.7,<=3.5,>=3.7",
->>>>>>> 53bff4c... Change to support python version grater than or equal to 3.5 and less than or equal to 3.7.
+
 	install_requires=(
 		"numpy",
 		"scipy",
