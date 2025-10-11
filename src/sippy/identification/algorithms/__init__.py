@@ -11,6 +11,7 @@ try:
     from .arx import ARXAlgorithm
     from .bj import BJAlgorithm
     from .cva import CVAAlgorithm
+    from .rls import RLSAlgorithm
     from .fir import FIRAlgorithm
     from .moesp import MOESPAlgorithm
     from .n4sid import N4SIDAlgorithm
@@ -33,6 +34,7 @@ try:
     AlgorithmFactory.register('OE', OEAlgorithm)
     AlgorithmFactory.register('ARMA', ARMAAlgorithm)
     AlgorithmFactory.register('BJ', BJAlgorithm)
+    AlgorithmFactory.register('RLS', RLSAlgorithm)
 except ImportError:
     # In case sysidbox is not available, we still have the base classes ready
     N4SIDAlgorithm = None
@@ -49,3 +51,4 @@ except ImportError:
     FIRAlgorithm = None
     OEAlgorithm = None
     ARMAAlgorithm = None
+    RLSAlgorithm = None
