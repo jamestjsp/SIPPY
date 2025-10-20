@@ -13,24 +13,25 @@ Functions include:
 - Data windowing functions
 """
 
-from typing import Optional, Tuple
 import warnings
+from typing import Optional, Tuple
+
 import numpy as np
-from scipy import signal as scipy_signal, fftpack
-from scipy.fft import fft, ifft, fftfreq
+from scipy import signal as scipy_signal
+from scipy.fft import fft, fftfreq, ifft
 
 # Import compiled utilities for performance
+# Note: NUMBA_AVAILABLE reserved for future optimization of performance-critical
+# functions like compute_correlations_fft, smooth_frequency_response, compute_coherence
 try:
-    from .compiled_utils import (
-        NUMBA_AVAILABLE,
-    )
+    from .compiled_utils import NUMBA_AVAILABLE  # noqa: F401
 except ImportError:
-    NUMBA_AVAILABLE = False
+    NUMBA_AVAILABLE = False  # noqa: F841
 
 
 def compute_power_spectrum_welch(
-    x: np.ndarray, 
-    dt: float = 1.0, 
+    x: np.ndarray,
+    dt: float = 1.0,
     nperseg: int = 1024,
     window: str = "hann"
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -427,7 +428,7 @@ def extract_magnitude_phase(G: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def validate_signal_pair(
-    u: np.ndarray, y: np.ndarray, min_length: int = 100
+    u: np.ndarray, y: np.ndarray, min_length: int = 100, warn_constant: bool = True
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Validate and preprocess input-output signal pair.
@@ -440,6 +441,8 @@ def validate_signal_pair(
         Output signal
     min_length : int
         Minimum acceptable signal length
+    warn_constant : bool
+        Whether to warn if signals have very low variance
 
     Returns:
     --------
@@ -473,6 +476,17 @@ def validate_signal_pair(
         raise ValueError(
             f"Need at least {min_length} samples for reliable identification, got {len(u)}"
         )
+
+    # Warn about constant/low-variance signals
+    if warn_constant:
+        u_std = np.std(u)
+        y_std = np.std(y)
+        if u_std < 1e-10 or y_std < 1e-10:
+            warnings.warn(
+                "Input or output signal has very low variance (constant signal). "
+                "Frequency response estimation may be unreliable.",
+                RuntimeWarning,
+            )
 
     return u, y
 

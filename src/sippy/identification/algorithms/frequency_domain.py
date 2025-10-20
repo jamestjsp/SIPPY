@@ -11,24 +11,24 @@ References:
     - Ljung, L. (1999). System Identification: Theory for the User.
 """
 
-from typing import TYPE_CHECKING, Optional, Tuple, Dict, Any
-import warnings
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+
 import numpy as np
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
 from ...utils.spectral_utils import (
-    compute_correlations_fft,
-    compute_spectra_from_correlation,
-    compute_output_spectrum,
-    compute_frequency_response,
     compute_coherence,
+    compute_correlations_fft,
+    compute_frequency_response,
+    compute_output_spectrum,
+    compute_spectra_from_correlation,
     create_hamming_window,
-    smooth_frequency_response,
-    extract_magnitude_phase,
-    validate_signal_pair,
-    denormalize_frequency,
     create_window,
+    denormalize_frequency,
+    extract_magnitude_phase,
+    smooth_frequency_response,
+    validate_signal_pair,
 )
+from ..base import IdentificationAlgorithm, StateSpaceModel
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -129,14 +129,28 @@ class FrequencyDomainIdentification(IdentificationAlgorithm):
         """
         Perform non-parametric frequency domain identification.
 
+        Non-parametric frequency domain methods estimate frequency response directly
+        from data without assuming a parametric model structure.
+
         Args:
             y: Output signal (N samples)
             u: Input signal (N samples)
             iddata: IDData object with input/output data
-            **kwargs: Additional parameters (dt: sampling interval)
+            **kwargs: Additional parameters (dt: sampling interval in seconds)
 
         Returns:
-            StateSpaceModel object with frequency response in identification_info
+            StateSpaceModel: Factory-compatible container with:
+                - Placeholder state-space matrices (A, B, C, D all identity/zero)
+                - Frequency response data in identification_info dict with keys:
+                  - 'frequency_response': dict with omega, freq_hz, G_smooth, magnitude_db,
+                    phase_deg, coherence, spectra (Phi_u, Phi_y, Phi_uy), correlations
+                  - 'quality_metrics': dict with mean_coherence, quality_label, etc.
+
+        Note:
+            This non-parametric algorithm returns frequency response data in
+            identification_info. The StateSpaceModel matrices (A, B, C, D) are
+            placeholder identity/zero matrices as non-parametric methods do not
+            produce parametric state-space models by definition.
         """
         # Extract data from IDData if provided
         if iddata is not None:
@@ -235,8 +249,6 @@ class FrequencyDomainIdentification(IdentificationAlgorithm):
         4. Apply spectral smoothing
         5. Compute coherence and quality metrics
         """
-        N = len(u)
-
         # Step 1: Correlation computation (uses spectral_utils)
         tau, R_u, R_uy = compute_correlations_fft(u, y, max_lag)
 
