@@ -5,6 +5,7 @@ Base classes for system identification algorithms.
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, List, Optional, Union
 
+import control
 import numpy as np
 
 if TYPE_CHECKING:
@@ -38,10 +39,8 @@ def resolve_identification_data(
 
 
 def realize_transfer_function(transfer_function: object) -> tuple[np.ndarray, ...]:
-    import harold
-
-    realization = harold.transfer_to_state(transfer_function)
-    return realization.a, realization.b, realization.c, realization.d
+    realization = control.tf2ss(transfer_function, method="slycot")
+    return realization.A, realization.B, realization.C, realization.D
 
 
 class IdentificationAlgorithm(ABC):
@@ -119,16 +118,10 @@ class StateSpaceModel:
         self.Yid = Yid  # One-step-ahead predictions from identification
         self.identification_info = identification_info or {}
 
-        # Try to import harold for State object
         if B.size == 0 or B.shape[1] == 0:
             self.G = None
         else:
-            try:
-                from harold import State
-
-                self.G = State(A, B, C, D, ts)
-            except ImportError:
-                self.G = None
+            self.G = control.ss(A, B, C, D, dt=ts)
 
         self.x0 = np.zeros((self.n, 1))
 

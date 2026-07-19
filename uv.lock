@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -473,20 +473,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/01/ee/02a2c011bdab74c6fb3c75474d40b3052059d95df7e73351460c8588d963/h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1", size = 101250, upload-time = "2025-04-24T03:35:25.427Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86", size = 37515, upload-time = "2025-04-24T03:35:24.344Z" },
-]
-
-[[package]]
-name = "harold"
-version = "1.0.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "matplotlib" },
-    { name = "scipy" },
-    { name = "tabulate" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/84/6c/0b85e54ad1226c08279f8b488edb496889dca8429bf03ec07d9562f4b68f/harold-1.0.3.tar.gz", hash = "sha256:8e44a4af47db1bcd8b9c1247a14386e82b4f5b8df79ef50f56ae17736b56169a", size = 104363, upload-time = "2022-12-04T12:45:13.542Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/8e/f46aebffc8bfbc2548f2bfacb013826feb2aeb7ebb4963c9bfe6c0c59bb8/harold-1.0.3-py3-none-any.whl", hash = "sha256:9e895fe046e567943d4125fa5d7ef044c544401e253c56ced815450dc8e37b7a", size = 120699, upload-time = "2022-12-04T12:45:10.913Z" },
 ]
 
 [[package]]
@@ -1493,6 +1479,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/00/e9/3916abb671bffb00845408c604ff03480dc8dc273310d8268547a37be0fb/pydantic_core-2.41.3.tar.gz", hash = "sha256:cdebb34b36ad05e8d77b4e797ad38a2a775c2a07a8fa386d4f6943b7778dcd39", size = 457489, upload-time = "2025-10-13T19:34:51.666Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9f/a6/7533cba20b8b66e209d8d2acbb9ccc0bc1b883b0654776d676e02696ef5d/pydantic_core-2.41.3-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:a8596700fdd3ee12b0d9c1f2395f4c32557e7ebfbfacdc08055b0bcbe7d2827e", size = 2105686, upload-time = "2025-10-13T19:31:57.675Z" },
     { url = "https://files.pythonhosted.org/packages/84/d7/2d15cb9dfb9f94422fb4a8820cbfeb397e3823087c2361ef46df5c172000/pydantic_core-2.41.3-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:624503f918e472c0eed6935020c01b6a6b4bcdb7955a848da5c8805d40f15c0f", size = 1910554, upload-time = "2025-10-13T19:32:00.037Z" },
@@ -1965,7 +1952,6 @@ source = { editable = "." }
 dependencies = [
     { name = "casadi" },
     { name = "control" },
-    { name = "harold" },
     { name = "joblib" },
     { name = "jupyterlab" },
     { name = "numba" },
@@ -1986,13 +1972,12 @@ dev = [
 requires-dist = [
     { name = "casadi", specifier = ">=3.7.2" },
     { name = "control", specifier = ">=0.10.2" },
-    { name = "harold", specifier = ">=1.0.3" },
     { name = "joblib", specifier = ">=1.4.0" },
     { name = "jupyterlab", specifier = ">=4.4.9" },
     { name = "numba", specifier = ">=0.60.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pytest", specifier = ">=8.4.2" },
-    { name = "slycot", specifier = ">=0.6.0" },
+    { name = "slycot", specifier = ">=0.7.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -2014,12 +1999,28 @@ wheels = [
 
 [[package]]
 name = "slycot"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/18/96acf7dcdc931d0c9a165a8aa3a6f3e6b145d0d69aea43ecef82b8611888/slycot-0.6.0.tar.gz", hash = "sha256:98ecf19cad0c6ce0d6f4db95169efc14f89a285ac24a4a8da1ca5b96b9da3c23", size = 3084062, upload-time = "2024-04-05T14:08:15.669Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/93/b1/4134384bca323b66adfc862bbc4d9d8883d6c2594d8c4a5bcfaf929bce83/slycot-0.7.0.tar.gz", hash = "sha256:41ba13991982b0304520bf5115491d63f644389552eea62fc2ecbd21ef661001", size = 3030549, upload-time = "2026-06-16T06:34:35.934Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/a1/21acb8b00ec28b9ef2a923c46b1a65d921ede31a32fc982df1670d97c04f/slycot-0.7.0-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:00b98777ab35ea2dc89567c1ec786db04c2cd1a883da430264f8694ce3f5d870", size = 9707928, upload-time = "2026-06-16T06:33:21.861Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/9a/0e063ed6631fd034a911fbb5c3915447a2bca9883b83b4fafee2d92f0d06/slycot-0.7.0-cp313-cp313-macosx_15_0_x86_64.whl", hash = "sha256:66e8415932b30bed7766f0c857957c8fa26e368950c6b66b2cbaadf57bbac48a", size = 10050933, upload-time = "2026-06-16T06:33:27.434Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/a1/08db556c3c2a9aeed652da5f2e8571a935a30d23f1537034905d8438e3be/slycot-0.7.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:298b9077ff1cb947b25c01dd74b36a0e58851072de38da36f4c5c553350a6e24", size = 10529731, upload-time = "2026-06-16T06:33:32.962Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/0d/2fbf93925130aa16d519da32c56518f1dfef13c87090a4c4b45a81cbe154/slycot-0.7.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3f36acc6265e16a4d87c525dbd72b8678618e215664b79993a5cb5a093f27a94", size = 10511317, upload-time = "2026-06-16T06:33:38.65Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/30/f10a443657f11b3c6622031a27dd5ef68f98ac8fdfa51fedf241aa3e99d8/slycot-0.7.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:4780a43f0355d3170d03a9595c6ae29cebc91b4c40cd255a7ff49b04d3b5fcb1", size = 10969759, upload-time = "2026-06-16T06:33:44.46Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/30/9267de54414d2d2d084f1961bcbb0b08c87b9da74df2c4615febfebe8dfd/slycot-0.7.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:b6c46a8bf07571f681d34a8ed06e53aceecf7ceffe3c057cf6f3516eba3c6313", size = 11524475, upload-time = "2026-06-16T06:33:50.648Z" },
+    { url = "https://files.pythonhosted.org/packages/92/c3/d9d73a7132b5aebd1959df4c8972aadf053ff690f8b2315e48cbb65002a8/slycot-0.7.0-cp313-cp313-win_amd64.whl", hash = "sha256:0323d2d783b3b924221c7259ba0f54bb37923e0c720e844feb06d4d608d7a302", size = 8827874, upload-time = "2026-06-16T06:33:56.073Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/1f/c567d4e02ca814485372c150bce201e53ef83476417c105d46725f502c65/slycot-0.7.0-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:f9c883335db8206c036f341fc9e144eb78024039f786a2a44fe9cf2178bacb36", size = 9707993, upload-time = "2026-06-16T06:34:00.57Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/af/8d14049029d4d505e5926134aecb2cf09422e1366184d2ab2777f667e3cd/slycot-0.7.0-cp314-cp314-macosx_15_0_x86_64.whl", hash = "sha256:c357e7f7e0582717753dca3aed9a1bc9ce626ac7e29d7151b9512a311bbec603", size = 10050857, upload-time = "2026-06-16T06:34:05.573Z" },
+    { url = "https://files.pythonhosted.org/packages/65/3e/429db694ad3c346afdfcc95d29555acfe713f956ab6c3390ab803c0aa86c/slycot-0.7.0-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:4c8eb586eca8daf55ce5454f57d80d83a575719bf746640730a7072a5c1d3910", size = 10529741, upload-time = "2026-06-16T06:34:09.98Z" },
+    { url = "https://files.pythonhosted.org/packages/40/80/dc90bc30a78a102314c60369aee6793c69e08728d84b3305fcd986e880d5/slycot-0.7.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:665d26c8c140773bf579fc133aecd7d6c2c9d181b3cb118f7357d55a82e9287d", size = 10511342, upload-time = "2026-06-16T06:34:14.99Z" },
+    { url = "https://files.pythonhosted.org/packages/51/06/36f7cfbb0eede786e5b2345bbeb94a5bdd6d9a2ed340cc2176618286c713/slycot-0.7.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:0dabd96bb69d5dcbf5b5cce8cbf6997f4d9928ebbab02982c300bd04e0ae8bdf", size = 10969819, upload-time = "2026-06-16T06:34:20.675Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/a8/5c9309bfefeb4775871cbb39d0d0325236c59b0743a67878b3d1ecd8eddf/slycot-0.7.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:6a18a43b165013a467f44732355adb503511e78127c58e4de271e5314d49dc50", size = 11524435, upload-time = "2026-06-16T06:34:26.709Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/17/e5abbfa424521e2b379ffce36efd729928b6be2b193b21ab471f6111b220/slycot-0.7.0-cp314-cp314-win_amd64.whl", hash = "sha256:57fd9d7afe9095915aca647a413ef66b159a41547a0a35c088fdf90e212aa137", size = 8952882, upload-time = "2026-06-16T06:34:31.344Z" },
+]
 
 [[package]]
 name = "sniffio"
@@ -2051,15 +2052,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/e3/55dcc2cfbc3ca9c29519eb6884dd1415ecb53b0e934862d3559ddcb7e20b/stack_data-0.6.3.tar.gz", hash = "sha256:836a778de4fec4dcd1dcd89ed8abff8a221f58308462e1c4aa2a3cf30148f0b9", size = 44707, upload-time = "2023-09-30T13:58:05.479Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl", hash = "sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695", size = 24521, upload-time = "2023-09-30T13:58:03.53Z" },
-]
-
-[[package]]
-name = "tabulate"
-version = "0.8.10"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7a/53/afac341569b3fd558bf2b5428e925e2eb8753ad9627c1f9188104c6e0c4a/tabulate-0.8.10.tar.gz", hash = "sha256:6c57f3f3dd7ac2782770155f3adb2db0b1a269637e42f27599925e64b114f519", size = 60154, upload-time = "2022-06-21T16:26:42.76Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/4e/e5a13fdb3e6f81ce11893523ff289870c87c8f1f289a7369fb0e9840c3bb/tabulate-0.8.10-py3-none-any.whl", hash = "sha256:0ba055423dbaa164b9e456abe7920c5e8ed33fcc16f6d1b2f2d152c8e1e8b4fc", size = 29068, upload-time = "2022-06-21T16:26:37.943Z" },
 ]
 
 [[package]]

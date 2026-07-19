@@ -2,6 +2,7 @@
 Tests for base classes.
 """
 
+import control
 import numpy as np
 import pytest
 
@@ -9,6 +10,7 @@ from sippy.identification.base import (
     IdentificationAlgorithm,
     StateSpaceModel,
     SystemIdentificationConfig,
+    realize_transfer_function,
 )
 
 
@@ -77,6 +79,47 @@ class TestStateSpaceModel:
         assert np.array_equal(model.D, D)
         assert model.ts == ts
         assert model.Vn == Vn
+        assert isinstance(model.G, control.StateSpace)
+        assert model.G.dt == pytest.approx(ts)
+        np.testing.assert_array_equal(model.G.A, A)
+        np.testing.assert_array_equal(model.G.B, B)
+        np.testing.assert_array_equal(model.G.C, C)
+        np.testing.assert_array_equal(model.G.D, D)
+
+    def test_model_creation_preserves_mimo_dimensions(self):
+        model = StateSpaceModel(
+            A=np.diag([0.8, 0.6]),
+            B=np.eye(2),
+            C=np.eye(2),
+            D=np.zeros((2, 2)),
+            K=np.zeros((2, 2)),
+            Q=np.eye(2),
+            R=np.eye(2),
+            S=np.zeros((2, 2)),
+            ts=0.25,
+            Vn=np.eye(2),
+        )
+
+        assert isinstance(model.G, control.StateSpace)
+        assert model.G.shape == (2, 2)
+        assert model.G.nstates == 2
+        assert model.G.dt == pytest.approx(0.25)
+
+    def test_model_without_inputs_has_no_control_system(self):
+        model = StateSpaceModel(
+            A=np.eye(2),
+            B=np.empty((2, 0)),
+            C=np.ones((1, 2)),
+            D=np.empty((1, 0)),
+            K=np.zeros((2, 1)),
+            Q=np.eye(2),
+            R=np.eye(1),
+            S=np.zeros((2, 1)),
+            ts=0.5,
+            Vn=0.0,
+        )
+
+        assert model.G is None
 
     def test_stability_check(self):
         """Test stability checking."""
@@ -130,6 +173,45 @@ class TestStateSpaceModel:
         freqs = model.get_natural_frequencies()
         assert len(freqs) == 2
         assert np.all(freqs >= 0)
+
+
+def test_realize_transfer_function_uses_control_state_space_conventions():
+    transfer_function = control.tf([0.2, 0.1], [1.0, -0.7, 0.12], dt=0.2)
+
+    A, B, C, D = realize_transfer_function(transfer_function)
+    realized = control.ss(A, B, C, D, dt=transfer_function.dt)
+
+    assert A.ndim == B.ndim == C.ndim == D.ndim == 2
+    assert realized.nstates == 2
+    np.testing.assert_allclose(
+        control.frequency_response(realized, [0.1, 1.0]).frdata,
+        control.frequency_response(transfer_function, [0.1, 1.0]).frdata,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_realize_mimo_transfer_function_with_slycot():
+    transfer_function = control.tf(
+        [[[0.2], [0.1]], [[0.3], [0.4]]],
+        [
+            [[1.0, -0.5], [1.0, -0.4]],
+            [[1.0, -0.3], [1.0, -0.2]],
+        ],
+        dt=0.1,
+    )
+
+    A, B, C, D = realize_transfer_function(transfer_function)
+    realized = control.ss(A, B, C, D, dt=transfer_function.dt)
+
+    assert realized.shape == (2, 2)
+    assert realized.dt == pytest.approx(0.1)
+    np.testing.assert_allclose(
+        control.frequency_response(realized, [0.2, 0.8]).frdata,
+        control.frequency_response(transfer_function, [0.2, 0.8]).frdata,
+        rtol=1e-10,
+        atol=1e-10,
+    )
 
 
 class TestSystemIdentificationConfig:

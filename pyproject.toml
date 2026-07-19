@@ -10,13 +10,12 @@ requires-python = ">=3.13"
 dependencies = [
     "casadi>=3.7.2",
     "control>=0.10.2",
-    "harold>=1.0.3",
     "joblib>=1.4.0",
     "jupyterlab>=4.4.9",
     "numba>=0.60.0",
     "pandas>=2.3.3",
     "pytest>=8.4.2",
-    "slycot>=0.6.0",
+    "slycot>=0.7.0",
 ]
 
 [dependency-groups]
