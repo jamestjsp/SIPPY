@@ -19,6 +19,7 @@ setuptools.setup(
         "numpy",
         "scipy",
         "control>=0.10.2",
+        "ctrlsys>=1.1.1",
         "slycot>=0.7.0",
     ),
     classifiers=(

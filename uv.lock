@@ -363,6 +363,29 @@ wheels = [
 ]
 
 [[package]]
+name = "ctrlsys"
+version = "1.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0b/3f/6d2b1cbb38756bad997c1d81261cd8bcd1243fc3f3dbbcc1cc444031a738/ctrlsys-1.1.1.tar.gz", hash = "sha256:35edb2c66c80123ffbec6e230d846c7a4abb106e3fc543e672d72170f2ac2d09", size = 2478160, upload-time = "2026-05-10T14:53:13.938Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a4/b4/d0980214dc45e88740242283f242040ffee57015daab9e7daaa44a82e06b/ctrlsys-1.1.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:432a3cea910a2fdb69e39431464e4ac6431d1e7e1f96dd9ec3ed9c66c8cc6a7b", size = 11370753, upload-time = "2026-05-10T14:52:51.341Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/88/3a2b093716a0dcd1469d0e5482290e61285b3204e2cf71f387c2f331dac2/ctrlsys-1.1.1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f3d780e86052cd6a91545147d80b18eda801f56131fc4eaab7946fbf83a6f0b6", size = 11070423, upload-time = "2026-05-10T16:16:08.688Z" },
+    { url = "https://files.pythonhosted.org/packages/75/62/9c9d44f7171dbaa39e5b0c6de7b4ab2e1f3fe99b1c18c43058ef0ccc9adb/ctrlsys-1.1.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c0429161fcc24c507237bba92305c2795d7feeea0ea4f7d809c96f7ff0bb21cf", size = 11193123, upload-time = "2026-05-10T14:52:54.201Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/67/a9feb1f6f1456e7e4cd65cbc3043eb8a232b688b2997ff1ad943c2b9c1cb/ctrlsys-1.1.1-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:7057534ff9ae117658c4d2f7d1f92ced151ee8bfed6c23e40326f688495f16f6", size = 11391580, upload-time = "2026-05-10T16:16:11.42Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/7f/8cb0907ab0b792e3abc8399d6df8a82c3adc9d87b4a679361b5dd133afab/ctrlsys-1.1.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:e512ce99e42b52cf057685799bc9e91b28b33e8d6e8782a86de4367181bdab79", size = 11860919, upload-time = "2026-05-10T14:52:57.344Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/41/f5a5a815469a070b92d5e3ae4735fb51eb82a8314950ff11c5f81f1c2bb5/ctrlsys-1.1.1-cp313-cp313-win_amd64.whl", hash = "sha256:678315d552b82b3e092e1f84b86a706d8b2fc3db0cce391bdbabb7dc65ce116d", size = 9200001, upload-time = "2026-05-10T14:53:00.201Z" },
+    { url = "https://files.pythonhosted.org/packages/64/e6/0bedc9545d3679cfa16a3e77100e1a43923793ee05842879542646301482/ctrlsys-1.1.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:d619f346b21ab6906ffd5829d7372d353411e912fe3508c24666c2cd783ca5bc", size = 11369926, upload-time = "2026-05-10T14:53:02.8Z" },
+    { url = "https://files.pythonhosted.org/packages/bf/43/bfa3b719d48c9e940fbd410837d7d7ea0148eacb723721860b95da5ec694/ctrlsys-1.1.1-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a6cc3dcc971d39c0231f0d6a459d010b9291b800299852cbead03058ca94b717", size = 11070780, upload-time = "2026-05-10T16:16:14.112Z" },
+    { url = "https://files.pythonhosted.org/packages/2d/d7/1384f2faba2000fc1f28e3de30e2b59d715b96e5805581e4a0a19b874f0b/ctrlsys-1.1.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f8ca1a7a1f987e1812b6329843f6936dea885088695c388760d3086cdfbb68d7", size = 11190316, upload-time = "2026-05-10T14:53:05.806Z" },
+    { url = "https://files.pythonhosted.org/packages/46/ad/0faa78bab0702c3302b166f6d402994c984d40f276c077840bb405dea89f/ctrlsys-1.1.1-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:e3201c24e7f049bc3bccab167cd0b2d96d8f6c559e8e35e6c11272bd341ccd67", size = 11392642, upload-time = "2026-05-10T16:16:16.669Z" },
+    { url = "https://files.pythonhosted.org/packages/67/3e/817853471d11b33e7392670fe997ec64f9249c1ed38dab41f735cffc6e23/ctrlsys-1.1.1-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:c4b4381733acce820007fa89d96327d93e8b47a52891639de1de54f2acb622c7", size = 11858899, upload-time = "2026-05-10T14:53:08.642Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/cb/e70b8f63a17e718a0ea8245bef5a48da9b0949a5702fcc62240975e04f0d/ctrlsys-1.1.1-cp314-cp314-win_amd64.whl", hash = "sha256:49517613554a1d9b8b9961f40e89d30fc4e58ce95124c702a7373ec0d1a04701", size = 9314511, upload-time = "2026-05-10T14:53:11.317Z" },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1952,6 +1975,7 @@ source = { editable = "." }
 dependencies = [
     { name = "casadi" },
     { name = "control" },
+    { name = "ctrlsys" },
     { name = "joblib" },
     { name = "jupyterlab" },
     { name = "numba" },
@@ -1972,6 +1996,7 @@ dev = [
 requires-dist = [
     { name = "casadi", specifier = ">=3.7.2" },
     { name = "control", specifier = ">=0.10.2" },
+    { name = "ctrlsys", specifier = ">=1.1.1" },
     { name = "joblib", specifier = ">=1.4.0" },
     { name = "jupyterlab", specifier = ">=4.4.9" },
     { name = "numba", specifier = ">=0.60.0" },

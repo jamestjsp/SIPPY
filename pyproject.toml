@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "casadi>=3.7.2",
     "control>=0.10.2",
+    "ctrlsys>=1.1.1",
     "joblib>=1.4.0",
     "jupyterlab>=4.4.9",
     "numba>=0.60.0",
