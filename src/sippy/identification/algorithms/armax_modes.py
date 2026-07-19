@@ -493,7 +493,17 @@ class OPTHandler(ARMAXModeHandler):
         **kwargs,
     ) -> Tuple[Optional[StateSpaceModel], dict]:
         """Identify ARMAX using nonlinear optimization."""
-        model, info = self._identify_opt(u, y, na, nb, nc, nk, max_iterations, **kwargs)
+        model, info = self._identify_opt(
+            u,
+            y,
+            na,
+            nb,
+            nc,
+            nk,
+            max_iterations,
+            convergence_tolerance,
+            **kwargs,
+        )
         if model is not None:
             model.identification_info.update(info)
             model.finalize_identification(

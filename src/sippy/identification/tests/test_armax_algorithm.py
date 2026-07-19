@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
@@ -158,3 +160,22 @@ def test_legacy_armax_mode_handlers_build_control_models(handler, creator_name):
     assert model.H_tf.dt == pytest.approx(0.25)
     np.testing.assert_allclose(model.G_tf.num[0][0], [0.5, 0.0])
     np.testing.assert_allclose(model.G_tf.den[0][0], [1.0, 0.2, 0.0])
+
+
+def test_legacy_opt_handler_forwards_convergence_tolerance():
+    handler = OPTHandler()
+    u = np.arange(20.0)
+    y = np.arange(20.0)
+
+    with patch.object(handler, "_identify_opt", return_value=(None, {})) as identify:
+        handler.identify(
+            u,
+            y,
+            na=1,
+            nb=1,
+            nc=1,
+            nk=1,
+            convergence_tolerance=0.123,
+        )
+
+    identify.assert_called_once_with(u, y, 1, 1, 1, 1, 200, 0.123)
