@@ -140,3 +140,15 @@ class StateSpace(InputOutputSystem):
 class FrequencyResponseData:
     omega: np.ndarray
     frdata: np.ndarray
+
+    def __iter__(self):
+        yield np.abs(self.frdata)
+        yield np.angle(self.frdata)
+        yield self.omega
+
+
+@dataclass(frozen=True)
+class TimeResponseData:
+    time: np.ndarray
+    outputs: np.ndarray
+    states: np.ndarray

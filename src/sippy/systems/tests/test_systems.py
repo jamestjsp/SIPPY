@@ -5,7 +5,9 @@ from sippy.systems import (
     CtrlSysError,
     StateSpace,
     TransferFunction,
+    forced_response,
     frequency_response,
+    impulse_response,
     ss,
     ss2tf,
     tf,
@@ -122,3 +124,20 @@ def test_ctrlsys_info_code_becomes_python_exception(monkeypatch):
 
     with pytest.raises(CtrlSysError, match=r"tc04ad failed with info=2"):
         tf2ss(tf([1.0], [1.0, -0.5], dt=1.0))
+
+
+def test_forced_response_uses_discrete_state_equations():
+    system = ss([[0.5]], [[1.0]], [[2.0]], [[0.25]], dt=0.2)
+
+    response = forced_response(system, U=[1.0, 2.0, 0.0], X0=[0.5], squeeze=False)
+
+    np.testing.assert_allclose(response.outputs, [[1.25, 3.0, 5.25]])
+    np.testing.assert_allclose(response.states, [1.3125])
+
+
+def test_impulse_response_matches_unit_area_convention():
+    system = ss([[0.5]], [[1.0]], [[1.0]], [[0.0]], dt=0.2)
+
+    response = impulse_response(system, T=np.arange(4) * 0.2, squeeze=False)
+
+    np.testing.assert_allclose(response.outputs, [[[0.0, 5.0, 2.5, 1.25]]])

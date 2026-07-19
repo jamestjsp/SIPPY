@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from typing import Literal
 
-import control
 import numpy as np
+
+from sippy import systems as control
 
 ExcitationKind = Literal["white", "binary", "multisine"]
 

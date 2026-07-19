@@ -4,10 +4,11 @@ System simulation and analysis utilities.
 
 import warnings
 
-import control
 import numpy as np
 from scipy import fftpack, signal, stats
 from scipy.linalg import solve_discrete_are
+
+from sippy import systems as control
 
 # Import compiled utilities for performance
 try:

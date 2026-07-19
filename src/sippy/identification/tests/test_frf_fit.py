@@ -2,11 +2,11 @@
 Tests for fitting parametric transfer functions to FD frequency responses.
 """
 
-import control
 import numpy as np
 import pytest
 from scipy import signal
 
+from sippy import systems as control
 from sippy.identification.algorithms.frequency_domain import (
     FrequencyDomainAlgorithm,
 )

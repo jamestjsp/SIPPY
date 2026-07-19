@@ -1,7 +1,7 @@
-import control
 import numpy as np
 import pytest
 
+from sippy import systems as control
 from sippy.utils.simulation_utils import get_fir_coef, get_step_response
 
 from .simulation_scenarios import (

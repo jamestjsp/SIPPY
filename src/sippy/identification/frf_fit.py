@@ -24,8 +24,9 @@ References:
 import warnings
 from typing import Any
 
-import control
 import numpy as np
+
+from sippy import systems as control
 
 from .base import StateSpaceModel, realize_transfer_function
 

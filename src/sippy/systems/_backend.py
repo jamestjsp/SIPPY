@@ -148,3 +148,18 @@ def state_frequency_response(system: "StateSpace", omega: np.ndarray) -> np.ndar
         _check_info("tb05ad", info)
         response[:, :, index] = dynamic + system.D
     return response
+
+
+def discrete_time_response(
+    system: "StateSpace", inputs: np.ndarray, initial_state: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    outputs, final_state, info = ctrlsys.tf01md(
+        _fortran_copy(system.A),
+        _fortran_copy(system.B),
+        _fortran_copy(system.C),
+        _fortran_copy(system.D),
+        _fortran_copy(inputs),
+        np.array(initial_state, dtype=float, copy=True),
+    )
+    _check_info("tf01md", info)
+    return outputs, final_state

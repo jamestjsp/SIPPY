@@ -1,6 +1,6 @@
-import control
 import numpy as np
 
+from sippy import systems as control
 from sippy.identification.factory import create_algorithm
 
 from .simulation_scenarios import (
