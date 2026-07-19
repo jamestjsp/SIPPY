@@ -150,6 +150,7 @@ nc_ords = [1, 1]
 nd_ords = [1, 1]
 nf_ords = [2, 2]
 theta = [[1, 1, 1, 1], [1, 1, 1, 1]]
+nk_ords = [[delay + 1 for delay in row] for row in theta]
 # Number of iterations
 n_iter = 300
 
@@ -170,62 +171,57 @@ data = IDData(data=data_df, inputs=inputs, outputs=outputs, tsample=ts)
 
 sys_id_arx = SystemIdentification()
 Id_ARX = sys_id_arx.identify(
-    y=data.get_output_array(),
-    u=data.get_input_array(),
+    iddata=data,
     id_method="ARX",
-    na=na_ords,
-    nb=nb_ords,
-    theta=theta,
+    na=2,
+    nb=1,
+    nk=2,
 )
 
 sys_id_armax = SystemIdentification()
 Id_ARMAX = sys_id_armax.identify(
-    y=data.get_output_array(),
-    u=data.get_input_array(),
+    iddata=data,
     id_method="ARMAX",
     na=na_ords,
     nb=nb_ords,
     nc=nc_ords,
-    theta=theta,
+    nk=nk_ords,
     max_iterations=n_iter,
 )
 
 sys_id_oe = SystemIdentification()
 Id_OE = sys_id_oe.identify(
-    y=data.get_output_array(),
-    u=data.get_input_array(),
+    iddata=data,
     id_method="OE",
-    nb=nb_ords,
-    nf=nf_ords,
-    theta=theta,
+    nb=1,
+    nf=2,
+    nk=2,
     max_iterations=n_iter,
 )
 
 sys_id_bj = SystemIdentification()
 Id_BJ = sys_id_bj.identify(
-    y=data.get_output_array(),
-    u=data.get_input_array(),
+    iddata=data,
     id_method="BJ",
-    nb=nb_ords,
-    nc=nc_ords,
-    nd=nd_ords,
-    nf=nf_ords,
-    theta=theta,
+    nb=1,
+    nc=1,
+    nd=1,
+    nf=2,
+    nk=2,
     max_iterations=n_iter,
     stability_constraint=True,
 )
 
 sys_id_gen = SystemIdentification()
 Id_GEN = sys_id_gen.identify(
-    y=data.get_output_array(),
-    u=data.get_input_array(),
+    iddata=data,
     id_method="GEN",
-    na=na_ords,
-    nb=nb_ords,
-    nc=nc_ords,
-    nd=nd_ords,
-    nf=nf_ords,
-    theta=theta,
+    na=2,
+    nb=1,
+    nc=1,
+    nd=1,
+    nf=2,
+    nk=2,
     max_iterations=n_iter,
     stability_constraint=True,
     stability_margin=0.98,
@@ -237,8 +233,7 @@ method = "N4SID"
 SS_ord = 2
 sys_id_ss = SystemIdentification()
 Id_SS = sys_id_ss.identify(
-    y=data.get_output_array(),
-    u=data.get_input_array(),
+    iddata=data,
     id_method=method,
     ss_fixed_order=SS_ord,
 )

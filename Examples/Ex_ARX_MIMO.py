@@ -147,6 +147,15 @@ theta_list = [
     [th31, th32, th33, th34],
 ]
 
+# MIMO ARX and FIR currently use shared orders, so span every channel's lag range.
+shared_na = max(ordersna)
+shared_nb = max(
+    order + delay
+    for order_row, delay_row in zip(ordersnb, theta_list)
+    for order, delay in zip(order_row, delay_row)
+)
+shared_nk = 1
+
 # IDENTIFICATION STAGE using new API
 
 # Create IDData object - need to convert from numpy arrays to DataFrame
@@ -165,22 +174,20 @@ data = IDData(data=data_df, inputs=inputs, outputs=outputs, tsample=ts)
 # ARX
 sys_id_arx = SystemIdentification()
 Id_ARX = sys_id_arx.identify(
-    y=data.get_output_array(),
-    u=data.get_input_array(),
+    iddata=data,
     id_method="ARX",
-    na=[na1, na2, na3],
-    nb=ordersnb,
-    theta=theta_list,
+    na=shared_na,
+    nb=shared_nb,
+    nk=shared_nk,
 )
 
 # FIR
 sys_id_fir = SystemIdentification()
 Id_FIR = sys_id_fir.identify(
-    y=data.get_output_array(),
-    u=data.get_input_array(),
+    iddata=data,
     id_method="FIR",
-    nb=ordersnb,
-    theta=theta_list,
+    nb=shared_nb,
+    nk=shared_nk,
 )
 
 # output of the identified model

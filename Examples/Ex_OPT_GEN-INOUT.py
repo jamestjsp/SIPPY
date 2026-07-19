@@ -110,9 +110,6 @@ plt.grid()
 
 ##### SYSTEM IDENTIFICATION from collected data using new API
 
-# choose identification mode
-mode = "FIXED"
-
 # Create IDData object
 time_index = pd.date_range(
     "2023-01-01", periods=npts, freq=f"{int(sampling_time * 1000)}ms"
@@ -120,178 +117,83 @@ time_index = pd.date_range(
 data_df = pd.DataFrame({"u": Usim[0, :], "y": Ytot.flatten()}, index=time_index)
 data = IDData(data=data_df, inputs=["u"], outputs=["y"], tsample=sampling_time)
 
-if mode == "IC":
-    # use Information criterion
+# Use fixed model orders. Polynomial information-criterion search is not supported.
+na_ord = 2
+nb_ord = 3
+nc_ord = 2
+nd_ord = 3
+nf_ord = 4
+nk = 12
 
-    # ARMA - ARARX - ARARMAX
-    sys_id_arma = SystemIdentification()
-    Id_ARMA = sys_id_arma.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARMA",
-        criterion="BIC",
-        na=[2, 2],
-        nc=[2, 2],
-        delays=[11, 11],
-        max_iterations=300,
-    )
+# ARMA - ARARX - ARARMAX
+sys_id_arma = SystemIdentification()
+Id_ARMA = sys_id_arma.identify(
+    iddata=data,
+    id_method="ARMA",
+    na=na_ord,
+    nc=nc_ord,
+)
 
-    sys_id_ararx = SystemIdentification()
-    Id_ARARX = sys_id_ararx.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARARX",
-        criterion="BIC",
-        na=[4, 4],
-        nb=[3, 3],
-        nd=[3, 3],
-        delays=[11, 11],
-        max_iterations=300,
-    )
+sys_id_ararx = SystemIdentification()
+Id_ARARX = sys_id_ararx.identify(
+    iddata=data,
+    id_method="ARARX",
+    na=na_ord,
+    nb=nb_ord,
+    nd=nd_ord,
+    nk=nk,
+    max_iterations=300,
+)
 
-    sys_id_ararmax = SystemIdentification()
-    Id_ARARMAX = sys_id_ararmax.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARARMAX",
-        criterion="BIC",
-        na=[4, 4],
-        nb=[3, 3],
-        nc=[2, 2],
-        nd=[3, 3],
-        delays=[11, 11],
-        max_iterations=300,
-    )
+sys_id_ararmax = SystemIdentification()
+Id_ARARMAX = sys_id_ararmax.identify(
+    iddata=data,
+    id_method="ARARMAX",
+    na=na_ord,
+    nb=nb_ord,
+    nc=nc_ord,
+    nd=nd_ord,
+    nk=nk,
+    max_iterations=300,
+)
 
-    # OE - BJ - GEN
-    sys_id_oe = SystemIdentification()
-    Id_OE = sys_id_oe.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="OE",
-        criterion="BIC",
-        nb=[3, 3],
-        nf=[4, 4],
-        delays=[11, 11],
-        max_iterations=300,
-    )
-    #
-    sys_id_bj = SystemIdentification()
-    Id_BJ = sys_id_bj.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="BJ",
-        criterion="BIC",
-        nb=[3, 3],
-        nc=[2, 2],
-        nd=[3, 3],
-        nf=[4, 4],
-        delays=[11, 11],
-        max_iterations=300,
-    )
-    # #
-    sys_id_gen = SystemIdentification()
-    Id_GEN = sys_id_gen.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="GEN",
-        criterion="BIC",
-        na=[2, 2],
-        nb=[3, 3],
-        nc=[2, 2],
-        nd=[3, 3],
-        nf=[4, 4],
-        delays=[11, 11],
-        max_iterations=300,
-    )
+# OE - BJ - GEN
+sys_id_oe = SystemIdentification()
+Id_OE = sys_id_oe.identify(
+    iddata=data,
+    id_method="OE",
+    nb=nb_ord,
+    nf=nf_ord,
+    nk=nk,
+    max_iterations=300,
+)
 
+sys_id_bj = SystemIdentification()
+Id_BJ = sys_id_bj.identify(
+    iddata=data,
+    id_method="BJ",
+    nb=nb_ord,
+    nc=nc_ord,
+    nd=nd_ord,
+    nf=nf_ord,
+    nk=nk,
+    max_iterations=300,
+)
 
-elif mode == "FIXED":
-    # use fixed model orders
-
-    na_ord = [2]
-    nb_ord = [[3]]
-    nc_ord = [2]
-    nd_ord = [3]
-    nf_ord = [4]
-    theta = [[11]]
-
-    # ARMA - ARARX - ARARMAX
-    sys_id_arma = SystemIdentification()
-    Id_ARMA = sys_id_arma.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARMA",
-        na=na_ord,
-        nc=nc_ord,
-        theta=theta,
-    )
-    # #
-    sys_id_ararx = SystemIdentification()
-    Id_ARARX = sys_id_ararx.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARARX",
-        na=na_ord,
-        nb=nb_ord,
-        nd=nd_ord,
-        theta=theta,
-        max_iterations=300,
-    )
-    # #
-    sys_id_ararmax = SystemIdentification()
-    Id_ARARMAX = sys_id_ararmax.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARARMAX",
-        na=na_ord,
-        nb=nb_ord,
-        nc=nc_ord,
-        nd=nd_ord,
-        theta=theta,
-        max_iterations=300,
-    )
-
-    # OE - BJ - GEN
-    sys_id_oe = SystemIdentification()
-    Id_OE = sys_id_oe.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="OE",
-        nb=nb_ord,
-        nf=nf_ord,
-        theta=theta,
-        max_iterations=300,
-    )
-    #
-    sys_id_bj = SystemIdentification()
-    Id_BJ = sys_id_bj.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="BJ",
-        nb=nb_ord,
-        nc=nc_ord,
-        nd=nd_ord,
-        nf=nf_ord,
-        theta=theta,
-        max_iterations=300,
-    )
-    # #
-    sys_id_gen = SystemIdentification()
-    Id_GEN = sys_id_gen.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="GEN",
-        na=na_ord,
-        nb=nb_ord,
-        nc=nc_ord,
-        nd=nd_ord,
-        nf=nf_ord,
-        theta=theta,
-        max_iterations=300,
-    )
+sys_id_gen = SystemIdentification()
+Id_GEN = sys_id_gen.identify(
+    iddata=data,
+    id_method="GEN",
+    na=na_ord,
+    nb=nb_ord,
+    nc=nc_ord,
+    nd=nd_ord,
+    nf=nf_ord,
+    nk=nk,
+    max_iterations=300,
+)
 #
-_, Y_arma = Id_ARMA.simulate(Usim)
+Y_arma = Id_ARMA.Yid.squeeze()
 _, Y_ararx = Id_ARARX.simulate(Usim)
 _, Y_ararmax = Id_ARARMAX.simulate(Usim)
 #

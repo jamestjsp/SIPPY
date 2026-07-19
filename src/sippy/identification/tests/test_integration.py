@@ -2,6 +2,9 @@
 Integration tests for the complete system identification workflow.
 """
 
+import runpy
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -165,6 +168,42 @@ class TestMasterExamplesIntegration:
         import matplotlib
 
         matplotlib.use("Agg", force=True)
+
+    def test_ex_cst_script_runs(self, monkeypatch):
+        """Execute the shipped CST example through identification and plotting."""
+        import matplotlib.pyplot as plt
+
+        monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+        example = Path(__file__).parents[4] / "Examples" / "Ex_CST.py"
+
+        namespace = runpy.run_path(str(example))
+
+        for name in ("Y_arx", "Y_armax", "Y_oe", "Y_bj", "Y_gen", "Y_ss"):
+            assert namespace[name].shape == (2, 1001)
+
+    def test_ex_opt_gen_inout_script_runs(self, monkeypatch):
+        """Execute the shipped general input-output optimization example."""
+        import matplotlib.pyplot as plt
+
+        monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+        example = Path(__file__).parents[4] / "Examples" / "Ex_OPT_GEN-INOUT.py"
+
+        namespace = runpy.run_path(str(example))
+
+        for name in ("Y_arma", "Y_ararx", "Y_ararmax", "Y_oe", "Y_bj", "Y_gen"):
+            assert namespace[name].shape == (401,)
+
+    def test_ex_recursive_script_runs(self, monkeypatch):
+        """Execute the shipped recursive-identification comparison example."""
+        import matplotlib.pyplot as plt
+
+        monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+        example = Path(__file__).parents[4] / "Examples" / "Ex_RECURSIVE.py"
+
+        namespace = runpy.run_path(str(example))
+
+        for name in ("Y_armax", "Y_arx", "Y_oe", "Yv_armax", "Yv_arx", "Yv_oe"):
+            assert namespace[name].shape == (401,)
 
     def test_ex_ss_example_from_master(self):
         """Test Ex_SS.py from master branch - State Space methods."""

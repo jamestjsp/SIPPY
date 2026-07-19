@@ -120,9 +120,6 @@ plt.grid()
 
 ##### SYSTEM IDENTIFICATION from collected data using new API
 
-# choose RECURSIVE identification mode: ARMAX - ARX - OE
-mode = "FIXED"
-
 # Create IDData object - need to convert from numpy arrays to DataFrame
 time_index = pd.date_range(
     "2023-01-01", periods=npts, freq=f"{int(sampling_time * 1000)}ms"
@@ -136,88 +133,42 @@ inputs = ["u"]
 outputs = ["y"]
 data = IDData(data=data_df, inputs=inputs, outputs=outputs, tsample=sampling_time)
 
-if mode == "IC":
-    # use Information criterion
+na_ord = 4
+nb_ord = 3
+nc_ord = 2
+nf_ord = 4
+nk = 12
 
-    sys_id_armax = SystemIdentification()
-    Id_ARMAX = sys_id_armax.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARMAX",
-        na=[4],
-        nb=[3],
-        nc=[2],
-        theta=[11],
-        max_iterations=300,
-        ARMAX_mod="RLLS",
-    )
+sys_id_armax = SystemIdentification()
+Id_ARMAX = sys_id_armax.identify(
+    iddata=data,
+    id_method="ARMAX",
+    na=na_ord,
+    nb=nb_ord,
+    nc=nc_ord,
+    nk=nk,
+    max_iterations=300,
+    mode="ILLS",
+)
 
-    sys_id_arx = SystemIdentification()
-    Id_ARX = sys_id_arx.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARX",
-        na=[4],
-        nb=[3],
-        theta=[11],
-        max_iterations=300,
-    )
+sys_id_arx = SystemIdentification()
+Id_ARX = sys_id_arx.identify(
+    iddata=data,
+    id_method="ARX",
+    na=na_ord,
+    nb=nb_ord,
+    nk=nk,
+)
 
-    sys_id_oe = SystemIdentification()
-    Id_OE = sys_id_oe.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="OE",
-        nb=[3],
-        nf=[4],
-        theta=[11],
-        max_iterations=300,
-    )
-
-
-elif mode == "FIXED":
-    # use fixed model orders
-
-    na_ord = [4]
-    nb_ord = [[3]]
-    nc_ord = [2]
-    nf_ord = [4]
-    theta = [[11]]
-
-    sys_id_armax = SystemIdentification()
-    Id_ARMAX = sys_id_armax.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARMAX",
-        na=na_ord,
-        nb=nb_ord,
-        nc=nc_ord,
-        theta=theta,
-        max_iterations=300,
-        ARMAX_mod="RLLS",
-    )
-
-    sys_id_arx = SystemIdentification()
-    Id_ARX = sys_id_arx.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="ARX",
-        na=na_ord,
-        nb=nb_ord,
-        theta=theta,
-        max_iterations=300,
-    )
-
-    sys_id_oe = SystemIdentification()
-    Id_OE = sys_id_oe.identify(
-        y=data.get_output_array(),
-        u=data.get_input_array(),
-        id_method="OE",
-        nb=nb_ord,
-        nf=nf_ord,
-        theta=theta,
-        max_iterations=300,
-    )
+sys_id_oe = SystemIdentification()
+Id_OE = sys_id_oe.identify(
+    iddata=data,
+    id_method="OE",
+    nb=nb_ord,
+    nf=nf_ord,
+    nk=nk,
+    max_iterations=300,
+)
 
 # Use one-step-ahead predictions (Yid) for identification data
 Y_armax = (
@@ -346,7 +297,7 @@ mag3, fi3, om = (
 )
 
 plt.subplot(2, 1, 1)
-plt.loglog(om, mag)
+plt.loglog(om, mag.squeeze())
 plt.grid()
 plt.loglog(om, mag1.squeeze() if hasattr(mag1, "squeeze") else mag1)
 plt.loglog(om, mag2.squeeze() if hasattr(mag2, "squeeze") else mag2)
@@ -355,7 +306,7 @@ plt.xlabel("w")
 plt.ylabel("Amplitude Ratio")
 plt.title("Bode Plot G(iw)")
 plt.subplot(2, 1, 2)
-plt.semilogx(om, fi)
+plt.semilogx(om, fi.squeeze())
 plt.grid()
 plt.semilogx(om, fi1.squeeze() if hasattr(fi1, "squeeze") else fi1)
 plt.semilogx(om, fi2.squeeze() if hasattr(fi2, "squeeze") else fi2)
@@ -388,7 +339,7 @@ mag3, fi3, om = (
 )
 
 plt.subplot(2, 1, 1)
-plt.loglog(om, mag)
+plt.loglog(om, mag.squeeze())
 plt.grid()
 plt.loglog(om, mag1.squeeze() if hasattr(mag1, "squeeze") else mag1)
 plt.loglog(om, mag2.squeeze() if hasattr(mag2, "squeeze") else mag2)
@@ -397,7 +348,7 @@ plt.xlabel("w")
 plt.ylabel("Amplitude Ratio")
 plt.title("Bode Plot H(iw)")
 plt.subplot(2, 1, 2)
-plt.semilogx(om, fi)
+plt.semilogx(om, fi.squeeze())
 plt.grid()
 plt.semilogx(om, fi1.squeeze() if hasattr(fi1, "squeeze") else fi1)
 plt.semilogx(om, fi2.squeeze() if hasattr(fi2, "squeeze") else fi2)

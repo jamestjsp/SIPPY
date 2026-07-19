@@ -2,6 +2,9 @@
 Test cases for ARX identification algorithm implementation.
 """
 
+import runpy
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -193,6 +196,18 @@ class TestARXMasterExamples:
         import matplotlib
 
         matplotlib.use("Agg", force=True)
+
+    def test_ex_arx_mimo_script_runs(self, monkeypatch):
+        """Execute the shipped MIMO ARX example through its plotting path."""
+        import matplotlib.pyplot as plt
+
+        monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+        example = Path(__file__).parents[4] / "Examples" / "Ex_ARX_MIMO.py"
+
+        namespace = runpy.run_path(str(example))
+
+        assert namespace["Yout_ARX"].shape == (3, 401)
+        assert namespace["Yout_FIR"].shape == (3, 401)
 
     def test_ex_arx_mimo_example_from_master(self):
         """Test Ex_ARX_MIMO.py from master branch - 3x4 MIMO system."""
