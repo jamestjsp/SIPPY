@@ -266,6 +266,28 @@ def test_forced_response_uses_discrete_state_equations():
     np.testing.assert_allclose(response.states, [1.3125])
 
 
+def test_forced_response_does_not_mutate_model_or_inputs():
+    system = ss(
+        [[0.5, 0.1], [0.0, 0.75]], [[1.0], [0.5]], [[2.0, -0.5]], [[0.25]], dt=0.2
+    )
+    inputs = np.asfortranarray([[1.0, 2.0, 0.0]])
+    initial_state = np.array([0.5, -0.25])
+    matrices_before = [
+        matrix.copy() for matrix in (system.A, system.B, system.C, system.D)
+    ]
+    inputs_before = inputs.copy()
+    initial_state_before = initial_state.copy()
+
+    forced_response(system, U=inputs, X0=initial_state, squeeze=False)
+
+    for matrix, before in zip(
+        (system.A, system.B, system.C, system.D), matrices_before
+    ):
+        np.testing.assert_array_equal(matrix, before)
+    np.testing.assert_array_equal(inputs, inputs_before)
+    np.testing.assert_array_equal(initial_state, initial_state_before)
+
+
 def test_impulse_response_matches_unit_area_convention():
     system = ss([[0.5]], [[1.0]], [[1.0]], [[0.0]], dt=0.2)
 

@@ -361,11 +361,11 @@ def discrete_time_response(
     system: "StateSpace", inputs: np.ndarray, initial_state: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     outputs, final_state, info = ctrlsys.tf01md(
-        _fortran_copy(system.A),
-        _fortran_copy(system.B),
-        _fortran_copy(system.C),
-        _fortran_copy(system.D),
-        _fortran_copy(inputs),
+        system.A,
+        system.B,
+        system.C,
+        system.D,
+        inputs,
         np.array(initial_state, dtype=float, copy=True),
     )
     _check_info("tf01md", info)

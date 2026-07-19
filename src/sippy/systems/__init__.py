@@ -116,7 +116,7 @@ def _response_inputs(system: StateSpace, U: object) -> np.ndarray:
             inputs = inputs.T
         else:
             raise ValueError("Input channel count does not match the system")
-    return np.array(inputs, dtype=float, order="F", copy=True)
+    return np.asfortranarray(inputs, dtype=float)
 
 
 def forced_response(
