@@ -259,12 +259,15 @@ fir_coeffs = model.get_fir_coefficients(
 
 # Frequency response and empirical uncertainty analysis
 response = model.frequency_response()
-uncertainty = model.get_model_uncertainty(
+uncertainty = model.get_frequency_response_uncertainty(
     input_data=u_test,
     output_data=y_test,
     nperseg=256,
 )
 lower95, upper95 = uncertainty.magnitude_confidence_interval(0.95)
+validation_lower95, validation_upper95 = (
+    uncertainty.magnitude_validation_envelope(0.95)
+)
 uncertainty.model_response             # shape (frequency, output, input)
 uncertainty.empirical_response         # Welch/H1 validation estimate
 uncertainty.coherence                  # shape (frequency, output)
@@ -349,7 +352,7 @@ Every input-output identification result can use the Welch/H1 engine for
 validation-data uncertainty:
 
 ```python
-uncertainty = model.get_model_uncertainty(
+uncertainty = model.get_frequency_response_uncertainty(
     u_validation,
     y_validation,
     nperseg=256,
@@ -357,6 +360,9 @@ uncertainty = model.get_model_uncertainty(
     confidence_levels=(0.68, 0.95),
 )
 lower95, upper95 = uncertainty.magnitude_confidence_interval(0.95)
+validation_lower95, validation_upper95 = (
+    uncertainty.magnitude_validation_envelope(0.95)
+)
 ```
 
 The confidence bands use a delete-one-segment jackknife on non-overlapping
@@ -364,7 +370,13 @@ Welch segments. Their degrees of freedom are `n_segments - 1`; they quantify
 the sampling uncertainty of the non-parametric FRF used to validate the model.
 They are not presented as algorithm-specific parameter covariance. The result
 also includes phase bands, residual spectra, multiple coherence, and SNR for
-SISO or MIMO data.
+SISO or MIMO data. `magnitude_validation_envelope()` and
+`phase_validation_envelope()` instead return model-centred diagnostic envelopes
+that include both the observed empirical-minus-model discrepancy and the
+selected empirical interval. These validation envelopes deliberately widen
+where the model fits poorly, but they are not parameter-confidence intervals
+and do not claim nominal plant coverage. `get_model_uncertainty()` remains as a
+compatibility alias for `get_frequency_response_uncertainty()`.
 
 Quality is assessed from coherence: values near 1 indicate a reliable
 linear, noise-free relationship at that frequency; use
@@ -1125,7 +1137,9 @@ y_sim, x trajectory = model.simulate(u_test)
 # Additional built-in analysis
 frequencies = model.get_natural_frequencies()
 dampings = model.get_damping_ratios()
-uncertainty = model.get_model_uncertainty(u_test, y_test, nperseg=256)
+uncertainty = model.get_frequency_response_uncertainty(
+    u_test, y_test, nperseg=256
+)
 lower95, upper95 = uncertainty.magnitude_confidence_interval(0.95)
 ```
 

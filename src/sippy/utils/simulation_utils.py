@@ -475,7 +475,7 @@ def K_calc(A, C, Q, R, S):
         return K, Calculated
 
 
-def get_model_uncertainty(
+def get_frequency_response_uncertainty(
     u,
     y,
     model,
@@ -487,7 +487,17 @@ def get_model_uncertainty(
     smoothing_bins=5,
     confidence_levels=(0.68, 0.95),
 ):
-    """Estimate generic frequency-response uncertainty for a model or FIR."""
+    """Estimate empirical frequency-response uncertainty for a model or FIR."""
+    if hasattr(model, "get_frequency_response_uncertainty"):
+        return model.get_frequency_response_uncertainty(
+            u,
+            y,
+            nperseg=nperseg,
+            window=window,
+            noverlap=noverlap,
+            smoothing_bins=smoothing_bins,
+            confidence_levels=confidence_levels,
+        )
     if hasattr(model, "get_model_uncertainty"):
         return model.get_model_uncertainty(
             u,
@@ -526,6 +536,32 @@ def get_model_uncertainty(
     basis = np.exp(-1j * normalized_omega[:, None] * delays[None, :])
     response = np.einsum("oil,fl->foi", coefficients, basis)
     return result.with_model_response(response)
+
+
+def get_model_uncertainty(
+    u,
+    y,
+    model,
+    *,
+    dt=1.0,
+    nperseg=None,
+    window="hann",
+    noverlap=0,
+    smoothing_bins=5,
+    confidence_levels=(0.68, 0.95),
+):
+    """Compatibility alias for :func:`get_frequency_response_uncertainty`."""
+    return get_frequency_response_uncertainty(
+        u,
+        y,
+        model,
+        dt=dt,
+        nperseg=nperseg,
+        window=window,
+        noverlap=noverlap,
+        smoothing_bins=smoothing_bins,
+        confidence_levels=confidence_levels,
+    )
 
 
 def get_fir_coef(model, inds, deps, sampling, tss):

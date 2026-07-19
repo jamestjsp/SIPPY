@@ -584,7 +584,7 @@ class StateSpaceModel:
         """Evaluate the identified innovations-to-output response."""
         return self.frequency_response(omega, response="innovations")
 
-    def get_model_uncertainty(
+    def get_frequency_response_uncertainty(
         self,
         input_data: np.ndarray,
         output_data: np.ndarray,
@@ -637,6 +637,32 @@ class StateSpaceModel:
         response = self.frequency_response(uncertainty.omega).frdata
         model_response = np.transpose(response, (2, 0, 1))
         return uncertainty.with_model_response(model_response)
+
+    def get_model_uncertainty(
+        self,
+        input_data: np.ndarray,
+        output_data: np.ndarray,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
+        *,
+        nperseg: Optional[int] = None,
+        window: str = "hann",
+        noverlap: int = 0,
+        smoothing_bins: int = 5,
+        confidence_levels: tuple[float, ...] = (0.68, 0.95),
+    ):
+        """Compatibility alias for empirical frequency-response uncertainty."""
+        return self.get_frequency_response_uncertainty(
+            input_data,
+            output_data,
+            input_name,
+            output_name,
+            nperseg=nperseg,
+            window=window,
+            noverlap=noverlap,
+            smoothing_bins=smoothing_bins,
+            confidence_levels=confidence_levels,
+        )
 
     def simulate(self, u: np.ndarray, x0: np.ndarray = None) -> tuple:
         """

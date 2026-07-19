@@ -12,6 +12,7 @@ from .identification import (
     SystemIdentification,
     SystemIdentificationConfig,
     get_fir_coef,
+    get_frequency_response_uncertainty,
     get_model_uncertainty,
     get_step_response,
     simulate_ss_system,
@@ -30,6 +31,7 @@ __all__ = [
     "white_noise_var",
     "get_fir_coef",
     "get_step_response",
+    "get_frequency_response_uncertainty",
     "get_model_uncertainty",
     "simulate_ss_system",
 ]

@@ -17,7 +17,7 @@ class FrequencyResponseUncertainty:
     omega: np.ndarray
     frequency_hz: np.ndarray
     empirical_response: np.ndarray
-    model_response: np.ndarray
+    model_response: np.ndarray | None
     coherence: np.ndarray
     residual_spectrum: np.ndarray
     signal_to_noise_ratio: np.ndarray
@@ -39,7 +39,8 @@ class FrequencyResponseUncertainty:
 
     @property
     def model_magnitude_db(self) -> np.ndarray:
-        return 20 * np.log10(np.maximum(np.abs(self.model_response), 1e-300))
+        response = self._require_model_response()
+        return 20 * np.log10(np.maximum(np.abs(response), 1e-300))
 
     @property
     def empirical_phase_deg(self) -> np.ndarray:
@@ -47,7 +48,24 @@ class FrequencyResponseUncertainty:
 
     @property
     def model_phase_deg(self) -> np.ndarray:
-        return np.degrees(np.unwrap(np.angle(self.model_response), axis=0))
+        return np.degrees(np.unwrap(np.angle(self._require_model_response()), axis=0))
+
+    @property
+    def model_validation_phase_deg(self) -> np.ndarray:
+        """Model phase shifted onto the nearest empirical 360-degree branch."""
+        return self.empirical_phase_deg - self.phase_validation_error_deg
+
+    @property
+    def magnitude_validation_error_db(self) -> np.ndarray:
+        """Signed empirical-minus-model magnitude discrepancy in decibels."""
+        return self.empirical_magnitude_db - self.model_magnitude_db
+
+    @property
+    def phase_validation_error_deg(self) -> np.ndarray:
+        """Shortest signed empirical-minus-model phase discrepancy."""
+        model_response = self._require_model_response()
+        relative_response = self.empirical_response * np.conj(model_response)
+        return np.degrees(np.angle(relative_response))
 
     def magnitude_confidence_interval(
         self, level: float
@@ -64,6 +82,27 @@ class FrequencyResponseUncertainty:
             self.phase_confidence_lower_deg[index],
             self.phase_confidence_upper_deg[index],
         )
+
+    def magnitude_validation_envelope(
+        self, level: float
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return a model-centred envelope containing the empirical interval.
+
+        This diagnostic envelope includes the observed model-to-H1 discrepancy
+        and the empirical FRF sampling uncertainty. It is not a model-parameter
+        confidence interval and does not claim nominal coverage for the plant.
+        """
+        lower, upper = self.magnitude_confidence_interval(level)
+        return self._validation_envelope(self.model_magnitude_db, lower, upper)
+
+    def phase_validation_envelope(self, level: float) -> tuple[np.ndarray, np.ndarray]:
+        """Return a model-centred phase envelope containing the empirical interval.
+
+        The model phase is shifted by multiples of 360 degrees onto the branch
+        nearest the empirical phase before constructing the envelope.
+        """
+        lower, upper = self.phase_confidence_interval(level)
+        return self._validation_envelope(self.model_validation_phase_deg, lower, upper)
 
     def with_model_response(
         self, model_response: np.ndarray
@@ -83,6 +122,25 @@ class FrequencyResponseUncertainty:
                 f"Confidence level {level:g} was not calculated; available: {available}"
             )
         return int(matches[0])
+
+    def _require_model_response(self) -> np.ndarray:
+        if self.model_response is None:
+            raise ValueError(
+                "No model response is attached to this empirical FRF uncertainty"
+            )
+        return self.model_response
+
+    @staticmethod
+    def _validation_envelope(
+        model_center: np.ndarray,
+        empirical_lower: np.ndarray,
+        empirical_upper: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        half_width = np.maximum(
+            np.abs(model_center - empirical_lower),
+            np.abs(empirical_upper - model_center),
+        )
+        return model_center - half_width, model_center + half_width
 
 
 def _jackknife_standard_error(values: np.ndarray) -> np.ndarray:
@@ -201,7 +259,7 @@ def estimate_frequency_response_uncertainty(
         omega=2 * np.pi * freqs,
         frequency_hz=freqs,
         empirical_response=response,
-        model_response=response.copy(),
+        model_response=None,
         coherence=coherence,
         residual_spectrum=residual_spectrum,
         signal_to_noise_ratio=snr,
