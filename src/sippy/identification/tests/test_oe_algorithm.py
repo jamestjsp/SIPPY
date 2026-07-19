@@ -2,11 +2,11 @@
 Test cases for OE (Output Error) identification algorithm implementation.
 """
 
-import control
 import numpy as np
 import pandas as pd
 import pytest
 
+from sippy import systems as control
 from sippy.identification import IDData, SystemIdentificationConfig
 from sippy.identification.algorithms.oe import OEAlgorithm
 from sippy.identification.base import IdentificationAlgorithm, StateSpaceModel

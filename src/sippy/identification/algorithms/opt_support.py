@@ -17,8 +17,9 @@ import warnings
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple, Union
 
-import control
 import numpy as np
+
+from sippy import systems as control
 
 try:  # pragma: no cover - CasADi is optional but required for NLP methods
     from casadi import DM, SX, mtimes, nlpsol, norm_inf, vertcat

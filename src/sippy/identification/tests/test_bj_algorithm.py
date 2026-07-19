@@ -2,11 +2,11 @@
 Test suite for Box-Jenkins (BJ) algorithm implementation.
 """
 
-import control
 import numpy as np
 import pandas as pd
 import pytest
 
+from sippy import systems as control
 from sippy.identification.algorithms.bj import BJAlgorithm
 from sippy.identification.base import StateSpaceModel, SystemIdentificationConfig
 from sippy.identification.iddata import IDData
@@ -411,5 +411,5 @@ class TestBJAlgorithm:
         assert A_state_dim >= config.nf
         assert result.H_tf is not None
 
-        noise_realization = control.tf2ss(result.H_tf, method="slycot")
+        noise_realization = control.tf2ss(result.H_tf)
         assert noise_realization.A.shape[0] >= config.nd

@@ -2,11 +2,11 @@
 Test cases for FIR identification algorithm implementation.
 """
 
-import control
 import numpy as np
 import pandas as pd
 import pytest
 
+from sippy import systems as control
 from sippy.identification import IDData, SystemIdentificationConfig
 from sippy.identification.algorithms.fir import FIRAlgorithm
 from sippy.identification.base import IdentificationAlgorithm, StateSpaceModel

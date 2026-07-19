@@ -1,7 +1,7 @@
-import control
 import numpy as np
 import pytest
 
+from sippy import systems as control
 from sippy.identification.algorithms.armax import ARMAXAlgorithm
 from sippy.identification.algorithms.armax_modes import (
     ILLSHandler,

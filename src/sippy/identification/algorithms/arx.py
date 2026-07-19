@@ -4,9 +4,10 @@ ARX (AutoRegressive with eXogenous inputs) identification algorithm.
 
 from typing import TYPE_CHECKING, Optional
 
-import control
 import numpy as np
 from numpy.linalg import lstsq
+
+from sippy import systems as control
 
 from ..base import (
     IdentificationAlgorithm,

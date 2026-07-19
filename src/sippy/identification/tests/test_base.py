@@ -2,10 +2,10 @@
 Tests for base classes.
 """
 
-import control
 import numpy as np
 import pytest
 
+from sippy import systems as control
 from sippy.identification.base import (
     IdentificationAlgorithm,
     StateSpaceModel,

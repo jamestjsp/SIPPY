@@ -2,11 +2,11 @@
 Test cases for ARX identification algorithm implementation.
 """
 
-import control
 import numpy as np
 import pandas as pd
 import pytest
 
+from sippy import systems as control
 from sippy.identification import IDData, SystemIdentificationConfig
 from sippy.identification.algorithms.arx import ARXAlgorithm
 from sippy.identification.base import IdentificationAlgorithm, StateSpaceModel
@@ -235,7 +235,7 @@ class TestARXMasterExamples:
 
         try:
             # Simulate the MIMO system using control library (following master example)
-            import control.matlab as cnt
+            from sippy import systems as cnt
 
             # Create transfer functions
             g_sample11 = cnt.tf(NUM11, DEN1, ts)

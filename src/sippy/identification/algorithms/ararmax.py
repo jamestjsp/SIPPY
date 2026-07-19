@@ -5,9 +5,10 @@ ARARMAX (Auto-Regressive ARMAX) identification algorithm.
 import warnings
 from typing import Optional
 
-import control
 import numpy as np
 from numpy.linalg import lstsq
+
+from sippy import systems as control
 
 from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
 from .ararx import _state_space_from_results, _state_space_from_single_result

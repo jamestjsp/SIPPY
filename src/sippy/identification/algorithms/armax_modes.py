@@ -6,9 +6,10 @@ import warnings
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
-import control
 import numpy as np
 from scipy.optimize import minimize
+
+from sippy import systems as control
 
 from ..base import StateSpaceModel
 

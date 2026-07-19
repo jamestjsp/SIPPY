@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
-import control
 import numpy as np
+
+from sippy import systems as control
 
 from ..base import (
     IdentificationAlgorithm,

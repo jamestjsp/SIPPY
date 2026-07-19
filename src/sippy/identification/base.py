@@ -5,8 +5,9 @@ Base classes for system identification algorithms.
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, List, Optional, Union
 
-import control
 import numpy as np
+
+from sippy import systems as control
 
 if TYPE_CHECKING:
     from .iddata import IDData
@@ -39,7 +40,7 @@ def resolve_identification_data(
 
 
 def realize_transfer_function(transfer_function: object) -> tuple[np.ndarray, ...]:
-    realization = control.tf2ss(transfer_function, method="slycot")
+    realization = control.tf2ss(transfer_function)
     return realization.A, realization.B, realization.C, realization.D
 
 

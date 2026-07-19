@@ -4,11 +4,11 @@ Test suite for ARARX (Auto-Regressive Auto-Regressive X) algorithm implementatio
 
 from unittest.mock import patch
 
-import control
 import numpy as np
 import pandas as pd
 import pytest
 
+from sippy import systems as control
 from sippy.identification.algorithms.ararx import ARARXAlgorithm
 from sippy.identification.base import StateSpaceModel, SystemIdentificationConfig
 from sippy.identification.iddata import IDData
