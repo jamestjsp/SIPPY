@@ -1294,19 +1294,26 @@ def Z_dot_PIort_compiled(z, X):
     """
     Compiled version of Z_dot_PIort operation.
 
+    Projects the rows of ``z`` onto the orthogonal complement of the row
+    space of ``X`` using the SVD-based pseudoinverse, which handles the
+    rank-deficient Hankel matrices produced by narrow-band excitation.
+    (Numba has no rank-revealing pivoted QR; the pure-Python variant in
+    simulation_utils uses one.)
+
     Parameters:
     -----------
     z : ndarray
-        Vector
+        Data matrix (rows are projected)
     X : ndarray
-        Matrix
+        Matrix whose row space is projected out
 
     Returns:
     --------
     result : ndarray
-        Computed result
+        Projected data
     """
-    return z - np.dot(np.dot(z, X.T), np.linalg.pinv(X.T))
+    Xt = np.ascontiguousarray(X.T)
+    return z - np.dot(np.dot(z, Xt), np.linalg.pinv(Xt))
 
 
 @jit

@@ -891,10 +891,9 @@ class ParsimCoreAlgorithm:
         """
 
         n = S_n.size
-        S_n_diag = np.diag(S_n)
 
         # Construct observability matrix
-        Ob_f = np.dot(U_n, sc.linalg.sqrtm(S_n_diag))
+        Ob_f = np.dot(U_n, np.diag(np.sqrt(S_n)))
 
         # Estimate A from observability matrix shift property
         A = np.dot(

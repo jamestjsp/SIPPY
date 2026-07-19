@@ -77,7 +77,7 @@ def GBN_seq(N, p_swd, Nmin=1, Range=[-1.0, 1.0], Tol=0.01, nit_max=30):
                 gbn_b = GBN_seq_compiled(N, p_swd, Nmin, (min_Range, max_Range))
                 # Calculate actual switching probability for basic case
                 switches = np.sum(np.abs(np.diff(gbn_b)) > 0)
-                p_sw_b = min(Nmin * (switches + 1) / N, N)  # cap at 1.0
+                p_sw_b = min(Nmin * (switches + 1) / N, 1.0)
                 Nswb = switches
                 return gbn_b, p_sw_b, Nswb
             except Exception:
@@ -91,8 +91,11 @@ def GBN_seq(N, p_swd, Nmin=1, Range=[-1.0, 1.0], Tol=0.01, nit_max=30):
     else:
         gbn = 1.0 * np.ones(N)
 
-    # Initialize variables
+    # Initialize variables (best-so-far defaults guard against the loop
+    # never improving on the sentinel probability)
     p_sw = p_sw_b = 2.0  # actual switch probability
+    gbn_b = gbn.copy()
+    Nswb = 0
     nit = 0
 
     while (np.abs(p_sw - p_swd)) / p_swd > Tol and nit <= nit_max:

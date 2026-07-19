@@ -146,14 +146,6 @@ class ARXAlgorithm(IdentificationAlgorithm):
                 f"Not enough data points. Need at least {max_lag + 1} samples, got {N}"
             )
 
-        # Estimate parameters using least squares
-        max_lag = max(na, nb + nk - 1)
-        N_eff = N - max_lag
-        if N_eff <= 0:
-            raise ValueError(
-                f"Not enough data points. Need at least {max_lag + 1} samples, got {N}"
-            )
-
         if ny == 1:
             # SISO case leverages shared compiled builder
             Phi, y_matrix = self._create_regression_matrix(u, y, na, nb, nk, ny, nu, N)

@@ -6,6 +6,7 @@ import warnings
 
 import numpy as np
 from scipy import signal
+from scipy.linalg import qr as sc_qr
 from scipy.linalg import solve_discrete_are
 
 from sippy import systems as control
@@ -85,22 +86,37 @@ def ordinate_sequence(y, f, p):
 
 def Z_dot_PIort(z, X):
     """
-    Compute the scalar product between vector z and I - X^T * pinv(X^T),
-    avoiding direct computation of the full matrix.
+    Project the rows of ``z`` onto the orthogonal complement of the row
+    space of ``X`` (i.e. compute ``z @ (I - X^T pinv(X^T))``) without
+    forming the N x N projector.
+
+    Uses a rank-revealing (column-pivoted) QR of ``X^T``: with pivoting the
+    magnitudes of R's diagonal are non-increasing, so the numerical rank is
+    read off reliably even for the smooth, rank-deficient Hankel matrices
+    that narrow-band excitation produces; only the leading ``rank`` columns
+    of Q enter the projection.
 
     Parameters:
     -----------
     z : ndarray
-        Vector
+        Data matrix (rows are projected)
     X : ndarray
-        Matrix
+        Matrix whose row space is projected out
 
     Returns:
     --------
     result : ndarray
-        Computed result
+        Projected data
     """
-    return z - np.dot(np.dot(z, X.T), np.linalg.pinv(X.T))
+    Xt = X.T
+    Q, R, _ = sc_qr(Xt, mode="economic", pivoting=True)
+    diagonal = np.abs(np.diag(R))
+    if diagonal.size == 0 or diagonal[0] == 0.0:
+        return z.copy()
+    tolerance = max(Xt.shape) * np.finfo(np.float64).eps * diagonal[0]
+    rank = int(np.sum(diagonal > tolerance))
+    Q_r = Q[:, :rank]
+    return z - np.dot(np.dot(z, Q_r), Q_r.T)
 
 
 def Vn_mat(y, yest):
@@ -244,21 +260,21 @@ def check_types(threshold, max_order, fixed_order, f, p=20):
         Whether parameters are valid
     """
     if threshold < 0.0 or threshold >= 1.0:
-        print("Error! The threshold value must be >=0. and <1.")
+        warnings.warn("The threshold value must be >=0. and <1.")
         return False
     if not np.isnan(max_order):
         if not isinstance(max_order, int):
-            print("Error! The max_order value must be integer")
+            warnings.warn("The max_order value must be integer")
             return False
     if not np.isnan(fixed_order):
         if not isinstance(fixed_order, int):
-            print("Error! The fixed_order value must be integer")
+            warnings.warn("The fixed_order value must be integer")
             return False
     if not isinstance(f, int):
-        print("Error! The future horizon (f) must be integer")
+        warnings.warn("The future horizon (f) must be integer")
         return False
     if not isinstance(p, int):
-        print("Error! The past horizon (p) must be integer")
+        warnings.warn("The past horizon (p) must be integer")
         return False
     return True
 
@@ -289,8 +305,8 @@ def check_inputs(threshold, max_order, fixed_order, f):
         threshold = 0.0
         max_order = fixed_order
     if f < max_order:
-        print(
-            "Warning! The horizon must be larger than the model order, max_order setted as f"
+        warnings.warn(
+            "The horizon must be larger than the model order, max_order set to f"
         )
     if max_order >= f:
         max_order = f
