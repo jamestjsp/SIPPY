@@ -69,6 +69,16 @@ class TestSystemIdentification:
             model = identifier.identify(y, u)
             assert model is not None
 
+    def test_id_method_override_selects_requested_algorithm(self, sample_data):
+        y, u = sample_data
+        identifier = SystemIdentification(
+            SystemIdentificationConfig(method="N4SID", ss_fixed_order=1)
+        )
+
+        model = identifier.identify(y, u, id_method="MOESP")
+
+        assert model.method == "MOESP"
+
     def test_centering_options(self, sample_data):
         """Test different centering options."""
         y, u = sample_data

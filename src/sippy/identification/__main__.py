@@ -57,9 +57,16 @@ class SystemIdentification:
         if iddata is not None and (y is not None or u is not None):
             raise ValueError("Provide either iddata or (y, u), but not both")
 
-        # Check if this is ARMA (time series model that doesn't need inputs)
-        method = kwargs.get("method", self.config.method if self.config else "N4SID")
-        is_time_series_method = method in ["ARMA"]
+        method_override = kwargs.pop("method", None)
+        id_method = kwargs.pop("id_method", None)
+        if (
+            method_override is not None
+            and id_method is not None
+            and method_override.upper() != id_method.upper()
+        ):
+            raise ValueError("method and id_method select different algorithms")
+        method = method_override or id_method or self.config.method
+        is_time_series_method = method.upper() == "ARMA"
 
         if iddata is None and y is None:
             raise ValueError("Must provide either iddata or y")
@@ -76,8 +83,7 @@ class SystemIdentification:
         # Merge config with kwargs
         config_dict = self.config.__dict__.copy()
         config_dict.update(kwargs)
-
-        method = config_dict.get("method", "N4SID")
+        config_dict["method"] = method
 
         # Create algorithm instance
         algorithm = create_algorithm(method)

@@ -223,9 +223,18 @@ class TestSystemIdentificationConfig:
         assert config.method == "N4SID"
         assert config.centering == "None"
         assert config.ss_f == 20
+        assert config.ss_p == 20
         assert config.ss_threshold == 0.1
         assert not config.ss_d_required
         assert not config.ss_a_stability
+
+    def test_orders_default_is_not_shared(self):
+        first = SystemIdentificationConfig()
+        second = SystemIdentificationConfig()
+
+        first.ss_orders.append(20)
+
+        assert second.ss_orders == [1, 10]
 
     def test_custom_config(self):
         """Test custom configuration."""
@@ -233,6 +242,7 @@ class TestSystemIdentificationConfig:
             method="CVA",
             centering="MeanVal",
             ss_f=15,
+            ss_p=12,
             ss_threshold=0.05,
             ss_d_required=True,
             ss_a_stability=True,
@@ -240,6 +250,7 @@ class TestSystemIdentificationConfig:
         assert config.method == "CVA"
         assert config.centering == "MeanVal"
         assert config.ss_f == 15
+        assert config.ss_p == 12
         assert config.ss_threshold == 0.05
         assert config.ss_d_required
         assert config.ss_a_stability

@@ -864,10 +864,11 @@ class SystemIdentificationConfig:
         ic: str = "None",
         tsample: float = 1.0,
         ss_f: int = 20,
+        ss_p: int = 20,
         ss_threshold: float = 0.1,
         ss_max_order: Optional[int] = None,
         ss_fixed_order: Optional[int] = 1,  # Default to 1 to avoid issues
-        ss_orders: List[int] = [1, 10],
+        ss_orders: Optional[List[int]] = None,
         ss_d_required: bool = False,
         ss_a_stability: bool = False,
         # AR* algorithm parameters (for compatibility with master branch)
@@ -894,10 +895,11 @@ class SystemIdentificationConfig:
         self.ic = ic
         self.tsample = tsample
         self.ss_f = ss_f
+        self.ss_p = ss_p
         self.ss_threshold = ss_threshold
         self.ss_max_order = ss_max_order
         self.ss_fixed_order = ss_fixed_order
-        self.ss_orders = ss_orders
+        self.ss_orders = [1, 10] if ss_orders is None else list(ss_orders)
         self.ss_d_required = ss_d_required
         self.ss_a_stability = ss_a_stability
 
