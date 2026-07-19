@@ -11,7 +11,7 @@ from scipy.optimize import minimize
 
 from sippy import systems as control
 
-from ..base import StateSpaceModel
+from ..base import StateSpaceModel, realize_transfer_function
 
 # Import compiled utilities for performance
 try:
@@ -50,6 +50,46 @@ def _create_armax_transfer_functions(
         control.tf(numerator_g, denominator, dt=sample_time),
         control.tf(numerator_h, denominator, dt=sample_time),
     )
+
+
+def _armax_state_space_model(
+    coefficients: np.ndarray,
+    na: int,
+    nb: int,
+    nc: int,
+    nk: int,
+    Ts: float,
+) -> Optional[StateSpaceModel]:
+    """Realise the deterministic ARMAX transfer function as a state-space model.
+
+    The realization covers G = B/A only; the noise dynamics stay in ``H_tf``.
+    """
+    try:
+        a_coeffs = coefficients[:na]
+        b_coeffs = coefficients[na : na + nb]
+        c_coeffs = coefficients[na + nb : na + nb + nc]
+
+        G_tf, H_tf = _create_armax_transfer_functions(
+            a_coeffs, b_coeffs, c_coeffs, nk, Ts
+        )
+        A, B, C, D = realize_transfer_function(G_tf)
+
+        return StateSpaceModel(
+            A=A,
+            B=B,
+            C=C,
+            D=D,
+            K=None,
+            Q=None,
+            R=None,
+            S=None,
+            ts=Ts,
+            Vn=None,
+            G_tf=G_tf,
+            H_tf=H_tf,
+        )
+    except Exception:
+        return None
 
 
 class ARMAXModeHandler(ABC):
@@ -273,64 +313,7 @@ class ILLSHandler(ARMAXModeHandler):
         Ts: float,
     ) -> Optional[StateSpaceModel]:
         """Create state-space model from ARMAX parameters."""
-        try:
-            # Extract coefficients
-            A_coeffs = beta_hat[:na]
-            B_coeffs = beta_hat[na : na + nb]
-            C_coeffs = beta_hat[na + nb : na + nb + nc]
-
-            G_tf, H_tf = _create_armax_transfer_functions(
-                A_coeffs, B_coeffs, C_coeffs, nk, Ts
-            )
-
-            # Create state-space representation
-            n_states = na + nc
-
-            # A matrix (companion form)
-            A_mat = np.zeros((n_states, n_states))
-            if na > 1:
-                for i in range(na - 1):
-                    A_mat[i, i + 1] = 1.0
-            if na > 0:
-                A_mat[na - 1, :na] = -A_coeffs
-
-            # Add MA dynamics
-            if nc > 0:
-                A_mat[na:, na:] = np.eye(nc)
-                A_mat[:na, na:] = np.zeros((na, nc))
-
-            # B matrix
-            B_mat = np.zeros((n_states, nu))
-            if nu > 0:
-                B_mat[:na, 0] = B_coeffs
-
-            # C matrix
-            C_mat = np.zeros((ny, n_states))
-            if na > 0:
-                C_mat[0, :na] = 1.0
-            if nc > 0:
-                C_mat[0, na:] = C_coeffs
-
-            # D matrix
-            D_mat = np.zeros((ny, nu))
-
-            return StateSpaceModel(
-                A=A_mat,
-                B=B_mat,
-                C=C_mat,
-                D=D_mat,
-                K=None,
-                Q=None,
-                R=None,
-                S=None,
-                ts=Ts,
-                Vn=None,
-                G_tf=G_tf,
-                H_tf=H_tf,
-            )
-
-        except Exception:
-            return None
+        return _armax_state_space_model(beta_hat, na, nb, nc, nk, Ts)
 
 
 class RLLSHandler(ARMAXModeHandler):
@@ -482,69 +465,8 @@ class RLLSHandler(ARMAXModeHandler):
         nu: int,
         Ts: float,
     ) -> Optional[StateSpaceModel]:
-        """Create state-space model from RLLS parameters."""
-        try:
-            # Extract coefficients from theta (same as ILLS)
-            # theta contains [-a, b, c] parameters
-            pos = 0
-            A_coeffs = theta[pos : pos + na]
-            pos += na
-            B_coeffs = theta[pos : pos + nb]
-            pos += nb
-            C_coeffs = theta[pos : pos + nc]
-
-            G_tf, H_tf = _create_armax_transfer_functions(
-                A_coeffs, B_coeffs, C_coeffs, nk, Ts
-            )
-
-            # Use same state-space creation as ILLS
-            n_states = na + nc
-
-            # A matrix (companion form)
-            A_mat = np.zeros((n_states, n_states))
-            if na > 1:
-                for i in range(na - 1):
-                    A_mat[i, i + 1] = 1.0
-            if na > 0:
-                A_mat[na - 1, :na] = -A_coeffs
-
-            # Add MA dynamics
-            if nc > 0:
-                A_mat[na:, na:] = np.eye(nc)
-                A_mat[:na, na:] = np.zeros((na, nc))
-
-            # B matrix
-            B_mat = np.zeros((n_states, nu))
-            if nu > 0:
-                B_mat[:na, 0] = B_coeffs
-
-            # C matrix
-            C_mat = np.zeros((ny, n_states))
-            if na > 0:
-                C_mat[0, :na] = 1.0
-            if nc > 0:
-                C_mat[0, na:] = C_coeffs
-
-            # D matrix
-            D_mat = np.zeros((ny, nu))
-
-            return StateSpaceModel(
-                A=A_mat,
-                B=B_mat,
-                C=C_mat,
-                D=D_mat,
-                K=None,
-                Q=None,
-                R=None,
-                S=None,
-                ts=Ts,
-                Vn=None,
-                G_tf=G_tf,
-                H_tf=H_tf,
-            )
-
-        except Exception:
-            return None
+        """Create state-space model from RLLS parameters ([a, b, c] blocks)."""
+        return _armax_state_space_model(theta, na, nb, nc, nk, Ts)
 
 
 class OPTHandler(ARMAXModeHandler):
@@ -621,8 +543,10 @@ class OPTHandler(ARMAXModeHandler):
                 B_params = params[na : na + nb]
                 C_params = params[na + nb : na + nb + nc]
 
-                # Simulate model and calculate errors
+                # Simulate model and calculate errors; residuals are updated
+                # incrementally so each cost evaluation stays O(N)
                 predicted = np.zeros(N)
+                residuals = y.astype(float).copy()
                 for k in range(max_order, N):
                     # AR part
                     ar_part = np.sum(A_params * y[k - 1 : k - 1 - na : -1])
@@ -634,18 +558,15 @@ class OPTHandler(ARMAXModeHandler):
                     else:
                         x_part = 0.0
 
-                    # MA part (using residuals) - with numerical stability checks
-                    residuals = y - predicted
-                    if np.max(np.abs(residuals)) > 1e6:  # Check for residuals explosion
-                        return np.inf
-
+                    # MA part (using past one-step residuals)
                     ma_part = np.sum(C_params * residuals[k - 1 : k - 1 - nc : -1])
 
-                    # Check for overflow in predicted value
-                    if not np.isfinite(-ar_part + x_part + ma_part):
+                    value = -ar_part + x_part + ma_part
+                    if not np.isfinite(value) or abs(value) > 1e6:
                         return np.inf
 
-                    predicted[k] = -ar_part + x_part + ma_part
+                    predicted[k] = value
+                    residuals[k] = y[k] - value
 
                 # Return prediction error with numerical stability
                 error = y[max_order:] - predicted[max_order:]
@@ -693,13 +614,22 @@ class OPTHandler(ARMAXModeHandler):
                     "error": f"Cost function evaluation failed: {str(cost_e)}"
                 }
 
-            # Try the requested optimization method first
+            # Each scipy method accepts a different tolerance option, and only
+            # some support bounds; passing the wrong ones is silently ignored
+            # or rejected depending on the method.
+            if opt_method == "trust-constr":
+                options = {"maxiter": max_iterations, "xtol": convergence_tolerance}
+            elif opt_method == "BFGS":
+                options = {"maxiter": max_iterations}
+            else:
+                options = {"maxiter": max_iterations, "ftol": convergence_tolerance}
+
             result = minimize(
                 cost_function,
                 x0=initial_guess,
                 method=opt_method,
-                bounds=bounds,
-                options={"maxiter": max_iterations, "ftol": convergence_tolerance},
+                bounds=bounds if opt_method != "BFGS" else None,
+                options=options,
             )
 
         except Exception as e:
@@ -757,13 +687,15 @@ class OPTHandler(ARMAXModeHandler):
             N_eff = N - max_order
             sum_order = na + nb
 
-            # Build regression matrix for ARX part (no MA)
+            # Build regression matrix for ARX part (no MA); the input lags use
+            # the same u[k-nk-j] convention as the OPT cost function.
             Phi = np.zeros((N_eff, sum_order))
             for i in range(N_eff):
                 # AR part
                 Phi[i, 0:na] = -y[i + max_order - 1 :: -1][0:na]
                 # X part
-                Phi[i, na : na + nb] = u[max_order + i - 1 :: -1][nk : nb + nk]
+                for j in range(nb):
+                    Phi[i, na + j] = u[max_order + i - nk - j]
 
             # Least squares solution
             beta_hat = np.dot(np.linalg.pinv(Phi), y[max_order:N])
@@ -786,64 +718,7 @@ class OPTHandler(ARMAXModeHandler):
         Ts: float,
     ) -> Optional[StateSpaceModel]:
         """Create state-space model from OPT parameters."""
-        try:
-            # Extract coefficients
-            A_coeffs = params[:na]
-            B_coeffs = params[na : na + nb]
-            C_coeffs = params[na + nb : na + nb + nc]
-
-            G_tf, H_tf = _create_armax_transfer_functions(
-                A_coeffs, B_coeffs, C_coeffs, nk, Ts
-            )
-
-            # Use same state-space creation as ILLS
-            n_states = na + nc
-
-            # A matrix (companion form)
-            A_mat = np.zeros((n_states, n_states))
-            if na > 1:
-                for i in range(na - 1):
-                    A_mat[i, i + 1] = 1.0
-            if na > 0:
-                A_mat[na - 1, :na] = -A_coeffs
-
-            # Add MA dynamics
-            if nc > 0:
-                A_mat[na:, na:] = np.eye(nc)
-                A_mat[:na, na:] = np.zeros((na, nc))
-
-            # B matrix (account for delay)
-            B_mat = np.zeros((n_states, nu))
-            if nu > 0 and nb > 0:
-                B_mat[na - 1, 0] = B_coeffs[0]  # Place first B coefficient
-
-            # C matrix
-            C_mat = np.zeros((ny, n_states))
-            if na > 0:
-                C_mat[0, :na] = 1.0
-            if nc > 0:
-                C_mat[0, na:] = C_coeffs
-
-            # D matrix
-            D_mat = np.zeros((ny, nu))
-
-            return StateSpaceModel(
-                A=A_mat,
-                B=B_mat,
-                C=C_mat,
-                D=D_mat,
-                K=None,
-                Q=None,
-                R=None,
-                S=None,
-                ts=Ts,
-                Vn=None,
-                G_tf=G_tf,
-                H_tf=H_tf,
-            )
-
-        except Exception:
-            return None
+        return _armax_state_space_model(params, na, nb, nc, nk, Ts)
 
 
 def get_armax_handler(mode: str) -> ARMAXModeHandler:
