@@ -123,27 +123,24 @@ def _state_space_from_single_result(
     """Build a ``StateSpaceModel`` for a single output."""
 
     A, B, C, D, G_tf, H_tf = _ss_matrices_from_result(result, nu, sample_time)
-    n_states = A.shape[0]
-    K = np.zeros((n_states, C.shape[0]))
-    Q = np.eye(n_states)
-    R = np.eye(C.shape[0])
-    S = np.zeros((n_states, C.shape[0]))
-
     model = StateSpaceModel(
         A=A,
         B=B,
         C=C,
         D=D,
-        K=K,
-        Q=Q,
-        R=R,
-        S=S,
+        K=None,
+        Q=None,
+        R=None,
+        S=None,
         ts=sample_time,
         Vn=result.noise_variance,
         G_tf=G_tf,
         H_tf=H_tf,
         Yid=result.y_hat.reshape(1, -1),
-        identification_info={"reached_max": result.reached_max},
+        identification_info={
+            "reached_max": result.reached_max,
+            "fit_start": result.fit_start,
+        },
     )
     return model
 
@@ -196,10 +193,6 @@ def _state_space_from_results(
 
     D = np.vstack(mats_D)
 
-    K = np.zeros((total_states, ny))
-    Q = np.eye(total_states)
-    R = np.eye(ny)
-    S = np.zeros((total_states, ny))
     Yid = np.vstack(y_hat_rows)
     G_tf = control.ss2tf(control.ss(A, B, C, D, dt=sample_time))
     H_tf = _diagonal_noise_transfer_function(results, sample_time)
@@ -209,16 +202,19 @@ def _state_space_from_results(
         B=B,
         C=C,
         D=D,
-        K=K,
-        Q=Q,
-        R=R,
-        S=S,
+        K=None,
+        Q=None,
+        R=None,
+        S=None,
         ts=sample_time,
         Vn=sum(res.noise_variance for res in results),
         G_tf=G_tf,
         H_tf=H_tf,
         Yid=Yid,
-        identification_info={"reached_max": reached},
+        identification_info={
+            "reached_max": reached,
+            "fit_start": max(result.fit_start for result in results),
+        },
     )
     return model
 

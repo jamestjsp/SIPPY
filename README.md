@@ -15,10 +15,14 @@ distributed under the LGPL license.
 - State space: N4SID, MOESP, CVA, PARSIM-K, PARSIM-S, PARSIM-P
 - Input/output: ARX, ARMAX, ARARX, ARARMAX, FIR, OE, ARMA, BJ
 - Generalized polynomial model: GEN
+- Nonparametric frequency response: FD
 
-All 15 algorithms share the same `identify(y=None, u=None, iddata=None,
-**kwargs)` interface. They accept raw arrays or `IDData` and return a
-`StateSpaceModel`.
+All 16 algorithms share the same `identify(y=None, u=None, iddata=None,
+**kwargs)` interface. They accept raw arrays or `IDData` and return an
+`IdentificationResult` (`StateSpaceModel` remains its compatibility name).
+Every result exposes the same analysis methods and reports support through
+`model.supports(operation)`. Unsupported operations raise `NotImplementedError`
+instead of returning fabricated state or covariance values.
 
 The test suite covers SISO and MIMO systems, multiple excitation types and SNR
 levels, correlated inputs, colored and cross-correlated noise, unstable
@@ -61,7 +65,19 @@ model = SystemIdentification(config).identify(y, u)
 print(model.n)
 print(model.is_stable())
 x, y_simulated = model.simulate(u)
+print(model.fit())
+print(model.residual_covariance)
+print(model.capabilities)
 ```
+
+The deterministic process model is available as `model.deterministic_model`;
+the innovations model, when identified, is `model.innovations_model`.
+`predict(u=...)` performs deterministic prediction, while
+`predict(u=..., y=...)` performs one-step-ahead prediction when an estimated
+Kalman gain or causally invertible innovations model is available. `Vn` is the
+mean squared identification residual after the model warm-up interval;
+`residual_covariance` retains the full output covariance matrix. `K`, `Q`, `R`,
+and `S` are `None` unless the selected estimator actually identifies them.
 
 Algorithms can also be created directly:
 

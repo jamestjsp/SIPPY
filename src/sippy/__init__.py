@@ -7,6 +7,8 @@ New modular architecture with object-oriented identification algorithms.
 from .identification import (
     FrequencyResponseUncertainty,
     GBN_seq,
+    IdentificationResult,
+    StateSpaceModel,
     SystemIdentification,
     SystemIdentificationConfig,
     get_fir_coef,
@@ -22,6 +24,8 @@ __all__ = [
     "FrequencyResponseUncertainty",
     "system_identification",
     "SystemIdentificationConfig",
+    "IdentificationResult",
+    "StateSpaceModel",
     "GBN_seq",
     "white_noise_var",
     "get_fir_coef",

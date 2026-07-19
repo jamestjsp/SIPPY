@@ -77,6 +77,9 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
         dt / tsample: sampling interval in seconds (default 1.0)
     """
 
+    def get_algorithm_name(self) -> str:
+        return "FD"
+
     def validate_parameters(self, **kwargs) -> bool:
         """Validate algorithm-specific parameters."""
         fd_method = kwargs.get("fd_method", "auto")
@@ -177,12 +180,12 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
             B=np.empty((0, n_inputs)),
             C=np.empty((n_outputs, 0)),
             D=np.zeros((n_outputs, n_inputs)),
-            K=np.empty((0, n_outputs)),
-            Q=np.empty((0, 0)),
-            R=np.eye(n_outputs),
-            S=np.empty((0, n_outputs)),
+            K=None,
+            Q=None,
+            R=None,
+            S=None,
             ts=dt,
-            Vn=0.0,
+            Vn=None,
             identification_info=results,
             is_parametric=False,
         )

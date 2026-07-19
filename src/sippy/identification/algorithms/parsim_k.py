@@ -31,6 +31,8 @@ class PARSIMKAlgorithm(IdentificationAlgorithm):
     - Implementation: parsim_core.py (helper functions), parsim_k.py
     """
 
+    kalman_gain_source = "parsim_observer_estimate"
+
     def get_algorithm_name(self) -> str:
         """Return algorithm name."""
         return "PARSIM-K"
@@ -86,14 +88,7 @@ class PARSIMKAlgorithm(IdentificationAlgorithm):
         except Exception as exc:
             raise RuntimeError(f"PARSIM-K identification failed: {exc}") from exc
 
-        # Set default covariance matrices
-        n = A.shape[0]
-        l = C.shape[0]
-        Q = np.eye(n) * 0.01
-        R = 0.1 * np.eye(l)
-        S = np.zeros((n, l))
-
-        return StateSpaceModel(A, B, C, D, K, Q, R, S, tsample, Vn)
+        return StateSpaceModel(A, B, C, D, K, None, None, None, tsample, Vn, x0=x0)
 
     def validate_parameters(self, **kwargs) -> bool:
         """Validate PARSIM-K-specific parameters."""

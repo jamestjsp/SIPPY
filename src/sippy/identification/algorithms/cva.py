@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 class CVAAlgorithm(IdentificationAlgorithm):
     """CVA (Canonical Variate Analysis) algorithm."""
 
+    covariance_source = "subspace_residuals"
+    kalman_gain_source = "riccati_solution"
+
     def get_algorithm_name(self) -> str:
         """Return algorithm name."""
         return "CVA"

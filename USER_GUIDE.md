@@ -216,14 +216,21 @@ config = SystemIdentificationConfig(
 )
 ```
 
-### StateSpaceModel Enhancements
+### Identification Result Contract
 
-The returned model object includes many built-in analysis methods:
+Every algorithm returns an `IdentificationResult`. `StateSpaceModel` is kept as
+a compatible name for the same result type. Parametric state-space,
+polynomial, output-only, and nonparametric frequency-domain estimates expose
+the same methods; `model.supports(operation)` states whether a method is
+meaningful for that particular estimate.
 
 ```python
 # Basic properties
 print(f"States: {model.n}")
+print(f"Inputs: {model.ninputs}, outputs: {model.noutputs}")
+print(f"Method: {model.method}")
 print(f"Stable: {model.is_stable()}")
+print(model.capabilities)
 
 # System analysis
 frequencies = model.get_natural_frequencies()
@@ -231,6 +238,16 @@ dampings = model.get_damping_ratios()
 
 # Simulation
 x, y_sim = model.simulate(u_new)
+
+# Deterministic and one-step prediction
+y_sim = model.predict(u=u_new)
+if model.supports('one_step_prediction'):
+    y_one_step = model.predict(u=u_validation, y=y_validation)
+
+# Identification residuals and normalized-RMSE fit
+residuals = model.residuals()
+fit = model.fit()
+residual_covariance = model.residual_covariance
 
 # FIR coefficients for specific channels
 fir_coeffs = model.get_fir_coefficients(
@@ -253,6 +270,22 @@ uncertainty.empirical_response         # Welch/H1 validation estimate
 uncertainty.coherence                  # shape (frequency, output)
 uncertainty.signal_to_noise_ratio
 ```
+
+The process transfer/state-space model is `model.deterministic_model`; an
+identified innovations model is `model.innovations_model`. `Vn` consistently
+means the scalar mean squared identification residual after the estimator's
+warm-up interval. Multi-output residual covariance is retained separately in
+`model.residual_covariance`. Stochastic state-space quantities are never
+invented: `K`, `Q`, `R`, and `S` are `None` unless the estimator actually
+identifies them, and `model.identification_info['provenance']` records their
+source. N4SID, MOESP, and CVA estimate `Q/R/S` and a Riccati gain; PARSIM
+estimates an observer gain but not `Q/R/S`; polynomial and frequency-domain
+estimators do not claim state-noise covariances.
+
+For discrete-time models, natural frequencies and damping ratios are computed
+from the continuous-equivalent poles `log(z) / sample_time`. Therefore
+`get_natural_frequencies()` reports undamped natural frequency, not merely the
+oscillation angle of a discrete pole.
 
 ---
 

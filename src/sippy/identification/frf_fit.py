@@ -297,23 +297,36 @@ def fit_frf_model(
     C = np.asarray(C).reshape(n_outputs, n_states)
     D = np.asarray(D).reshape(n_outputs, n_inputs)
 
-    return StateSpaceModel(
+    result = StateSpaceModel(
         A=A,
         B=B,
         C=C,
         D=D,
-        K=np.zeros((n_states, n_outputs)),
-        Q=np.eye(n_states),
-        R=np.eye(n_outputs),
-        S=np.zeros((n_states, n_outputs)),
+        K=None,
+        Q=None,
+        R=None,
+        S=None,
         ts=model.ts,
-        Vn=float(np.mean(residuals)),
+        Vn=None,
         G_tf=G_tf,
         identification_info={
             "method": "FD-FIT",
             "source_estimator": info["estimator"],
             "orders": {"na": na, "nb": nb, "nk": nk},
             "min_coherence": min_coherence,
+            "frequency_fit_loss": float(np.mean(residuals)),
             "frf_fit": fits,
         },
     )
+    identification_input = getattr(model, "_identification_input", None)
+    identification_output = getattr(model, "_identification_output", None)
+    if identification_input is not None and identification_output is not None:
+        result.finalize_identification(
+            method="FD-FIT",
+            input_data=identification_input,
+            output_data=identification_output,
+            covariance_source=None,
+            kalman_gain_source=None,
+            options={"na": na, "nb": nb, "nk": nk},
+        )
+    return result

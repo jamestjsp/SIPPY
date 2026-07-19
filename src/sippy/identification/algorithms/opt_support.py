@@ -48,6 +48,7 @@ class MISOResult:
     f_coeffs: np.ndarray
     delay: np.ndarray
     y_hat: np.ndarray
+    fit_start: int
     noise_variance: float
     reached_max: bool
     y_std: float
@@ -489,6 +490,7 @@ def gen_miso_id(
         f_coeffs=f_coeffs,
         delay=theta,
         y_hat=y_hat,
+        fit_start=val,
         noise_variance=Vn,
         reached_max=reached_max,
         y_std=y_std,
@@ -641,6 +643,7 @@ def armax_miso_id(
         f_coeffs=np.array([], dtype=float),
         delay=theta,
         y_hat=y_hat,
+        fit_start=val,
         noise_variance=Vn,
         reached_max=iterations >= max_iterations,
         y_std=y_std,

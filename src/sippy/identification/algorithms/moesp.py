@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 class MOESPAlgorithm(IdentificationAlgorithm):
     """MOESP (Multivariable Output-Error State Space) algorithm."""
 
+    covariance_source = "subspace_residuals"
+    kalman_gain_source = "riccati_solution"
+
     def get_algorithm_name(self) -> str:
         """Return algorithm name."""
         return "MOESP"

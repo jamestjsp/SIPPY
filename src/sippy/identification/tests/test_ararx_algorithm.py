@@ -437,16 +437,12 @@ class TestARARXAlgorithm:
 
         result = algorithm.identify(self.data, self.config)
 
-        # Test that model can be used for prediction (if supported)
-        if hasattr(result, "simulate") and hasattr(result, "predict"):
-            # Should be supported for simulation
-            t_test = np.random.rand(10)
-            y_pred = result.simulate(t_test, u=None)
-            assert y_pred is not None
-            assert y_pred.shape[0] == 10  # 10 time steps
-        else:
-            # Test fallback prediction if simulation not available
-            pass
+        u_test = np.random.rand(1, 10)
+        _, y_simulated = result.simulate(u_test)
+        y_predicted = result.predict(u=u_test)
+
+        assert y_simulated.shape == (1, 10)
+        np.testing.assert_allclose(y_predicted, y_simulated)
 
         assert result is not None
         assert isinstance(result, StateSpaceModel)

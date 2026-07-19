@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 class N4SIDAlgorithm(IdentificationAlgorithm):
     """N4SID (Numerical algorithms for Subspace State Space System Identification) algorithm."""
 
+    covariance_source = "subspace_residuals"
+    kalman_gain_source = "riccati_solution"
+
     def get_algorithm_name(self) -> str:
         """Return algorithm name."""
         return "N4SID"

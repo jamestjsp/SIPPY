@@ -603,6 +603,10 @@ class SubspaceCoreAlgorithm:
             if K_calculated:
                 K[:, j] = K[:, j] / Ystd[j]
 
+        output_scale = np.diag(Ystd)
+        R = output_scale @ R @ output_scale
+        S = S @ output_scale
+
         return A, B, C, D, Vn, Q, R, S, K
 
     @staticmethod
@@ -847,5 +851,9 @@ class SubspaceCoreAlgorithm:
             D[j, :] = D[j, :] * Ystd[j]
             if K_calculated:
                 K[:, j] = K[:, j] / Ystd[j]
+
+        output_scale = np.diag(Ystd)
+        R = output_scale @ R @ output_scale
+        S = S @ output_scale
 
         return A, B, C, D, Vn, Q, R, S, K

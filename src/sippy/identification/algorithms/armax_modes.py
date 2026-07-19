@@ -122,9 +122,20 @@ class ILLSHandler(ARMAXModeHandler):
         **kwargs,
     ) -> Tuple[Optional[StateSpaceModel], dict]:
         """Identify ARMAX using Iterative Least Squares."""
-        return self._identify_ills(
+        model, info = self._identify_ills(
             u, y, na, nb, nc, nk, max_iterations, convergence_tolerance
         )
+        if model is not None:
+            model.identification_info.update(info)
+            model.finalize_identification(
+                method="ARMAX-ILLS",
+                input_data=np.atleast_2d(u),
+                output_data=np.atleast_2d(y),
+                covariance_source=None,
+                kalman_gain_source=None,
+                options=kwargs,
+            )
+        return model, info
 
     def _identify_ills(
         self,
@@ -241,6 +252,7 @@ class ILLSHandler(ARMAXModeHandler):
         info = {
             "iterations": iterations,
             "max_reached": max_reached,
+            "fit_start": max_order,
             "final_variance": Vn,
             "converged": not max_reached and abs(Vn_old - Vn) < convergence_tolerance,
             "predicted_output": Yid,
@@ -307,12 +319,12 @@ class ILLSHandler(ARMAXModeHandler):
                 B=B_mat,
                 C=C_mat,
                 D=D_mat,
-                K=np.zeros((A_mat.shape[0], C_mat.shape[0])),
-                Q=np.eye(A_mat.shape[0]) * 0.01,
-                R=np.eye(C_mat.shape[0]) * 0.01,
-                S=np.zeros((A_mat.shape[0], C_mat.shape[0])),
+                K=None,
+                Q=None,
+                R=None,
+                S=None,
                 ts=Ts,
-                Vn=0.01,
+                Vn=None,
                 G_tf=G_tf,
                 H_tf=H_tf,
             )
@@ -344,7 +356,20 @@ class RLLSHandler(ARMAXModeHandler):
         **kwargs,
     ) -> Tuple[Optional[StateSpaceModel], dict]:
         """Identify ARMAX using Recursive Least Squares."""
-        return self._identify_rlls(u, y, na, nb, nc, nk, max_iterations, **kwargs)
+        model, info = self._identify_rlls(
+            u, y, na, nb, nc, nk, max_iterations, **kwargs
+        )
+        if model is not None:
+            model.identification_info.update(info)
+            model.finalize_identification(
+                method="ARMAX-RLLS",
+                input_data=np.atleast_2d(u),
+                output_data=np.atleast_2d(y),
+                covariance_source=None,
+                kalman_gain_source=None,
+                options=kwargs,
+            )
+        return model, info
 
     def _identify_rlls(
         self,
@@ -445,6 +470,7 @@ class RLLSHandler(ARMAXModeHandler):
             return None, {"error": f"RLLS model creation failed: {str(e)}"}
 
         info = {
+            "fit_start": max_order,
             "final_variance": Vn,
             "predicted_output": Yp,
             "residuals": E,
@@ -515,12 +541,12 @@ class RLLSHandler(ARMAXModeHandler):
                 B=B_mat,
                 C=C_mat,
                 D=D_mat,
-                K=np.zeros((A_mat.shape[0], C_mat.shape[0])),
-                Q=np.eye(A_mat.shape[0]) * 0.01,
-                R=np.eye(C_mat.shape[0]) * 0.01,
-                S=np.zeros((A_mat.shape[0], C_mat.shape[0])),
+                K=None,
+                Q=None,
+                R=None,
+                S=None,
                 ts=Ts,
-                Vn=0.01,
+                Vn=None,
                 G_tf=G_tf,
                 H_tf=H_tf,
             )
@@ -553,7 +579,18 @@ class OPTHandler(ARMAXModeHandler):
         **kwargs,
     ) -> Tuple[Optional[StateSpaceModel], dict]:
         """Identify ARMAX using nonlinear optimization."""
-        return self._identify_opt(u, y, na, nb, nc, nk, max_iterations, **kwargs)
+        model, info = self._identify_opt(u, y, na, nb, nc, nk, max_iterations, **kwargs)
+        if model is not None:
+            model.identification_info.update(info)
+            model.finalize_identification(
+                method="ARMAX-OPT",
+                input_data=np.atleast_2d(u),
+                output_data=np.atleast_2d(y),
+                covariance_source=None,
+                kalman_gain_source=None,
+                options=kwargs,
+            )
+        return model, info
 
     def _identify_opt(
         self,
@@ -805,12 +842,12 @@ class OPTHandler(ARMAXModeHandler):
                 B=B_mat,
                 C=C_mat,
                 D=D_mat,
-                K=np.zeros((A_mat.shape[0], C_mat.shape[0])),
-                Q=np.eye(A_mat.shape[0]) * 0.01,
-                R=np.eye(C_mat.shape[0]) * 0.01,
-                S=np.zeros((A_mat.shape[0], C_mat.shape[0])),
+                K=None,
+                Q=None,
+                R=None,
+                S=None,
                 ts=Ts,
-                Vn=0.01,
+                Vn=None,
                 G_tf=G_tf,
                 H_tf=H_tf,
             )

@@ -271,6 +271,11 @@ class TestBJAlgorithm:
             nk=config.nk,
         )
         assert result is not None
+        assert result.fit_start == n_samples
+        assert result.identification_info["requested_fit_start"] > n_samples
+        assert result.Vn is None
+        assert result.residual_covariance is None
+        assert not result.supports("fit")
         assert isinstance(result, StateSpaceModel)
 
     def test_bj_state_space_models(self):

@@ -3,7 +3,8 @@ Base classes for system identification algorithms.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Optional, Union
+from functools import wraps
+from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 import numpy as np
 
@@ -58,6 +59,41 @@ def identity_transfer_function(
 class IdentificationAlgorithm(ABC):
     """Abstract base class for system identification algorithms."""
 
+    covariance_source: Optional[str] = None
+    kalman_gain_source: Optional[str] = None
+
+    def __init_subclass__(cls, **kwargs):
+        """Wrap concrete estimators so result normalization cannot be skipped."""
+        super().__init_subclass__(**kwargs)
+        identify = cls.__dict__.get("identify")
+        if identify is None or getattr(identify, "_sippy_result_finalizer", False):
+            return
+
+        @wraps(identify)
+        def finalized_identify(self, y=None, u=None, iddata=None, **options):
+            model = identify(self, y=y, u=u, iddata=iddata, **options)
+            result_y = y
+            result_u = u
+            result_data = iddata
+            if result_data is None and hasattr(y, "get_output_array"):
+                result_data = y
+            if result_data is not None:
+                result_y = result_data.get_output_array()
+                result_u = result_data.get_input_array()
+            if result_y is None:
+                return model
+            if model.B.shape[1] == 0 and model.G_tf is None:
+                result_u = None
+            return self.finalize_result(
+                model,
+                result_y,
+                result_u,
+                options=options,
+            )
+
+        finalized_identify._sippy_result_finalizer = True
+        cls.identify = finalized_identify
+
     def __init__(self):
         self.name = self.__class__.__name__
 
@@ -91,6 +127,34 @@ class IdentificationAlgorithm(ABC):
         """Validate algorithm-specific parameters."""
         pass
 
+    def finalize_result(
+        self,
+        model: "StateSpaceModel",
+        y: np.ndarray,
+        u: Optional[np.ndarray],
+        *,
+        covariance_source: Optional[str] = None,
+        kalman_gain_source: Optional[str] = None,
+        options: Optional[dict[str, Any]] = None,
+    ) -> "StateSpaceModel":
+        """Finalize an algorithm result under the shared result contract."""
+        method_getter = getattr(self, "get_algorithm_name", None)
+        method = (
+            method_getter() if method_getter is not None else self.__class__.__name__
+        )
+        if covariance_source is None:
+            covariance_source = self.covariance_source
+        if kalman_gain_source is None:
+            kalman_gain_source = self.kalman_gain_source
+        return model.finalize_identification(
+            method=method,
+            input_data=u,
+            output_data=y,
+            covariance_source=covariance_source,
+            kalman_gain_source=kalman_gain_source,
+            options=options,
+        )
+
 
 class StateSpaceModel:
     """Enhanced state-space model container."""
@@ -101,17 +165,18 @@ class StateSpaceModel:
         B: np.ndarray,
         C: np.ndarray,
         D: np.ndarray,
-        K: np.ndarray,
-        Q: np.ndarray,
-        R: np.ndarray,
-        S: np.ndarray,
+        K: Optional[np.ndarray],
+        Q: Optional[np.ndarray],
+        R: Optional[Union[float, np.ndarray]],
+        S: Optional[np.ndarray],
         ts: float,
-        Vn: Union[float, np.ndarray],
+        Vn: Optional[Union[float, np.ndarray]],
         G_tf: Optional[object] = None,
         H_tf: Optional[object] = None,
         Yid: Optional[np.ndarray] = None,
         identification_info: Optional[dict] = None,
         is_parametric: bool = True,
+        x0: Optional[np.ndarray] = None,
     ):
         self.A = A
         self.B = B
@@ -121,7 +186,7 @@ class StateSpaceModel:
         self.Q = Q
         self.R = R
         self.S = S
-        self.ts = ts
+        self.ts = float(ts)
         self.Vn = Vn
         self.n = A.shape[0]  # State dimension
 
@@ -131,13 +196,26 @@ class StateSpaceModel:
         self.Yid = Yid  # One-step-ahead predictions from identification
         self.identification_info = identification_info or {}
         self.is_parametric = bool(is_parametric)
+        self.method = self.identification_info.get("method")
+        self.ninputs = int(self.identification_info.get("n_inputs", B.shape[1]))
+        self.noutputs = int(self.identification_info.get("n_outputs", C.shape[0]))
+        self.residual_covariance: Optional[np.ndarray] = None
+        self.fit_start = int(self.identification_info.get("fit_start", 0))
+        self._identification_input: Optional[np.ndarray] = None
+        self._identification_output: Optional[np.ndarray] = None
+        self._residuals: Optional[np.ndarray] = None
+        self.capabilities: dict[str, bool] = {}
 
         if not self.is_parametric or B.size == 0 or B.shape[1] == 0:
             self.G = None
         else:
-            self.G = control.ss(A, B, C, D, dt=ts)
+            self.G = control.ss(A, B, C, D, dt=self.ts)
 
-        self.x0 = np.zeros((self.n, 1))
+        self.x0 = (
+            np.zeros((self.n, 1))
+            if x0 is None
+            else np.asarray(x0, dtype=float).reshape(self.n, 1)
+        )
 
         # Calculate observer matrices if possible
         try:
@@ -147,6 +225,171 @@ class StateSpaceModel:
             self.A_K = np.array([])
             self.B_K = np.array([])
 
+        self._update_capabilities()
+
+    @property
+    def deterministic_model(self) -> Optional[object]:
+        """Canonical input-to-output model, when one was identified."""
+        return self.G_tf or self.G
+
+    @property
+    def innovations_model(self) -> Optional[object]:
+        """Canonical innovations-to-output model, when one was identified."""
+        return self.H_tf
+
+    def _update_capabilities(self) -> None:
+        frequency_response = (
+            self.deterministic_model is not None
+            or self.innovations_model is not None
+            or (
+                not self.is_parametric
+                and "frequency_response" in self.identification_info
+            )
+        )
+        simulation = self.is_parametric and self.deterministic_model is not None
+        dynamic_model = self.deterministic_model or self.innovations_model
+        self.capabilities = {
+            "frequency_response": frequency_response,
+            "uncertainty": frequency_response and self.ninputs > 0,
+            "simulation": simulation,
+            "prediction": simulation or self.Yid is not None,
+            "one_step_prediction": self.K is not None
+            or self._has_invertible_innovations_model(),
+            "residuals": self._residuals is not None,
+            "fit": self._residuals is not None,
+            "stability": self.is_parametric and dynamic_model is not None,
+            "modal_properties": self.is_parametric and dynamic_model is not None,
+            "time_response": simulation,
+            "innovations_response": self.innovations_model is not None,
+            "stochastic_state_space": all(
+                value is not None for value in (self.K, self.Q, self.R, self.S)
+            ),
+        }
+
+    def _has_invertible_innovations_model(self) -> bool:
+        system = self.innovations_model
+        if not isinstance(system, control.TransferFunction):
+            return False
+        if system.ninputs != self.noutputs or system.noutputs != self.noutputs:
+            return False
+        for output in range(self.noutputs):
+            numerator = np.asarray(system.num[output][output], dtype=float)
+            if numerator.size == 0 or np.isclose(numerator[0], 0.0):
+                return False
+            for input_ in range(self.noutputs):
+                if input_ != output and np.any(np.abs(system.num[output][input_]) > 0):
+                    return False
+        return True
+
+    def supports(self, operation: str) -> bool:
+        """Return whether this result can perform an operation truthfully."""
+        normalized = operation.lower().replace("-", "_").replace(" ", "_")
+        if normalized not in self.capabilities:
+            raise ValueError(f"Unknown identification-result operation: {operation}")
+        return self.capabilities[normalized]
+
+    def finalize_identification(
+        self,
+        *,
+        method: str,
+        input_data: Optional[np.ndarray],
+        output_data: np.ndarray,
+        covariance_source: Optional[str],
+        kalman_gain_source: Optional[str],
+        options: Optional[dict[str, Any]] = None,
+    ) -> "StateSpaceModel":
+        """Normalize provenance, fit statistics, and behavior after identification."""
+        y = np.atleast_2d(np.asarray(output_data, dtype=float))
+        u = (
+            None
+            if input_data is None
+            else np.atleast_2d(np.asarray(input_data, dtype=float))
+        )
+        if u is not None and u.shape[1] != y.shape[1]:
+            raise ValueError("Identification input and output sample counts differ")
+
+        self.method = str(method).upper()
+        self.noutputs = y.shape[0]
+        self.ninputs = 0 if u is None else u.shape[0]
+        self._identification_input = None if u is None else u.copy()
+        self._identification_output = y.copy()
+        requested_fit_start = int(self.identification_info.get("fit_start", 0))
+        if requested_fit_start < 0:
+            raise ValueError("fit_start must be non-negative")
+        self.fit_start = min(requested_fit_start, y.shape[1])
+        if requested_fit_start > y.shape[1]:
+            self.identification_info["requested_fit_start"] = requested_fit_start
+
+        if self.is_parametric and self.G_tf is not None:
+            A, B, C, D = realize_transfer_function(self.G_tf)
+            self.A, self.B, self.C, self.D = A, B, C, D
+            self.G = control.ss(A, B, C, D, dt=self.ts)
+            self.n = A.shape[0]
+            self.x0 = np.zeros((self.n, 1))
+
+        if covariance_source is None:
+            self.Q = None
+            self.R = None
+            self.S = None
+        if kalman_gain_source is None:
+            self.K = None
+
+        if self.K is None:
+            self.A_K = np.array([])
+            self.B_K = np.array([])
+        else:
+            self.A_K = self.A - self.K @ self.C
+            self.B_K = self.B - self.K @ self.D
+
+        if self.Yid is None and self.is_parametric:
+            if self.K is not None:
+                try:
+                    self.Yid = self.predict(u=u, y=y)
+                except (ValueError, NotImplementedError):
+                    self.Yid = None
+            elif u is not None and self.deterministic_model is not None:
+                _, self.Yid = self.simulate(u)
+
+        if self.Yid is not None:
+            fitted = np.atleast_2d(np.asarray(self.Yid, dtype=float))
+            if fitted.shape == y.shape:
+                self.Yid = fitted
+                if self.fit_start < y.shape[1]:
+                    self._residuals = y - fitted
+                    effective_residuals = self._residuals[:, self.fit_start :]
+                    centered = effective_residuals - np.mean(
+                        effective_residuals, axis=1, keepdims=True
+                    )
+                    denominator = max(effective_residuals.shape[1] - 1, 1)
+                    self.residual_covariance = centered @ centered.T / denominator
+                    self.Vn = float(np.mean(effective_residuals**2))
+                else:
+                    self.Vn = None
+
+        provenance = {
+            "kalman_gain": kalman_gain_source or "unavailable",
+            "state_covariances": covariance_source or "unavailable",
+            "residual_covariance": (
+                "empirical" if self.residual_covariance is not None else "unavailable"
+            ),
+        }
+        self.identification_info.update(
+            {
+                "method": self.method,
+                "model_type": "parametric" if self.is_parametric else "nonparametric",
+                "n_inputs": self.ninputs,
+                "n_outputs": self.noutputs,
+                "sample_time": self.ts,
+                "fit_start": self.fit_start,
+                "provenance": provenance,
+                "options": dict(options or {}),
+            }
+        )
+        if self._residuals is not None:
+            self.identification_info["fit"] = self.fit()
+        self._update_capabilities()
+        return self
+
     def is_stable(self) -> bool:
         """Check if the system matrix A is stable."""
         if not self.is_parametric:
@@ -154,34 +397,52 @@ class StateSpaceModel:
                 "Stability is not defined for a non-parametric frequency response"
             )
         try:
-            eigenvals = np.linalg.eigvals(self.A)
+            eigenvals = self.poles()
             return np.all(np.abs(eigenvals) < 1.0)
         except (ValueError, np.linalg.LinAlgError):
             return False
 
     def get_natural_frequencies(self) -> np.ndarray:
-        """Get natural frequencies of the system."""
+        """Return undamped natural frequencies in cycles per unit time."""
         if not self.is_parametric:
             raise NotImplementedError(
                 "Natural frequencies require a parametric model realization"
             )
         try:
-            eigenvals = np.linalg.eigvals(self.A)
-            return np.abs(np.angle(eigenvals) / (2 * np.pi * self.ts))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                continuous_poles = np.log(self.poles().astype(complex)) / self.ts
+            return np.abs(continuous_poles) / (2 * np.pi)
         except (ValueError, np.linalg.LinAlgError, ZeroDivisionError):
             return np.array([])
 
     def get_damping_ratios(self) -> np.ndarray:
-        """Get damping ratios of the system."""
+        """Return damping ratios from the continuous-equivalent poles."""
         if not self.is_parametric:
             raise NotImplementedError(
                 "Damping ratios require a parametric model realization"
             )
         try:
-            eigenvals = np.linalg.eigvals(self.A)
-            return -np.real(eigenvals) / np.abs(eigenvals)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                continuous_poles = np.log(self.poles().astype(complex)) / self.ts
+            magnitudes = np.abs(continuous_poles)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                return np.divide(
+                    -continuous_poles.real,
+                    magnitudes,
+                    out=np.full_like(magnitudes, np.nan),
+                    where=magnitudes > 0,
+                )
         except (ValueError, np.linalg.LinAlgError, ZeroDivisionError):
             return np.array([])
+
+    def poles(self) -> np.ndarray:
+        """Return poles of the canonical dynamic model."""
+        if not self.is_parametric:
+            raise NotImplementedError("Poles require a parametric model realization")
+        system = self.deterministic_model or self.innovations_model
+        if system is None:
+            raise NotImplementedError("This result has no dynamic model")
+        return control.poles(system)
 
     def get_fir_coefficients(
         self, inputs: list, outputs: list, sampling: float, tss: float
@@ -236,14 +497,22 @@ class StateSpaceModel:
         return get_step_response(fir_model)
 
     def frequency_response(
-        self, omega: Optional[np.ndarray] = None
+        self, omega: Optional[np.ndarray] = None, *, response: str = "process"
     ) -> control.FrequencyResponseData:
         """Evaluate the identified response on an angular-frequency grid."""
         if self.is_parametric:
-            system = self.G_tf or self.G or self.H_tf
+            if response not in {"process", "innovations"}:
+                raise ValueError("response must be 'process' or 'innovations'")
+            system = (
+                self.innovations_model
+                if response == "innovations"
+                else self.deterministic_model
+            )
+            if system is None and response == "process" and self.ninputs == 0:
+                system = self.innovations_model
             if system is None:
                 raise NotImplementedError(
-                    "This identification result has no frequency-response model"
+                    f"This identification result has no {response} response model"
                 )
             if omega is None:
                 if not np.isfinite(self.ts) or self.ts <= 0:
@@ -251,6 +520,10 @@ class StateSpaceModel:
                 omega = np.linspace(0.0, np.pi / self.ts, 512)
             return control.frequency_response(system, omega)
 
+        if response != "process":
+            raise NotImplementedError(
+                "A non-parametric frequency-domain result has no innovations model"
+            )
         info = self.identification_info
         if info.get("method") != "FD" or "frequency_response" not in info:
             raise NotImplementedError(
@@ -305,6 +578,12 @@ class StateSpaceModel:
             frequencies.copy(), np.transpose(response, (1, 2, 0))
         )
 
+    def innovations_frequency_response(
+        self, omega: Optional[np.ndarray] = None
+    ) -> control.FrequencyResponseData:
+        """Evaluate the identified innovations-to-output response."""
+        return self.frequency_response(omega, response="innovations")
+
     def get_model_uncertainty(
         self,
         input_data: np.ndarray,
@@ -340,6 +619,10 @@ class StateSpaceModel:
         """
         from .uncertainty import estimate_frequency_response_uncertainty
 
+        if not self.supports("uncertainty"):
+            raise NotImplementedError(
+                "Empirical FRF uncertainty requires an identified input-output response"
+            )
         del input_name, output_name
         uncertainty = estimate_frequency_response_uncertainty(
             input_data,
@@ -375,12 +658,161 @@ class StateSpaceModel:
         """
         from ..utils.simulation_utils import simulate_ss_system
 
-        if not self.is_parametric:
+        if not self.supports("simulation"):
+            if not self.is_parametric:
+                raise NotImplementedError(
+                    "Simulation is not defined for a non-parametric frequency response"
+                )
             raise NotImplementedError(
-                "Simulation is not defined for a non-parametric frequency response; "
-                "fit a parametric model first"
+                "Simulation requires a parametric input-to-output model"
             )
-        return simulate_ss_system(self.A, self.B, self.C, self.D, u, x0)
+        system = self.deterministic_model
+        if isinstance(system, control.TransferFunction):
+            realized = control.tf2ss(system)
+            return simulate_ss_system(
+                realized.A, realized.B, realized.C, realized.D, u, x0
+            )
+        return simulate_ss_system(system.A, system.B, system.C, system.D, u, x0)
+
+    def impulse_response(self, n_samples: int = 100) -> control.TimeResponseData:
+        """Return the deterministic impulse response for every input channel."""
+        if not self.supports("time_response"):
+            raise NotImplementedError(
+                "Impulse response requires a parametric input-to-output model"
+            )
+        if not isinstance(n_samples, int) or n_samples <= 0:
+            raise ValueError("n_samples must be a positive integer")
+        time = np.arange(n_samples, dtype=float) * self.ts
+        return control.impulse_response(self.deterministic_model, time, squeeze=False)
+
+    def step_response(self, n_samples: int = 100) -> control.TimeResponseData:
+        """Return the deterministic step response for every input channel."""
+        if not self.supports("time_response"):
+            raise NotImplementedError(
+                "Step response requires a parametric input-to-output model"
+            )
+        if not isinstance(n_samples, int) or n_samples <= 0:
+            raise ValueError("n_samples must be a positive integer")
+        system = self.deterministic_model
+        realized = (
+            control.tf2ss(system)
+            if isinstance(system, control.TransferFunction)
+            else system
+        )
+        time = np.arange(n_samples, dtype=float) * self.ts
+        outputs = np.empty((self.noutputs, self.ninputs, n_samples), dtype=float)
+        final_states = np.empty((realized.nstates, self.ninputs), dtype=float)
+        for input_ in range(self.ninputs):
+            inputs = np.zeros((self.ninputs, n_samples), dtype=float)
+            inputs[input_, :] = 1.0
+            response_data = control.forced_response(
+                realized, T=time, U=inputs, squeeze=False
+            )
+            outputs[:, input_, :] = response_data.outputs
+            final_states[:, input_] = response_data.states
+        return control.TimeResponseData(time, outputs, final_states)
+
+    def predict(
+        self,
+        u: Optional[np.ndarray] = None,
+        y: Optional[np.ndarray] = None,
+        x0: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Predict outputs deterministically or in one-step-ahead form."""
+        if u is None and y is None:
+            if self.Yid is None:
+                raise ValueError("Provide validation data; no fitted output is stored")
+            return self.Yid.copy()
+        if y is None:
+            if u is None:
+                raise ValueError("Input data is required for deterministic prediction")
+            return self.simulate(np.atleast_2d(u), x0=x0)[1]
+        outputs = np.atleast_2d(np.asarray(y, dtype=float))
+        if u is None:
+            inputs = np.empty((0, outputs.shape[1]))
+        else:
+            inputs = np.atleast_2d(np.asarray(u, dtype=float))
+        if inputs.shape[1] != outputs.shape[1]:
+            raise ValueError("Input and output sample counts differ")
+        if self.K is not None:
+            from ..utils.simulation_utils import ss_lsim_predictor_form
+
+            _, prediction = ss_lsim_predictor_form(
+                self.A_K, self.B_K, self.C, self.D, self.K, outputs, inputs, x0
+            )
+            return prediction
+        if not self._has_invertible_innovations_model():
+            raise NotImplementedError(
+                "One-step prediction requires an identified Kalman gain or a "
+                "causally invertible diagonal innovations model"
+            )
+
+        from scipy.signal import lfilter
+
+        if self.deterministic_model is None:
+            deterministic = np.zeros_like(outputs)
+        else:
+            if u is None:
+                raise ValueError("Input data is required for this process model")
+            deterministic = self.simulate(inputs, x0=x0)[1]
+        unexplained = outputs - deterministic
+        innovations = np.empty_like(unexplained)
+        noise_model = self.innovations_model
+        for output in range(self.noutputs):
+            innovations[output] = lfilter(
+                noise_model.den[output][output],
+                noise_model.num[output][output],
+                unexplained[output],
+            )
+        return outputs - innovations
+
+    def residuals(
+        self,
+        y: Optional[np.ndarray] = None,
+        u: Optional[np.ndarray] = None,
+        *,
+        prediction: bool = False,
+    ) -> np.ndarray:
+        """Return stored identification residuals or residuals on new data."""
+        if y is None:
+            if self._residuals is None:
+                raise ValueError("No identification residuals are stored")
+            return self._residuals.copy()
+        outputs = np.atleast_2d(np.asarray(y, dtype=float))
+        estimate = self.predict(u=u, y=outputs if prediction else None)
+        if estimate.shape != outputs.shape:
+            raise ValueError("Predicted and measured output shapes differ")
+        return outputs - estimate
+
+    def fit(
+        self,
+        y: Optional[np.ndarray] = None,
+        u: Optional[np.ndarray] = None,
+        *,
+        prediction: bool = False,
+    ) -> dict[str, Union[float, np.ndarray]]:
+        """Return per-output normalized-RMSE fit and its aggregate score."""
+        if y is None:
+            if self._identification_output is None:
+                raise ValueError("No identification output is stored")
+            outputs = self._identification_output
+            outputs = outputs[:, self.fit_start :]
+            errors = self.residuals()[:, self.fit_start :]
+        else:
+            outputs = np.atleast_2d(np.asarray(y, dtype=float))
+            errors = self.residuals(outputs, u, prediction=prediction)
+        rmse = np.sqrt(np.mean(errors**2, axis=1))
+        centered = outputs - np.mean(outputs, axis=1, keepdims=True)
+        scale = np.sqrt(np.mean(centered**2, axis=1))
+        nrmse = 1.0 - np.divide(
+            rmse,
+            scale,
+            out=np.full_like(rmse, np.nan),
+            where=scale > 0,
+        )
+        finite_nrmse = nrmse[np.isfinite(nrmse)]
+        score = float(np.mean(finite_nrmse)) if finite_nrmse.size else np.nan
+        return {"nrmse": nrmse, "score": score}
 
     def supports_optimization_methods(self) -> bool:
         """
@@ -390,7 +822,10 @@ class StateSpaceModel:
         --------
         bool : True if optimization methods are supported
         """
-        return self.is_parametric
+        return self.supports("simulation")
+
+
+IdentificationResult = StateSpaceModel
 
 
 class SystemIdentificationConfig:

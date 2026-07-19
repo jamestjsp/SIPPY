@@ -370,6 +370,7 @@ class OEAlgorithm(IdentificationAlgorithm):
         model.G_tf = G_tf
         model.H_tf = H_tf
         model.Yid = Yid
+        model.identification_info["fit_start"] = max_lag
 
         return model
 
@@ -753,12 +754,12 @@ class OEAlgorithm(IdentificationAlgorithm):
                     B=B,
                     C=C,
                     D=D,
-                    K=np.zeros((A.shape[0], C.shape[0])),
-                    Q=np.eye(A.shape[0]),
-                    R=np.eye(C.shape[0]),
-                    S=np.zeros((A.shape[0], C.shape[0])),
+                    K=None,
+                    Q=None,
+                    R=None,
+                    S=None,
                     ts=Ts,
-                    Vn=0.01,
+                    Vn=None,
                 )
 
         # Build observer canonical form state-space representation for OE
@@ -818,10 +819,10 @@ class OEAlgorithm(IdentificationAlgorithm):
             B=B,
             C=C,
             D=D,
-            K=np.zeros((A.shape[0], C.shape[0])),
-            Q=np.eye(A.shape[0]),
-            R=np.eye(C.shape[0]),
-            S=np.zeros((A.shape[0], C.shape[0])),
+            K=None,
+            Q=None,
+            R=None,
+            S=None,
             ts=Ts,
-            Vn=0.01,
+            Vn=None,
         )

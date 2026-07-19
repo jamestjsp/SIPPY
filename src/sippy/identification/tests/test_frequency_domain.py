@@ -265,9 +265,11 @@ class TestMIMOIdentification:
         assert result.B.shape == (0, 2)
         assert result.C.shape == (2, 0)
         assert result.D.shape == (2, 2)
-        assert result.K.shape == (0, 2)
-        assert result.R.shape == (2, 2)
-        assert result.S.shape == (0, 2)
+        assert result.K is None
+        assert result.Q is None
+        assert result.R is None
+        assert result.S is None
+        assert not result.supports("stochastic_state_space")
 
     def test_correlation_method_rejects_mimo(self, mimo_data):
         u, y, _ = mimo_data
