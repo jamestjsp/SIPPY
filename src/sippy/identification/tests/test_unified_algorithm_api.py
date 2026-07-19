@@ -25,6 +25,9 @@ ALGORITHM_NAMES = [
     "ARMA",
     "BJ",
     "GEN",
+    "FD",
+    "FREQUENCY_DOMAIN",
+    "FREQ_DOMAIN",
 ]
 
 SUBSPACE_NAMES = ["N4SID", "MOESP", "CVA", "PARSIM-K", "PARSIM-S", "PARSIM-P"]

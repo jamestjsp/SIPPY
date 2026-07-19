@@ -13,6 +13,7 @@ try:
     from .bj import BJAlgorithm
     from .cva import CVAAlgorithm
     from .fir import FIRAlgorithm
+    from .frequency_domain import FrequencyDomainAlgorithm
     from .gen import GENAlgorithm
     from .moesp import MOESPAlgorithm
     from .n4sid import N4SIDAlgorithm
@@ -36,6 +37,9 @@ try:
     AlgorithmFactory.register("ARMA", ARMAAlgorithm)
     AlgorithmFactory.register("BJ", BJAlgorithm)
     AlgorithmFactory.register("GEN", GENAlgorithm)
+    AlgorithmFactory.register("FD", FrequencyDomainAlgorithm)
+    AlgorithmFactory.register("FREQUENCY_DOMAIN", FrequencyDomainAlgorithm)
+    AlgorithmFactory.register("FREQ_DOMAIN", FrequencyDomainAlgorithm)
 except ImportError:
     # In case sysidbox is not available, we still have the base classes ready
     N4SIDAlgorithm = None
@@ -53,3 +57,4 @@ except ImportError:
     OEAlgorithm = None
     ARMAAlgorithm = None
     GENAlgorithm = None
+    FrequencyDomainAlgorithm = None

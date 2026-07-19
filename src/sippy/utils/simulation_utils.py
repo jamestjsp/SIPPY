@@ -519,27 +519,33 @@ def get_model_uncertainty(u, y, model):
     y_estimate = signal.convolve(u, model, mode="full")[: len(u)]
     model_error = y - y_estimate
 
+    from .spectral_utils import (
+        compute_cross_spectrum_welch,
+        compute_power_spectrum_welch,
+        create_hamming_window,
+    )
+
     h = fftpack.fft(model, nperseg)[: nperseg // 2]
-    freqs, Pxx = signal.welch(u, nperseg=nperseg)
-    freqs, Pyy = signal.welch(y, nperseg=nperseg)
-    freqs, Pyy_err = signal.welch(model_error, nperseg=nperseg)
-    freqs, Pxy = signal.csd(u, y, nperseg=nperseg)
+    freqs, Pxx = compute_power_spectrum_welch(u, nperseg=nperseg)
+    freqs, Pyy = compute_power_spectrum_welch(y, nperseg=nperseg)
+    freqs, Pyy_err = compute_power_spectrum_welch(model_error, nperseg=nperseg)
+    freqs, Pxy = compute_cross_spectrum_welch(u, y, nperseg=nperseg)
 
     snr = Pyy / Pyy_err
     data_bode = Pxy / Pxx
     data_bode_mag = np.abs(data_bode)
 
-    win = np.hamming(16)
-    data_bode_mag_filt_f = (np.convolve(data_bode_mag, win, mode="full") / sum(win))[
+    win = create_hamming_window(16, normalize=True)
+    data_bode_mag_filt_f = np.convolve(data_bode_mag, win, mode="full")[
         : len(data_bode_mag)
     ]
-    data_bode_mag_filt_b = (
-        np.convolve(data_bode_mag_filt_f[::-1], win, mode="full") / sum(win)
-    )[: len(data_bode_mag_filt_f)][::-1]
-    snr_filt_f = (np.convolve(np.abs(snr), win, mode="full") / sum(win))[: len(snr)]
-    snr_filt_b = (np.convolve(snr_filt_f[::-1], win, mode="full") / sum(win))[
-        : len(snr_filt_f)
+    data_bode_mag_filt_b = np.convolve(data_bode_mag_filt_f[::-1], win, mode="full")[
+        : len(data_bode_mag_filt_f)
     ][::-1]
+    snr_filt_f = np.convolve(np.abs(snr), win, mode="full")[: len(snr)]
+    snr_filt_b = np.convolve(snr_filt_f[::-1], win, mode="full")[: len(snr_filt_f)][
+        ::-1
+    ]
 
     model_bode_mag = np.abs(h)
     combined_bode = np.vstack((model_bode_mag, data_bode_mag_filt_b[:-1]))

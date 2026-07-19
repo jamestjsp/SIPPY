@@ -269,6 +269,48 @@ freqs, magnitude, ci95, ci68, snr = model.get_model_uncertainty(
 | **OE** | Input-Output | `OE_orders`, `OE_mod` | Output error modeling |
 | **ARMA** | Input-Output | `ARMA_orders` | Time series without inputs |
 | **BJ** | Input-Output | `BJ_orders` | Generalized models |
+| **FD** | Non-parametric | `fd_method`, `nperseg`, `max_lag` | Frequency response without a model structure |
+
+### Non-Parametric Frequency-Domain Identification (FD)
+
+`FD` (aliases `FREQUENCY_DOMAIN`, `FREQ_DOMAIN`) estimates the frequency
+response function G(e^jω) directly from data, with no assumed model order.
+Two estimators are available:
+
+- `fd_method='correlation'` — classical Blackman-Tukey correlation method
+  (SISO only): correlations are truncated at `max_lag`, lag-windowed
+  (`lag_window`, default `'hamming'`), transformed to spectra, and divided.
+- `fd_method='welch'` — Welch-averaged cross-spectral density matrices with
+  the H1 estimator. Works for SISO and MIMO; correlated inputs are handled
+  correctly by solving the full Wiener-Hopf system per frequency, and the
+  per-output *multiple coherence* is reported.
+
+The default `fd_method='auto'` picks `correlation` for SISO and `welch`
+otherwise. The result is returned in `model.identification_info` (the
+state-space matrices are 1×1 placeholders since the method is
+non-parametric):
+
+```python
+from sippy.identification import SystemIdentification, SystemIdentificationConfig
+
+ident = SystemIdentification(SystemIdentificationConfig(method='FD'))
+model = ident.identify(y=y, u=u)          # u: (m, N), y: (l, N) or 1-D
+
+fr = model.identification_info['frequency_response']
+q = model.identification_info['quality_metrics']
+# SISO correlation estimator: fr['omega'], fr['G_smooth'], fr['coherence'], ...
+# Welch/MIMO estimator: fr['freq_hz'], fr['G'] with shape (F, l, m),
+#                       fr['coherence'] (multiple coherence, shape (F, l))
+print(q['quality_label'], q['mean_coherence'])
+```
+
+Quality is assessed from coherence: values near 1 indicate a reliable
+linear, noise-free relationship at that frequency; use
+`coherence_threshold` (default 0.8) to control the reported
+`fraction_reliable`. Key tuning knobs: `max_lag` (correlation resolution,
+default `max(32, min(N // 10, 512))`), `nperseg` (Welch segment length,
+default `max(64, min(1024, N // 8))`), and `smoothing_window`
+(frequency-smoothing width in bins, default 11).
 
 ### Algorithm Selection
 
