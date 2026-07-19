@@ -175,10 +175,10 @@ def test_common_time_response_methods_use_the_canonical_process_model():
 
 def test_nonparametric_result_has_the_same_methods_with_honest_capabilities():
     model = StateSpaceModel(
-        A=np.empty((0, 0)),
-        B=np.empty((0, 1)),
-        C=np.empty((1, 0)),
-        D=np.zeros((1, 1)),
+        A=None,
+        B=None,
+        C=None,
+        D=None,
         K=np.empty((0, 1)),
         Q=np.empty((0, 0)),
         R=np.eye(1),
@@ -208,6 +208,23 @@ def test_nonparametric_result_has_the_same_methods_with_honest_capabilities():
     assert not model.supports("stability")
     with pytest.raises(NotImplementedError, match="Simulation"):
         model.simulate(np.ones((1, 8)))
+
+
+def test_nonparametric_result_rejects_state_space_matrices():
+    with pytest.raises(ValueError, match="cannot carry state-space matrices"):
+        StateSpaceModel(
+            A=np.empty((0, 0)),
+            B=np.empty((0, 1)),
+            C=np.empty((1, 0)),
+            D=np.zeros((1, 1)),
+            K=None,
+            Q=None,
+            R=None,
+            S=None,
+            ts=1.0,
+            Vn=None,
+            is_parametric=False,
+        )
 
 
 def test_subspace_covariances_are_returned_in_physical_output_units():

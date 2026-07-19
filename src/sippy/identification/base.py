@@ -135,7 +135,7 @@ class IdentificationAlgorithm(ABC):
                 iddata=None,
                 **options,
             )
-            if model.B.shape[1] == 0 and model.G_tf is None:
+            if model.is_parametric and model.B.shape[1] == 0 and model.G_tf is None:
                 result_u = None
             return self.finalize_result(
                 model,
@@ -212,12 +212,14 @@ class IdentificationAlgorithm(ABC):
 class IdentificationResult:
     """Enhanced state-space model container."""
 
+    _STATE_SPACE_ATTRIBUTES = frozenset({"A", "B", "C", "D", "n", "x0", "A_K", "B_K"})
+
     def __init__(
         self,
-        A: np.ndarray,
-        B: np.ndarray,
-        C: np.ndarray,
-        D: np.ndarray,
+        A: Optional[np.ndarray],
+        B: Optional[np.ndarray],
+        C: Optional[np.ndarray],
+        D: Optional[np.ndarray],
         K: Optional[np.ndarray],
         Q: Optional[np.ndarray],
         R: Optional[Union[float, np.ndarray]],
@@ -231,27 +233,27 @@ class IdentificationResult:
         is_parametric: bool = True,
         x0: Optional[np.ndarray] = None,
     ):
-        self.A = A
-        self.B = B
-        self.C = C
-        self.D = D
+        self.is_parametric = bool(is_parametric)
+        if not self.is_parametric:
+            if any(matrix is not None for matrix in (A, B, C, D)) or x0 is not None:
+                raise ValueError(
+                    "A non-parametric identification result cannot carry "
+                    "state-space matrices"
+                )
+
         self.K = K
         self.Q = Q
         self.R = R
         self.S = S
         self.ts = float(ts)
         self.Vn = Vn
-        self.n = A.shape[0]  # State dimension
 
         # Transfer functions and identification metadata
         self.G_tf = G_tf  # Deterministic transfer function G(q) = B/A
         self.H_tf = H_tf  # Noise transfer function H(q) = C/A
         self.Yid = Yid  # One-step-ahead predictions from identification
         self.identification_info = identification_info or {}
-        self.is_parametric = bool(is_parametric)
         self.method = self.identification_info.get("method")
-        self.ninputs = int(self.identification_info.get("n_inputs", B.shape[1]))
-        self.noutputs = int(self.identification_info.get("n_outputs", C.shape[0]))
         self.residual_covariance: Optional[np.ndarray] = None
         self.fit_start = int(self.identification_info.get("fit_start", 0))
         self._identification_input: Optional[np.ndarray] = None
@@ -259,7 +261,22 @@ class IdentificationResult:
         self._residuals: Optional[np.ndarray] = None
         self.capabilities: dict[str, bool] = {}
 
-        if not self.is_parametric or B.size == 0 or B.shape[1] == 0:
+        if not self.is_parametric:
+            self.ninputs = int(self.identification_info.get("n_inputs", 0))
+            self.noutputs = int(self.identification_info.get("n_outputs", 0))
+            self.G = None
+            self._update_capabilities()
+            return
+
+        self.A = A
+        self.B = B
+        self.C = C
+        self.D = D
+        self.n = A.shape[0]  # State dimension
+        self.ninputs = int(self.identification_info.get("n_inputs", B.shape[1]))
+        self.noutputs = int(self.identification_info.get("n_outputs", C.shape[0]))
+
+        if B.size == 0 or B.shape[1] == 0:
             self.G = None
         else:
             self.G = control.ss(A, B, C, D, dt=self.ts)
@@ -279,6 +296,19 @@ class IdentificationResult:
             self.B_K = np.array([])
 
         self._update_capabilities()
+
+    def __getattr__(self, name: str):
+        if name in type(self)._STATE_SPACE_ATTRIBUTES and not self.__dict__.get(
+            "is_parametric", True
+        ):
+            raise AttributeError(
+                f"A non-parametric identification result has no state-space "
+                f"attribute '{name}'; use frequency_response() or the stored "
+                f"identification_info instead"
+            )
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
+        )
 
     @property
     def deterministic_model(self) -> Optional[object]:
@@ -387,12 +417,13 @@ class IdentificationResult:
         if kalman_gain_source is None:
             self.K = None
 
-        if self.K is None:
-            self.A_K = np.array([])
-            self.B_K = np.array([])
-        else:
-            self.A_K = self.A - self.K @ self.C
-            self.B_K = self.B - self.K @ self.D
+        if self.is_parametric:
+            if self.K is None:
+                self.A_K = np.array([])
+                self.B_K = np.array([])
+            else:
+                self.A_K = self.A - self.K @ self.C
+                self.B_K = self.B - self.K @ self.D
 
         if self.Yid is None and self.is_parametric:
             if self.K is not None:

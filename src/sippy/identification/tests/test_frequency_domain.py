@@ -96,10 +96,12 @@ class TestCorrelationEstimator:
 
     def test_returns_nonparametric_model_without_fake_states(self, result):
         assert isinstance(result, StateSpaceModel)
-        assert result.A.shape == (0, 0)
-        assert result.n == 0
-        assert result.G is None
         assert not result.is_parametric
+        assert result.G is None
+        for name in ("A", "B", "C", "D", "n", "x0", "A_K", "B_K"):
+            assert not hasattr(result, name)
+            with pytest.raises(AttributeError, match="non-parametric"):
+                getattr(result, name)
 
     def test_estimator_and_dimensions_recorded(self, result):
         info = result.identification_info
@@ -262,9 +264,9 @@ class TestMIMOIdentification:
         assert info["estimator"] == "welch"
         assert info["n_inputs"] == 2
         assert info["n_outputs"] == 2
-        assert result.B.shape == (0, 2)
-        assert result.C.shape == (2, 0)
-        assert result.D.shape == (2, 2)
+        assert result.ninputs == 2
+        assert result.noutputs == 2
+        assert not hasattr(result, "B")
         assert result.K is None
         assert result.Q is None
         assert result.R is None

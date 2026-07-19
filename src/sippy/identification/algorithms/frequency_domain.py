@@ -176,10 +176,10 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
         results["n_outputs"] = n_outputs
 
         return StateSpaceModel(
-            A=np.empty((0, 0)),
-            B=np.empty((0, n_inputs)),
-            C=np.empty((n_outputs, 0)),
-            D=np.zeros((n_outputs, n_inputs)),
+            A=None,
+            B=None,
+            C=None,
+            D=None,
             K=None,
             Q=None,
             R=None,

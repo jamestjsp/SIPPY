@@ -216,6 +216,12 @@ polynomial, output-only, and nonparametric frequency-domain estimates expose
 the same methods; `model.supports(operation)` states whether a method is
 meaningful for that particular estimate.
 
+Only parametric results carry a state-space realization. On a nonparametric
+frequency-domain result the structural attributes (`A`, `B`, `C`, `D`, `n`,
+`x0`, `A_K`, `B_K`) do not exist — accessing them raises `AttributeError`
+instead of returning placeholder matrices; use `frequency_response()` or fit a
+parametric model with `fit_frf_model` first.
+
 ```python
 # Basic properties
 print(f"States: {model.n}")
