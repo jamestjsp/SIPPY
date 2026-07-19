@@ -5,6 +5,7 @@ from ._backend import (
     discrete_time_response,
     state_frequency_response,
     state_to_transfer,
+    transfer_frequency_response,
     transfer_to_state,
 )
 from ._models import (
@@ -86,20 +87,12 @@ def frequency_response(
     if isinstance(system, StateSpace):
         response = state_frequency_response(system, frequencies)
     elif isinstance(system, TransferFunction):
-        response = np.empty(
-            (system.noutputs, system.ninputs, frequencies.size), dtype=complex
-        )
-        for index, frequency in enumerate(frequencies):
-            if system.dt is None or system.dt == 0:
-                evaluation_point = 1j * frequency
-            else:
-                sample_time = 1.0 if system.dt is True else float(system.dt)
-                evaluation_point = np.exp(1j * frequency * sample_time)
-            for output in range(system.noutputs):
-                for input_ in range(system.ninputs):
-                    response[output, input_, index] = np.polyval(
-                        system.num[output][input_], evaluation_point
-                    ) / np.polyval(system.den[output][input_], evaluation_point)
+        if system.dt is None or system.dt == 0:
+            evaluation_points = 1j * frequencies
+        else:
+            sample_time = 1.0 if system.dt is True else float(system.dt)
+            evaluation_points = np.exp(1j * frequencies * sample_time)
+        response = transfer_frequency_response(system, evaluation_points)
     else:
         raise TypeError("frequency_response expects a SIPPY input/output system")
     return FrequencyResponseData(frequencies.copy(), response)

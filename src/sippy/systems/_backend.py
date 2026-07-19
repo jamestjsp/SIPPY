@@ -150,6 +150,43 @@ def state_frequency_response(system: "StateSpace", omega: np.ndarray) -> np.ndar
     return response
 
 
+def transfer_frequency_response(
+    system: "TransferFunction", evaluation_points: np.ndarray
+) -> np.ndarray:
+    if system.noutputs == 1 and system.ninputs == 1:
+        return (
+            np.polyval(system.num[0][0], evaluation_points)
+            / np.polyval(system.den[0][0], evaluation_points)
+        ).reshape(1, 1, -1)
+
+    numerator_count = max(
+        len(coefficients) for row in system.num for coefficients in row
+    )
+    denominator_count = max(
+        len(coefficients) for row in system.den for coefficients in row
+    )
+    numerators = np.zeros(
+        (numerator_count, system.noutputs, system.ninputs), dtype=float
+    )
+    denominators = np.zeros(
+        (denominator_count, system.noutputs, system.ninputs), dtype=float
+    )
+    for output in range(system.noutputs):
+        for input_ in range(system.ninputs):
+            numerator = system.num[output][input_]
+            denominator = system.den[output][input_]
+            numerators[-len(numerator) :, output, input_] = numerator
+            denominators[-len(denominator) :, output, input_] = denominator
+
+    numerator_values = np.polynomial.polynomial.polyval(
+        evaluation_points, numerators[::-1]
+    )
+    denominator_values = np.polynomial.polynomial.polyval(
+        evaluation_points, denominators[::-1]
+    )
+    return numerator_values / denominator_values
+
+
 def discrete_time_response(
     system: "StateSpace", inputs: np.ndarray, initial_state: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:

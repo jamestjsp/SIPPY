@@ -92,6 +92,48 @@ def test_state_to_transfer_round_trip_preserves_mimo_response():
     )
 
 
+@pytest.mark.parametrize("sample_time", [None, 0.1])
+def test_transfer_frequency_response_vectorizes_unequal_mimo_orders(sample_time):
+    system = tf(
+        [
+            [[0.2, 0.1, 0.05], [0.1]],
+            [[0.3, -0.04], [0.4, 0.2]],
+        ],
+        [
+            [[1.0, -1.2, 0.55, -0.08], [1.0, -0.4]],
+            [[1.0, -0.3, 0.02], [1.0, -0.2, 0.05]],
+        ],
+        dt=sample_time,
+    )
+    frequencies = np.geomspace(0.01, 20.0, 257)
+    response = frequency_response(system, frequencies).frdata
+    evaluation_points = (
+        1j * frequencies
+        if sample_time is None
+        else np.exp(1j * frequencies * sample_time)
+    )
+    expected = np.empty((2, 2, frequencies.size), dtype=complex)
+    for output in range(2):
+        for input_ in range(2):
+            expected[output, input_] = np.polyval(
+                system.num[output][input_], evaluation_points
+            ) / np.polyval(system.den[output][input_], evaluation_points)
+
+    np.testing.assert_allclose(response, expected, rtol=1e-14, atol=1e-14)
+
+
+def test_transfer_frequency_response_preserves_empty_frequency_shape():
+    system = tf(
+        [[[1.0], [2.0]], [[3.0], [4.0]]],
+        [[[1.0, -0.5], [1.0]], [[1.0, -0.2], [1.0, -0.1]]],
+        dt=0.1,
+    )
+
+    response = frequency_response(system, []).frdata
+
+    assert response.shape == (2, 2, 0)
+
+
 def test_state_frequency_response_does_not_mutate_caller_arrays():
     matrices = [
         np.array([[0.75]]),
