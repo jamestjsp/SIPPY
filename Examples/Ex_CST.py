@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from sippy.identification import SystemIdentification, IDData
+from sippy.identification import IDData, SystemIdentification
 from sippy.utils.signal_utils import GBN_seq, white_noise_var
 
 # sampling time
@@ -67,9 +67,7 @@ def Fdyn(X, U):
     # Energy Balance
     # ro*cp*F*T_in - ro*cp*F*T + W*Lam = (V*ro*cp)*dT/dt
     #
-    dx_1 = (ro * cp * U[0] * U[3] - ro * cp * U[0] * X[1] + U[1] * Lam) / (
-        V * ro * cp
-    )
+    dx_1 = (ro * cp * U[0] * U[3] - ro * cp * U[0] * X[1] + U[1] * Lam) / (V * ro * cp)
 
     fx = np.append(dx_0, dx_1)
 
@@ -98,11 +96,15 @@ Range_GBN_2 = [W_min, W_max]
 # Input Concentration Ca_in = U[2]  [kg salt/m^3 solution]
 Ca_0 = 10.0  # initial condition
 sigma_Ca = 0.01  # variation
-U[2, :] = GBN_seq(npts, prob_switch_1, Range=[Ca_0 - 3*sigma_Ca, Ca_0 + 3*sigma_Ca])[0]
+U[2, :] = GBN_seq(
+    npts, prob_switch_1, Range=[Ca_0 - 3 * sigma_Ca, Ca_0 + 3 * sigma_Ca]
+)[0]
 # Input Temperature T_in            [°C]
 Tin_0 = 25.0  # initial condition
 sigma_T = 0.01  # variation
-U[3, :] = GBN_seq(npts, prob_switch_1, Range=[Tin_0 - 3*sigma_T, Tin_0 + 3*sigma_T])[0]
+U[3, :] = GBN_seq(
+    npts, prob_switch_1, Range=[Tin_0 - 3 * sigma_T, Tin_0 + 3 * sigma_T]
+)[0]
 
 
 ##### COLLECT DATA
@@ -152,51 +154,94 @@ theta = [[1, 1, 1, 1], [1, 1, 1, 1]]
 n_iter = 300
 
 # Create IDData object - need to convert from numpy arrays to DataFrame
-time_index = pd.date_range("2023-01-01", periods=npts, freq=f"{int(ts*1000)}ms")
+time_index = pd.date_range("2023-01-01", periods=npts, freq=f"{int(ts * 1000)}ms")
 data_dict = {}
 for i in range(4):
-    data_dict[f"u{i+1}"] = U[i, :]
+    data_dict[f"u{i + 1}"] = U[i, :]
 for i in range(2):
-    data_dict[f"y{i+1}"] = Y[i, :]
+    data_dict[f"y{i + 1}"] = Y[i, :]
 
 data_df = pd.DataFrame(data_dict, index=time_index)
-inputs = [f"u{i+1}" for i in range(4)]
-outputs = [f"y{i+1}" for i in range(2)]
+inputs = [f"u{i + 1}" for i in range(4)]
+outputs = [f"y{i + 1}" for i in range(2)]
 data = IDData(data=data_df, inputs=inputs, outputs=outputs, tsample=ts)
 
 # IN-OUT Models: ARX - ARMAX - OE - BJ - GEN
 
 sys_id_arx = SystemIdentification()
-Id_ARX = sys_id_arx.identify(y=data.get_output_array(), u=data.get_input_array(), 
-                             id_method="ARX", na=na_ords, nb=nb_ords, theta=theta)
+Id_ARX = sys_id_arx.identify(
+    y=data.get_output_array(),
+    u=data.get_input_array(),
+    id_method="ARX",
+    na=na_ords,
+    nb=nb_ords,
+    theta=theta,
+)
 
 sys_id_armax = SystemIdentification()
-Id_ARMAX = sys_id_armax.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                 id_method="ARMAX", na=na_ords, nb=nb_ords, nc=nc_ords, theta=theta,
-                                 max_iterations=n_iter)
+Id_ARMAX = sys_id_armax.identify(
+    y=data.get_output_array(),
+    u=data.get_input_array(),
+    id_method="ARMAX",
+    na=na_ords,
+    nb=nb_ords,
+    nc=nc_ords,
+    theta=theta,
+    max_iterations=n_iter,
+)
 
 sys_id_oe = SystemIdentification()
-Id_OE = sys_id_oe.identify(y=data.get_output_array(), u=data.get_input_array(),
-                           id_method="OE", nb=nb_ords, nf=nf_ords, theta=theta, 
-                           max_iterations=n_iter)
+Id_OE = sys_id_oe.identify(
+    y=data.get_output_array(),
+    u=data.get_input_array(),
+    id_method="OE",
+    nb=nb_ords,
+    nf=nf_ords,
+    theta=theta,
+    max_iterations=n_iter,
+)
 
 sys_id_bj = SystemIdentification()
-Id_BJ = sys_id_bj.identify(y=data.get_output_array(), u=data.get_input_array(),
-                          id_method="BJ", nb=nb_ords, nc=nc_ords, nd=nd_ords, nf=nf_ords, theta=theta,
-                          max_iterations=n_iter, stability_constraint=True)
+Id_BJ = sys_id_bj.identify(
+    y=data.get_output_array(),
+    u=data.get_input_array(),
+    id_method="BJ",
+    nb=nb_ords,
+    nc=nc_ords,
+    nd=nd_ords,
+    nf=nf_ords,
+    theta=theta,
+    max_iterations=n_iter,
+    stability_constraint=True,
+)
 
 sys_id_gen = SystemIdentification()
-Id_GEN = sys_id_gen.identify(y=data.get_output_array(), u=data.get_input_array(),
-                             id_method="GEN", na=na_ords, nb=nb_ords, nc=nc_ords, nd=nd_ords, nf=nf_ords, theta=theta,
-                             max_iterations=n_iter, stability_constraint=True, stability_margin=0.98)
+Id_GEN = sys_id_gen.identify(
+    y=data.get_output_array(),
+    u=data.get_input_array(),
+    id_method="GEN",
+    na=na_ords,
+    nb=nb_ords,
+    nc=nc_ords,
+    nd=nd_ords,
+    nf=nf_ords,
+    theta=theta,
+    max_iterations=n_iter,
+    stability_constraint=True,
+    stability_margin=0.98,
+)
 
 # SS - mimo
 # choose method
 method = "N4SID"
 SS_ord = 2
 sys_id_ss = SystemIdentification()
-Id_SS = sys_id_ss.identify(y=data.get_output_array(), u=data.get_input_array(),
-                          id_method=method, ss_fixed_order=SS_ord)
+Id_SS = sys_id_ss.identify(
+    y=data.get_output_array(),
+    u=data.get_input_array(),
+    id_method=method,
+    ss_fixed_order=SS_ord,
+)
 
 # GETTING RESULTS (Y_id)
 # IN-OUT
@@ -286,11 +331,15 @@ Range_GBN_2 = [W_min, W_max]
 # Input Concentration Ca_in = U[2]  [kg salt/m^3 solution]
 Ca_0 = 10.0  # initial condition
 sigma_Ca = 0.02  # variation
-U_val[2, :] = GBN_seq(npts, prob_switch_1, Range=[Ca_0 - 3*sigma_Ca, Ca_0 + 3*sigma_Ca])[0]
+U_val[2, :] = GBN_seq(
+    npts, prob_switch_1, Range=[Ca_0 - 3 * sigma_Ca, Ca_0 + 3 * sigma_Ca]
+)[0]
 # Input Temperature T_in            [°C]
 Tin_0 = 25.0  # initial condition
 sigma_T = 0.1  # variation
-U_val[3, :] = GBN_seq(npts, prob_switch_1, Range=[Tin_0 - 3*sigma_T, Tin_0 + 3*sigma_T])[0]
+U_val[3, :] = GBN_seq(
+    npts, prob_switch_1, Range=[Tin_0 - 3 * sigma_T, Tin_0 + 3 * sigma_T]
+)[0]
 
 #### COLLECT DATA
 

@@ -5,13 +5,14 @@ Demonstration of the new refactored system identification architecture.
 This script shows how the new class-based architecture with factory pattern
 works compared to the original function-based approach.
 """
+
 import os
 import sys
 
 import numpy as np
 
 # Add the source directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from sippy.identification import (
     SystemIdentification,
@@ -32,9 +33,15 @@ def generate_sample_data():
 
     # Simulate a simple linear system with some dynamics
     for i in range(1, n_points):
-        y[0, i] = 0.7 * y[0, i-1] + 0.3 * u[0, i-1] + 0.2 * u[1, i-1] + 0.05 * np.random.randn()
+        y[0, i] = (
+            0.7 * y[0, i - 1]
+            + 0.3 * u[0, i - 1]
+            + 0.2 * u[1, i - 1]
+            + 0.05 * np.random.randn()
+        )
 
     return y, u
+
 
 def demo_new_class_based_approach():
     """Demonstrate the new class-based approach."""
@@ -47,10 +54,7 @@ def demo_new_class_based_approach():
     # Create a configuration
     print("\n1. Creating custom configuration...")
     config = SystemIdentificationConfig(
-        method='N4SID',
-        ss_f=10,
-        ss_fixed_order=1,
-        ss_threshold=0.1
+        method="N4SID", ss_f=10, ss_fixed_order=1, ss_threshold=0.1
     )
     print(f"Method: {config.method}")
     print(f"Horizon (ss_f): {config.ss_f}")
@@ -77,10 +81,12 @@ def demo_new_class_based_approach():
 
     # Create algorithm directly
     from sippy.identification.factory import create_algorithm
-    n4sid_algo = create_algorithm('N4SID')
+
+    n4sid_algo = create_algorithm("N4SID")
     print(f"Created algorithm: {n4sid_algo.name}")
 
     return model
+
 
 def demo_backward_compatibility():
     """Demonstrate backward compatibility with original API."""
@@ -91,12 +97,7 @@ def demo_backward_compatibility():
 
     print("Using original function signature...")
     model = system_identification(
-        y=y,
-        u=u,
-        id_method='N4SID',
-        tsample=1.0,
-        SS_fixed_order=1,
-        SS_f=10
+        y=y, u=u, id_method="N4SID", tsample=1.0, SS_fixed_order=1, SS_f=10
     )
 
     print("✓ Model identified using old API")
@@ -105,6 +106,7 @@ def demo_backward_compatibility():
 
     return model
 
+
 def demo_different_algorithms():
     """Demonstrate using different algorithms."""
     print("\n\n=== DIFFERENT ALGORITHMS DEMO ===\n")
@@ -112,17 +114,14 @@ def demo_different_algorithms():
     # Generate sample data
     y, u = generate_sample_data()
 
-    algorithms = ['N4SID']  # Start with one for demo
+    algorithms = ["N4SID"]  # Start with one for demo
     models = {}
 
     for method in algorithms:
         print(f"\nTesting {method} algorithm...")
 
         config = SystemIdentificationConfig(
-            method=method,
-            ss_f=10,
-            ss_fixed_order=1,
-            ss_threshold=0.1
+            method=method, ss_f=10, ss_fixed_order=1, ss_threshold=0.1
         )
 
         identifier = SystemIdentification(config)
@@ -132,6 +131,7 @@ def demo_different_algorithms():
         print(f"✓ {method} -> {model.n} states, stable: {model.is_stable()}")
 
     return models
+
 
 def demo_flexible_configuration():
     """Demonstrate flexible configuration options."""
@@ -144,7 +144,10 @@ def demo_flexible_configuration():
     configs = [
         ("Default config", SystemIdentificationConfig()),
         ("Custom horizon", SystemIdentificationConfig(ss_f=15, ss_fixed_order=1)),
-        ("Different method", SystemIdentificationConfig(method='N4SID', ss_f=8, ss_fixed_order=1))
+        (
+            "Different method",
+            SystemIdentificationConfig(method="N4SID", ss_f=8, ss_fixed_order=1),
+        ),
     ]
 
     for name, config in configs:
@@ -155,6 +158,7 @@ def demo_flexible_configuration():
             print(f"✓ Success: {model.n} states")
         except Exception as e:
             print(f"✗ Error: {e}")
+
 
 if __name__ == "__main__":
     print("🚀 SIPPY System Identification - New Architecture Demo")
@@ -180,4 +184,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Error during demo: {e}")
         import traceback
+
         traceback.print_exc()

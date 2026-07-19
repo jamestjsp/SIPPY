@@ -37,9 +37,9 @@ Usim, _, _ = GBN_seq(npts, switch_probability, Range=[-1, 1])
 white_noise_variance = [0.01]
 e_t = white_noise_var(Usim.size, white_noise_variance)[0]
 
-print("="*80)
+print("=" * 80)
 print("GEN (Generalized Model) Identification Example")
-print("="*80)
+print("=" * 80)
 print("\nGEN is the most general input-output model structure:")
 print("A(q) * y(t) = [B(q)/F(q)] * u(t-nk) + [C(q)/D(q)] * e(t)")
 print("\nwhere:")
@@ -49,7 +49,7 @@ print("  F(q) - Input denominator polynomial (order nf)")
 print("  C(q) - Noise numerator polynomial (order nc)")
 print("  D(q) - Noise denominator polynomial (order nd)")
 print("  nk   - Input delay")
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 
 # ============================================================================
 # Example 1: GEN as ARX (na, nb, 0, 0, 0, nk)
@@ -66,9 +66,9 @@ nk_arx = 1
 y_arx = np.zeros(npts)
 for k in range(2, npts):
     y_arx[k] = (
-        -true_a[0] * y_arx[k-1]
-        + true_b[0] * Usim[k-nk_arx]
-        + true_b[1] * Usim[k-nk_arx-1]
+        -true_a[0] * y_arx[k - 1]
+        + true_b[0] * Usim[k - nk_arx]
+        + true_b[1] * Usim[k - nk_arx - 1]
         + e_t[k]
     )
 
@@ -87,11 +87,13 @@ model_arx = sysid.identify(
     nd=0,
     nf=0,
     nk=nk_arx,
-    tsample=sampling_time
+    tsample=sampling_time,
 )
 
 print(f"True A:      {true_a}")
-print(f"Estimated A: {model_arx.A_coeffs[0, :] if model_arx.A_coeffs.shape[1] > 0 else []}")
+print(
+    f"Estimated A: {model_arx.A_coeffs[0, :] if model_arx.A_coeffs.shape[1] > 0 else []}"
+)
 print(f"True B:      {true_b}")
 print(f"Estimated B: {model_arx.B_coeffs[0, :]}")
 print(f"Noise variance (Vn): {model_arx.Vn:.6f}")
@@ -110,11 +112,11 @@ y_armax = np.zeros(npts)
 epsilon = np.zeros(npts)
 for k in range(2, npts):
     y_armax[k] = (
-        -true_a[0] * y_armax[k-1]
-        + true_b[0] * Usim[k-nk_arx]
-        + true_b[1] * Usim[k-nk_arx-1]
+        -true_a[0] * y_armax[k - 1]
+        + true_b[0] * Usim[k - nk_arx]
+        + true_b[1] * Usim[k - nk_arx - 1]
         + e_t[k]
-        + true_c[0] * e_t[k-1]
+        + true_c[0] * e_t[k - 1]
     )
 
 # Identify using GEN with nd=nf=0 (ARMAX structure)
@@ -130,15 +132,19 @@ model_armax = sysid.identify(
     nd=0,
     nf=0,
     nk=nk_arx,
-    tsample=sampling_time
+    tsample=sampling_time,
 )
 
 print(f"True A:      {true_a}")
-print(f"Estimated A: {model_armax.A_coeffs[0, :] if model_armax.A_coeffs.shape[1] > 0 else []}")
+print(
+    f"Estimated A: {model_armax.A_coeffs[0, :] if model_armax.A_coeffs.shape[1] > 0 else []}"
+)
 print(f"True B:      {true_b}")
 print(f"Estimated B: {model_armax.B_coeffs[0, :]}")
 print(f"True C:      {true_c}")
-print(f"Estimated C: {model_armax.C_coeffs[0, :] if model_armax.C_coeffs.shape[1] > 0 else []}")
+print(
+    f"Estimated C: {model_armax.C_coeffs[0, :] if model_armax.C_coeffs.shape[1] > 0 else []}"
+)
 print(f"Noise variance (Vn): {model_armax.Vn:.6f}")
 
 # ============================================================================
@@ -155,9 +161,9 @@ y_oe = np.zeros(npts)
 w = np.zeros(npts)  # Intermediate variable for input path
 for k in range(2, npts):
     w[k] = (
-        -true_f[0] * w[k-1]
-        + true_b[0] * Usim[k-nk_arx]
-        + true_b[1] * Usim[k-nk_arx-1]
+        -true_f[0] * w[k - 1]
+        + true_b[0] * Usim[k - nk_arx]
+        + true_b[1] * Usim[k - nk_arx - 1]
     )
     y_oe[k] = w[k] + e_t[k]
 
@@ -174,13 +180,15 @@ model_oe = sysid.identify(
     nd=0,
     nf=1,
     nk=nk_arx,
-    tsample=sampling_time
+    tsample=sampling_time,
 )
 
 print(f"True B:      {true_b}")
 print(f"Estimated B: {model_oe.B_coeffs[0, :]}")
 print(f"True F:      {true_f}")
-print(f"Estimated F: {model_oe.F_coeffs[0, :] if model_oe.F_coeffs.shape[1] > 0 else []}")
+print(
+    f"Estimated F: {model_oe.F_coeffs[0, :] if model_oe.F_coeffs.shape[1] > 0 else []}"
+)
 print(f"Noise variance (Vn): {model_oe.Vn:.6f}")
 
 # ============================================================================
@@ -199,24 +207,16 @@ v_gen = np.zeros(npts)
 for k in range(3, npts):
     # Input path: B/F * u
     w_gen[k] = (
-        -true_f[0] * w_gen[k-1]
-        + true_b[0] * Usim[k-nk_arx]
-        + true_b[1] * Usim[k-nk_arx-1]
+        -true_f[0] * w_gen[k - 1]
+        + true_b[0] * Usim[k - nk_arx]
+        + true_b[1] * Usim[k - nk_arx - 1]
     )
 
     # Noise path: C/D * e
-    v_gen[k] = (
-        -true_d[0] * v_gen[k-1]
-        + e_t[k]
-        + true_c[0] * e_t[k-1]
-    )
+    v_gen[k] = -true_d[0] * v_gen[k - 1] + e_t[k] + true_c[0] * e_t[k - 1]
 
     # Output: A * y = w + v
-    y_gen[k] = (
-        -true_a[0] * y_gen[k-1]
-        + w_gen[k]
-        + v_gen[k]
-    )
+    y_gen[k] = -true_a[0] * y_gen[k - 1] + w_gen[k] + v_gen[k]
 
 # Identify using full GEN
 y_gen_2d = y_gen.reshape(1, -1)
@@ -232,19 +232,27 @@ model_gen = sysid.identify(
     nf=1,
     nk=nk_arx,
     tsample=sampling_time,
-    max_iterations=300
+    max_iterations=300,
 )
 
 print(f"True A:      {true_a}")
-print(f"Estimated A: {model_gen.A_coeffs[0, :] if model_gen.A_coeffs.shape[1] > 0 else []}")
+print(
+    f"Estimated A: {model_gen.A_coeffs[0, :] if model_gen.A_coeffs.shape[1] > 0 else []}"
+)
 print(f"True B:      {true_b}")
 print(f"Estimated B: {model_gen.B_coeffs[0, :]}")
 print(f"True C:      {true_c}")
-print(f"Estimated C: {model_gen.C_coeffs[0, :] if model_gen.C_coeffs.shape[1] > 0 else []}")
+print(
+    f"Estimated C: {model_gen.C_coeffs[0, :] if model_gen.C_coeffs.shape[1] > 0 else []}"
+)
 print(f"True D:      {true_d}")
-print(f"Estimated D: {model_gen.D_coeffs[0, :] if model_gen.D_coeffs.shape[1] > 0 else []}")
+print(
+    f"Estimated D: {model_gen.D_coeffs[0, :] if model_gen.D_coeffs.shape[1] > 0 else []}"
+)
 print(f"True F:      {true_f}")
-print(f"Estimated F: {model_gen.F_coeffs[0, :] if model_gen.F_coeffs.shape[1] > 0 else []}")
+print(
+    f"Estimated F: {model_gen.F_coeffs[0, :] if model_gen.F_coeffs.shape[1] > 0 else []}"
+)
 print(f"Noise variance (Vn): {model_gen.Vn:.6f}")
 
 # ============================================================================
@@ -256,47 +264,51 @@ fig, axes = plt.subplots(4, 1, figsize=(12, 10))
 fig.suptitle("GEN Identification Examples", fontsize=16)
 
 # Plot 1: Input signal
-axes[0].plot(Time, Usim, 'b-', linewidth=0.8)
-axes[0].set_ylabel('Input u(t)')
-axes[0].set_title('Input Signal (GBN)')
+axes[0].plot(Time, Usim, "b-", linewidth=0.8)
+axes[0].set_ylabel("Input u(t)")
+axes[0].set_title("Input Signal (GBN)")
 axes[0].grid(True)
 
 # Plot 2: GEN as ARX
-axes[1].plot(Time, y_arx, 'b-', label='True ARX', linewidth=1.0, alpha=0.7)
-axes[1].plot(Time, model_arx.Yid[0, :], 'r--', label='GEN (ARX)', linewidth=1.0)
-axes[1].set_ylabel('Output y(t)')
-axes[1].set_title('Example 1: GEN as ARX')
+axes[1].plot(Time, y_arx, "b-", label="True ARX", linewidth=1.0, alpha=0.7)
+axes[1].plot(Time, model_arx.Yid[0, :], "r--", label="GEN (ARX)", linewidth=1.0)
+axes[1].set_ylabel("Output y(t)")
+axes[1].set_title("Example 1: GEN as ARX")
 axes[1].legend()
 axes[1].grid(True)
 
 # Plot 3: GEN as ARMAX
-axes[2].plot(Time, y_armax, 'b-', label='True ARMAX', linewidth=1.0, alpha=0.7)
-axes[2].plot(Time, model_armax.Yid[0, :], 'g--', label='GEN (ARMAX)', linewidth=1.0)
-axes[2].set_ylabel('Output y(t)')
-axes[2].set_title('Example 2: GEN as ARMAX')
+axes[2].plot(Time, y_armax, "b-", label="True ARMAX", linewidth=1.0, alpha=0.7)
+axes[2].plot(Time, model_armax.Yid[0, :], "g--", label="GEN (ARMAX)", linewidth=1.0)
+axes[2].set_ylabel("Output y(t)")
+axes[2].set_title("Example 2: GEN as ARMAX")
 axes[2].legend()
 axes[2].grid(True)
 
 # Plot 4: Full GEN
-axes[3].plot(Time, y_gen, 'b-', label='True GEN', linewidth=1.0, alpha=0.7)
-axes[3].plot(Time, model_gen.Yid[0, :], 'm--', label='GEN (Full)', linewidth=1.0)
-axes[3].set_ylabel('Output y(t)')
-axes[3].set_xlabel('Time [s]')
-axes[3].set_title('Example 4: Full GEN Structure')
+axes[3].plot(Time, y_gen, "b-", label="True GEN", linewidth=1.0, alpha=0.7)
+axes[3].plot(Time, model_gen.Yid[0, :], "m--", label="GEN (Full)", linewidth=1.0)
+axes[3].set_ylabel("Output y(t)")
+axes[3].set_xlabel("Time [s]")
+axes[3].set_title("Example 4: Full GEN Structure")
 axes[3].legend()
 axes[3].grid(True)
 
 plt.tight_layout()
 plt.show()
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("GEN Example Complete")
-print("="*80)
+print("=" * 80)
 print("\nKey Observations:")
 print("1. GEN can reproduce ARX behavior when nc=nd=nf=0")
 print("2. GEN can reproduce ARMAX behavior when nd=nf=0")
 print("3. GEN can reproduce OE behavior when na=nc=nd=0")
 print("4. Full GEN structure handles complex dynamics with all polynomials")
-print("\nGEN is the most flexible but also the most challenging identification algorithm.")
-print("Consider using specialized methods (ARX, ARMAX, OE, BJ) when possible for better")
+print(
+    "\nGEN is the most flexible but also the most challenging identification algorithm."
+)
+print(
+    "Consider using specialized methods (ARX, ARMAX, OE, BJ) when possible for better"
+)
 print("numerical stability and parameter identifiability.")

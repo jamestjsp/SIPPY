@@ -10,14 +10,16 @@ Using method='N4SID','MOESP' or 'CVA', if the message
 that the package slycot is not well-installed.
 
 """
+
 # Checking path to access other files
 try:
-    from sippy.identification import SystemIdentification, IDData
+    from sippy.identification import IDData, SystemIdentification
 except ImportError:
     import os
     import sys
-    sys.path.append(os.path.join(os.path.dirname(os.getcwd()), 'src'))
-    from sippy.identification import SystemIdentification, IDData
+
+    sys.path.append(os.path.join(os.path.dirname(os.getcwd()), "src"))
+    from sippy.identification import IDData, SystemIdentification
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -37,6 +39,7 @@ class fset:
     def white_noise_var(*args, **kwargs):
         return white_noise_var(*args, **kwargs)
 
+
 class fsetSIM:
     @staticmethod
     def SS_lsim_process_form(*args, **kwargs):
@@ -49,9 +52,9 @@ class fsetSIM:
 ts = 1.0
 
 # SISO SS system (n = 2)
-A = np.array([[0.89, 0.], [0., 0.45]])
+A = np.array([[0.89, 0.0], [0.0, 0.45]])
 B = np.array([[0.3], [2.5]])
-C = np.array([[0.7, 1.]])
+C = np.array([[0.7, 1.0]])
 D = np.array([[0.0]])
 
 tfin = 500
@@ -60,7 +63,7 @@ Time = np.linspace(0, tfin, npts)
 
 # Input sequence
 U = np.zeros((1, npts))
-[U[0],_,_] = fset.GBN_seq(npts, 0.05)
+[U[0], _, _] = fset.GBN_seq(npts, 0.05)
 
 ##Output
 x, yout = fsetSIM.SS_lsim_process_form(A, B, C, D, U)
@@ -88,19 +91,19 @@ plt.title("Ytot")
 
 ##System identification using new API
 # Create IDData object
-time_index = pd.date_range("2023-01-01", periods=npts, freq=f"{int(ts*1000)}ms")
+time_index = pd.date_range("2023-01-01", periods=npts, freq=f"{int(ts * 1000)}ms")
 data_df = pd.DataFrame({"u": U[0], "y": y_tot[0]}, index=time_index)
 data = IDData(data=data_df, inputs=["u"], outputs=["y"], tsample=ts)
 
-METHOD = ['N4SID', 'CVA', 'MOESP']
+METHOD = ["N4SID", "CVA", "MOESP"]
 # Define distinct line styles for each method to avoid overlap confusion
 line_styles = [
-    {'linestyle': '--', 'linewidth': 2, 'alpha': 0.8},  # N4SID: dashed
-    {'linestyle': '-.', 'linewidth': 2, 'alpha': 0.8},  # CVA: dash-dot
-    {'linestyle': ':', 'linewidth': 3, 'alpha': 0.8},   # MOESP: dotted, thicker
+    {"linestyle": "--", "linewidth": 2, "alpha": 0.8},  # N4SID: dashed
+    {"linestyle": "-.", "linewidth": 2, "alpha": 0.8},  # CVA: dash-dot
+    {"linestyle": ":", "linewidth": 3, "alpha": 0.8},  # MOESP: dotted, thicker
 ]
 
-lege = ['System']
+lege = ["System"]
 for i in range(len(METHOD)):
     method = METHOD[i]
     try:
@@ -118,10 +121,11 @@ for i in range(len(METHOD)):
         # Plot with distinct line style
         plt.plot(Time, yid[0], label=method, **line_styles[i])
         lege.append(method)
-        print(f"  ✓ Plotted successfully")
+        print("  ✓ Plotted successfully")
     except Exception as e:
         print(f"Method {method} failed: {e}")
         import traceback
+
         traceback.print_exc()
         lege.append(f"{method} (failed)")
 

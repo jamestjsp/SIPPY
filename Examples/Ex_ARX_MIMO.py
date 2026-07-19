@@ -6,17 +6,20 @@ case 3 outputs x 4 inputs
 
 """
 
+import warnings
+
 import control.matlab as cnt
 import matplotlib.pyplot as plt
 import numpy as np
-import warnings
+import pandas as pd
 
-from sippy.identification import SystemIdentification, IDData
-from sippy.identification.algorithms.arx import ARXAlgorithm
+from sippy.identification import IDData, SystemIdentification
 from sippy.utils.signal_utils import GBN_seq, white_noise_var
 
 # Suppress the harmless control library warning about return_x
-warnings.filterwarnings(action='ignore', message='return_x specified for a transfer function system')
+warnings.filterwarnings(
+    action="ignore", message="return_x specified for a transfer function system"
+)
 
 # 4*3 MIMO system
 # generating transfer functions in z-operator
@@ -154,28 +157,38 @@ theta_list = [
 # IDENTIFICATION STAGE using new API
 
 # Create IDData object - need to convert from numpy arrays to DataFrame
-import pandas as pd
-time_index = pd.date_range("2023-01-01", periods=npts, freq=f"{int(ts*1000)}ms")
+time_index = pd.date_range("2023-01-01", periods=npts, freq=f"{int(ts * 1000)}ms")
 data_dict = {}
 for i in range(4):
-    data_dict[f"u{i+1}"] = Usim[i, :]
+    data_dict[f"u{i + 1}"] = Usim[i, :]
 for i in range(3):
-    data_dict[f"y{i+1}"] = Ytot[i, :]
+    data_dict[f"y{i + 1}"] = Ytot[i, :]
 
 data_df = pd.DataFrame(data_dict, index=time_index)
-inputs = [f"u{i+1}" for i in range(4)]
-outputs = [f"y{i+1}" for i in range(3)]
+inputs = [f"u{i + 1}" for i in range(4)]
+outputs = [f"y{i + 1}" for i in range(3)]
 data = IDData(data=data_df, inputs=inputs, outputs=outputs, tsample=ts)
 
 # ARX
 sys_id_arx = SystemIdentification()
-Id_ARX = sys_id_arx.identify(y=data.get_output_array(), u=data.get_input_array(), 
-                              id_method="ARX", na=[na1, na2, na3], nb=ordersnb, theta=theta_list)
+Id_ARX = sys_id_arx.identify(
+    y=data.get_output_array(),
+    u=data.get_input_array(),
+    id_method="ARX",
+    na=[na1, na2, na3],
+    nb=ordersnb,
+    theta=theta_list,
+)
 
 # FIR
 sys_id_fir = SystemIdentification()
-Id_FIR = sys_id_fir.identify(y=data.get_output_array(), u=data.get_input_array(), 
-                             id_method="FIR", nb=ordersnb, theta=theta_list)
+Id_FIR = sys_id_fir.identify(
+    y=data.get_output_array(),
+    u=data.get_input_array(),
+    id_method="FIR",
+    nb=ordersnb,
+    theta=theta_list,
+)
 
 # output of the identified model
 _, Yout_ARX = Id_ARX.simulate(Usim)  # simulate returns (x, y), we want y

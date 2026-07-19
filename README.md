@@ -33,9 +33,12 @@ SIPPY requires Python 3.13 or newer and uses
 uv sync
 ```
 
-Harold supplies transfer-function and state-space representations. CasADi and
-IPOPT support nonlinear polynomial-model estimation. NumPy, SciPy, Pandas, and
-Numba provide the numerical runtime.
+[python-control](https://python-control.readthedocs.io/) supplies transfer-
+function, state-space, analysis, and simulation APIs. Slycot is required for
+robust SISO and MIMO transfer-function realization; precompiled Slycot wheels
+are available from PyPI, so `uv sync` installs it without a local Fortran build
+on supported platforms. CasADi and IPOPT support nonlinear polynomial-model
+estimation. NumPy, SciPy, Pandas, and Numba provide the numerical runtime.
 
 ## Quick start
 

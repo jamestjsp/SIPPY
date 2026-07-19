@@ -213,27 +213,27 @@ def arx_test_data():
 # ============================================================================
 
 
-def compute_matrix_error(A_harold, A_master, name="Matrix"):
+def compute_matrix_error(A_control, A_master, name="Matrix"):
     """
     Compute comprehensive error metrics between two matrices.
 
     Returns:
         dict: Contains max_abs_error, max_rel_error, frobenius_norm, correlation
     """
-    if A_harold is None or A_master is None:
+    if A_control is None or A_master is None:
         return None
 
     # Ensure both are numpy arrays
-    A_harold = np.asarray(A_harold)
+    A_control = np.asarray(A_control)
     A_master = np.asarray(A_master)
 
     # Check shape compatibility
-    if A_harold.shape != A_master.shape:
-        warnings.warn(f"{name} shape mismatch: {A_harold.shape} vs {A_master.shape}")
+    if A_control.shape != A_master.shape:
+        warnings.warn(f"{name} shape mismatch: {A_control.shape} vs {A_master.shape}")
         return None
 
     # Compute errors
-    diff = A_harold - A_master
+    diff = A_control - A_master
     max_abs_error = np.max(np.abs(diff))
 
     # Relative error (avoid division by zero)
@@ -248,14 +248,14 @@ def compute_matrix_error(A_harold, A_master, name="Matrix"):
     frobenius_norm = np.linalg.norm(diff, ord="fro")
 
     # Correlation (flatten matrices)
-    A_harold_flat = A_harold.flatten()
+    A_control_flat = A_control.flatten()
     A_master_flat = A_master.flatten()
 
-    if len(A_harold_flat) > 1:
-        correlation = np.corrcoef(A_harold_flat, A_master_flat)[0, 1]
+    if len(A_control_flat) > 1:
+        correlation = np.corrcoef(A_control_flat, A_master_flat)[0, 1]
     else:
         correlation = (
-            1.0 if np.abs(A_harold_flat[0] - A_master_flat[0]) < 1e-10 else 0.0
+            1.0 if np.abs(A_control_flat[0] - A_master_flat[0]) < 1e-10 else 0.0
         )
 
     return {
@@ -266,23 +266,23 @@ def compute_matrix_error(A_harold, A_master, name="Matrix"):
     }
 
 
-def compute_simulation_fit(y_harold, y_master):
+def compute_simulation_fit(y_control, y_master):
     """
     Compute fit percentage between two simulation outputs.
 
-    Fit% = 100 * (1 - ||y_harold - y_master|| / ||y_master - mean(y_master)||)
+    Fit% = 100 * (1 - ||y_control - y_master|| / ||y_master - mean(y_master)||)
     """
-    if y_harold is None or y_master is None:
+    if y_control is None or y_master is None:
         return None
 
-    y_harold = np.asarray(y_harold)
+    y_control = np.asarray(y_control)
     y_master = np.asarray(y_master)
 
-    if y_harold.shape != y_master.shape:
+    if y_control.shape != y_master.shape:
         return None
 
     # Compute fit percentage
-    numerator = np.linalg.norm(y_harold - y_master)
+    numerator = np.linalg.norm(y_control - y_master)
     denominator = np.linalg.norm(y_master - np.mean(y_master))
 
     if denominator < 1e-12:
@@ -362,7 +362,7 @@ class TestSubspaceMethodsComparison:
         config.ss_fixed_order = 2
         config.ss_f = 10
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -370,11 +370,11 @@ class TestSubspaceMethodsComparison:
         )
 
         # Extract state-space matrices
-        A_harold, B_harold, C_harold, D_harold = (
-            model_harold.A,
-            model_harold.B,
-            model_harold.C,
-            model_harold.D,
+        A_control, B_control, C_control, D_control = (
+            model_control.A,
+            model_control.B,
+            model_control.C,
+            model_control.D,
         )
         # Master branch returns SS_model object with .A, .B, .C, .D attributes
         A_master, B_master, C_master, D_master = (
@@ -386,10 +386,10 @@ class TestSubspaceMethodsComparison:
 
         # Compute error metrics
         metrics = {
-            "A matrix": compute_matrix_error(A_harold, A_master, "A"),
-            "B matrix": compute_matrix_error(B_harold, B_master, "B"),
-            "C matrix": compute_matrix_error(C_harold, C_master, "C"),
-            "D matrix": compute_matrix_error(D_harold, D_master, "D"),
+            "A matrix": compute_matrix_error(A_control, A_master, "A"),
+            "B matrix": compute_matrix_error(B_control, B_master, "B"),
+            "C matrix": compute_matrix_error(C_control, C_master, "C"),
+            "D matrix": compute_matrix_error(D_control, D_master, "D"),
         }
 
         # Print report
@@ -415,7 +415,7 @@ class TestSubspaceMethodsComparison:
         config.ss_fixed_order = 2
         config.ss_f = 15
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -424,10 +424,10 @@ class TestSubspaceMethodsComparison:
 
         # Compute error metrics
         metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, model_master.A, "A"),
-            "B matrix": compute_matrix_error(model_harold.B, model_master.B, "B"),
-            "C matrix": compute_matrix_error(model_harold.C, model_master.C, "C"),
-            "D matrix": compute_matrix_error(model_harold.D, model_master.D, "D"),
+            "A matrix": compute_matrix_error(model_control.A, model_master.A, "A"),
+            "B matrix": compute_matrix_error(model_control.B, model_master.B, "B"),
+            "C matrix": compute_matrix_error(model_control.C, model_master.C, "C"),
+            "D matrix": compute_matrix_error(model_control.D, model_master.D, "D"),
         }
 
         # Print report
@@ -452,7 +452,7 @@ class TestSubspaceMethodsComparison:
         config.ss_fixed_order = 2
         config.ss_f = 10
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -461,10 +461,10 @@ class TestSubspaceMethodsComparison:
 
         # Compute error metrics
         metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, model_master.A, "A"),
-            "B matrix": compute_matrix_error(model_harold.B, model_master.B, "B"),
-            "C matrix": compute_matrix_error(model_harold.C, model_master.C, "C"),
-            "D matrix": compute_matrix_error(model_harold.D, model_master.D, "D"),
+            "A matrix": compute_matrix_error(model_control.A, model_master.A, "A"),
+            "B matrix": compute_matrix_error(model_control.B, model_master.B, "B"),
+            "C matrix": compute_matrix_error(model_control.C, model_master.C, "C"),
+            "D matrix": compute_matrix_error(model_control.D, model_master.D, "D"),
         }
 
         # Print report
@@ -489,7 +489,7 @@ class TestSubspaceMethodsComparison:
         config.ss_fixed_order = 2
         config.ss_f = 10
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -498,10 +498,10 @@ class TestSubspaceMethodsComparison:
 
         # Compute error metrics
         metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, model_master.A, "A"),
-            "B matrix": compute_matrix_error(model_harold.B, model_master.B, "B"),
-            "C matrix": compute_matrix_error(model_harold.C, model_master.C, "C"),
-            "D matrix": compute_matrix_error(model_harold.D, model_master.D, "D"),
+            "A matrix": compute_matrix_error(model_control.A, model_master.A, "A"),
+            "B matrix": compute_matrix_error(model_control.B, model_master.B, "B"),
+            "C matrix": compute_matrix_error(model_control.C, model_master.C, "C"),
+            "D matrix": compute_matrix_error(model_control.D, model_master.D, "D"),
         }
 
         # Print report
@@ -543,7 +543,7 @@ class TestInputOutputMethodsComparison:
         config.nb = 1
         config.nk = 1
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification (no theta_noise parameter)
         model_master = master_sysid(
@@ -562,32 +562,32 @@ class TestInputOutputMethodsComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from harold (if available)
-            if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0][0]
-                harold_den = model_harold.G_tf.den[0][0]
+            # Extract transfer function from control (if available)
+            if model_control.G_tf is not None:
+                control_num = model_control.G_tf.num[0][0]
+                control_den = model_control.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
-                harold_num_stripped = np.trim_zeros(harold_num, "fb")
+                control_num_stripped = np.trim_zeros(control_num, "fb")
                 master_den_stripped = np.trim_zeros(master_den, "fb")
-                harold_den_stripped = np.trim_zeros(harold_den, "fb")
+                control_den_stripped = np.trim_zeros(control_den, "fb")
 
                 # Normalize by leading denominator coefficient
                 master_num_norm = master_num_stripped / master_den_stripped[0]
                 master_den_norm = master_den_stripped / master_den_stripped[0]
-                harold_num_norm = harold_num_stripped / harold_den_stripped[0]
-                harold_den_norm = harold_den_stripped / harold_den_stripped[0]
+                control_num_norm = control_num_stripped / control_den_stripped[0]
+                control_den_norm = control_den_stripped / control_den_stripped[0]
 
                 # Compare coefficients
-                num_error = np.max(np.abs(harold_num_norm - master_num_norm))
-                den_error = np.max(np.abs(harold_den_norm - master_den_norm))
+                num_error = np.max(np.abs(control_num_norm - master_num_norm))
+                den_error = np.max(np.abs(control_den_norm - master_den_norm))
 
                 print("\nTransfer Function Comparison:")
                 print(f"Master numerator:  {master_num_stripped}")
-                print(f"Harold numerator:  {harold_num_stripped}")
+                print(f"python-control numerator:  {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"Harold denominator: {harold_den_stripped}")
+                print(f"python-control denominator: {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -597,7 +597,7 @@ class TestInputOutputMethodsComparison:
 
                 print("\nARX (SISO): PASS - Transfer functions match")
             else:
-                pytest.skip("Harold G_tf not available for comparison")
+                pytest.skip("python-control G_tf not available for comparison")
 
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
@@ -613,7 +613,7 @@ class TestInputOutputMethodsComparison:
         config.nb = 5
         config.nk = 1
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification (FIR is ARX with na=0)
         model_master = master_sysid(
@@ -626,15 +626,15 @@ class TestInputOutputMethodsComparison:
             tsample=data["ts"],
         )
 
-        assert model_harold.G_tf is not None
+        assert model_control.G_tf is not None
         np.testing.assert_allclose(
-            np.trim_zeros(model_harold.G_tf.num[0][0], "fb"),
+            np.trim_zeros(model_control.G_tf.num[0][0], "fb"),
             np.trim_zeros(model_master.G.num[0][0], "fb"),
             rtol=1e-10,
             atol=1e-12,
         )
         np.testing.assert_allclose(
-            np.trim_zeros(model_harold.G_tf.den[0][0], "fb"),
+            np.trim_zeros(model_control.G_tf.den[0][0], "fb"),
             np.trim_zeros(model_master.G.den[0][0], "fb"),
             rtol=1e-10,
             atol=1e-12,
@@ -653,7 +653,7 @@ class TestInputOutputMethodsComparison:
         config.nc = 1
         config.nk = 0
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -671,32 +671,32 @@ class TestInputOutputMethodsComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from harold (if available)
-            if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0][0]
-                harold_den = model_harold.G_tf.den[0][0]
+            # Extract transfer function from control (if available)
+            if model_control.G_tf is not None:
+                control_num = model_control.G_tf.num[0][0]
+                control_den = model_control.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
-                harold_num_stripped = np.trim_zeros(harold_num, "fb")
+                control_num_stripped = np.trim_zeros(control_num, "fb")
                 master_den_stripped = np.trim_zeros(master_den, "fb")
-                harold_den_stripped = np.trim_zeros(harold_den, "fb")
+                control_den_stripped = np.trim_zeros(control_den, "fb")
 
                 # Normalize by leading denominator coefficient
                 master_num_norm = master_num_stripped / master_den_stripped[0]
                 master_den_norm = master_den_stripped / master_den_stripped[0]
-                harold_num_norm = harold_num_stripped / harold_den_stripped[0]
-                harold_den_norm = harold_den_stripped / harold_den_stripped[0]
+                control_num_norm = control_num_stripped / control_den_stripped[0]
+                control_den_norm = control_den_stripped / control_den_stripped[0]
 
                 # Compare coefficients
-                num_error = np.max(np.abs(harold_num_norm - master_num_norm))
-                den_error = np.max(np.abs(harold_den_norm - master_den_norm))
+                num_error = np.max(np.abs(control_num_norm - master_num_norm))
+                den_error = np.max(np.abs(control_den_norm - master_den_norm))
 
                 print("\nTransfer Function Comparison:")
                 print(f"Master numerator:  {master_num_stripped}")
-                print(f"Harold numerator:  {harold_num_stripped}")
+                print(f"python-control numerator:  {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"Harold denominator: {harold_den_stripped}")
+                print(f"python-control denominator: {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -725,7 +725,7 @@ class TestInputOutputMethodsComparison:
                         f"num_error={num_error:.2e}, den_error={den_error:.2e}"
                     )
             else:
-                pytest.skip("Harold G_tf not available for comparison")
+                pytest.skip("python-control G_tf not available for comparison")
 
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
@@ -752,7 +752,7 @@ class TestConditionalMethodsComparison:
         Test ARARX on SISO system with basic orders (na=1, nb=1, nd=1).
 
         ARARX model: A(q) y(k) = B(q)/D(q) * u(k-theta) + e(k)
-        Harold uses 10-iteration auxiliary variable method.
+        python-control uses 10-iteration auxiliary variable method.
         Master uses optimization-based approach.
 
         Acceptable tolerance: 1e-4 relative error (iterative vs optimization)
@@ -768,7 +768,7 @@ class TestConditionalMethodsComparison:
         config.nd = 1
         config.theta = 1
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         # ARARX_orders format: [na, nb, nd, theta]
@@ -805,11 +805,11 @@ class TestConditionalMethodsComparison:
             pytest.skip(f"Could not extract state-space from master: {e}")
 
         validation_input = np.random.default_rng(810).standard_normal((1, 500))
-        _, output_harold = model_harold.simulate(validation_input)
+        _, output_control = model_control.simulate(validation_input)
         _, output_master = simulate_ss_system(
             A_master, B_master, C_master, D_master, validation_input
         )
-        response_error = np.linalg.norm(output_harold - output_master) / np.linalg.norm(
+        response_error = np.linalg.norm(output_control - output_master) / np.linalg.norm(
             output_master
         )
 
@@ -833,7 +833,7 @@ class TestConditionalMethodsComparison:
         config.nd = 2
         config.theta = 1
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -861,11 +861,11 @@ class TestConditionalMethodsComparison:
             pytest.skip(f"Could not extract state-space from master: {e}")
 
         validation_input = np.random.default_rng(811).standard_normal((1, 500))
-        _, output_harold = model_harold.simulate(validation_input)
+        _, output_control = model_control.simulate(validation_input)
         _, output_master = simulate_ss_system(
             A_master, B_master, C_master, D_master, validation_input
         )
-        response_error = np.linalg.norm(output_harold - output_master) / np.linalg.norm(
+        response_error = np.linalg.norm(output_control - output_master) / np.linalg.norm(
             output_master
         )
 
@@ -889,7 +889,7 @@ class TestConditionalMethodsComparison:
         config.nd = 1
         config.theta = 1
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -906,45 +906,45 @@ class TestConditionalMethodsComparison:
         master_G = model_master.G
 
         # Compare transfer functions if available
-        if model_harold.G_tf is not None and master_G is not None:
+        if model_control.G_tf is not None and master_G is not None:
             try:
                 # Extract transfer function coefficients
                 master_num = master_G.num[0][0]  # SISO numerator
                 master_den = master_G.den[0][0]  # SISO denominator
 
-                harold_num = model_harold.G_tf.num[0][0]
-                harold_den = model_harold.G_tf.den[0][0]
+                control_num = model_control.G_tf.num[0][0]
+                control_den = model_control.G_tf.den[0][0]
 
                 # Normalize and compare
                 master_num_stripped = np.trim_zeros(master_num, "fb")
-                harold_num_stripped = np.trim_zeros(harold_num, "fb")
+                control_num_stripped = np.trim_zeros(control_num, "fb")
                 master_den_stripped = np.trim_zeros(master_den, "fb")
-                harold_den_stripped = np.trim_zeros(harold_den, "fb")
+                control_den_stripped = np.trim_zeros(control_den, "fb")
 
                 # Normalize by leading denominator coefficient
                 master_num_norm = master_num_stripped / master_den_stripped[0]
                 master_den_norm = master_den_stripped / master_den_stripped[0]
-                harold_num_norm = harold_num_stripped / harold_den_stripped[0]
-                harold_den_norm = harold_den_stripped / harold_den_stripped[0]
+                control_num_norm = control_num_stripped / control_den_stripped[0]
+                control_den_norm = control_den_stripped / control_den_stripped[0]
 
                 print("\nARARX Transfer Function Comparison:")
                 print(f"Master numerator:   {master_num_stripped}")
-                print(f"Harold numerator:   {harold_num_stripped}")
+                print(f"python-control numerator:   {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"Harold denominator: {harold_den_stripped}")
+                print(f"python-control denominator: {control_den_stripped}")
 
                 # Compute errors (handle different lengths)
-                min_num_len = min(len(harold_num_norm), len(master_num_norm))
-                min_den_len = min(len(harold_den_norm), len(master_den_norm))
+                min_num_len = min(len(control_num_norm), len(master_num_norm))
+                min_den_len = min(len(control_den_norm), len(master_den_norm))
 
                 num_error = np.max(
                     np.abs(
-                        harold_num_norm[:min_num_len] - master_num_norm[:min_num_len]
+                        control_num_norm[:min_num_len] - master_num_norm[:min_num_len]
                     )
                 )
                 den_error = np.max(
                     np.abs(
-                        harold_den_norm[:min_den_len] - master_den_norm[:min_den_len]
+                        control_den_norm[:min_den_len] - master_den_norm[:min_den_len]
                     )
                 )
 
@@ -998,7 +998,7 @@ class TestConditionalMethodsComparison:
         config.nc = 1
         identifier = SystemIdentification(config)
 
-        model_harold = identifier.identify(y=data["y"], u=None)
+        model_control = identifier.identify(y=data["y"], u=None)
 
         # Master branch identification
         # ARMA_orders format: [na, nc, theta]
@@ -1014,13 +1014,13 @@ class TestConditionalMethodsComparison:
         )
 
         np.testing.assert_allclose(
-            model_harold.H_tf.num[0][0],
+            model_control.H_tf.num[0][0],
             model_master.H.num[0][0],
             rtol=1e-7,
             atol=1e-9,
         )
         np.testing.assert_allclose(
-            model_harold.H_tf.den[0][0],
+            model_control.H_tf.den[0][0],
             model_master.H.den[0][0],
             rtol=1e-7,
             atol=1e-9,
@@ -1043,7 +1043,7 @@ class TestConditionalMethodsComparison:
         config.nc = 2
         identifier = SystemIdentification(config)
 
-        model_harold = identifier.identify(y=data["y"], u=None)
+        model_control = identifier.identify(y=data["y"], u=None)
 
         # Master branch identification
         model_master = master_sysid(
@@ -1055,13 +1055,13 @@ class TestConditionalMethodsComparison:
         )
 
         np.testing.assert_allclose(
-            model_harold.H_tf.num[0][0],
+            model_control.H_tf.num[0][0],
             model_master.H.num[0][0],
             rtol=1e-7,
             atol=1e-8,
         )
         np.testing.assert_allclose(
-            model_harold.H_tf.den[0][0],
+            model_control.H_tf.den[0][0],
             model_master.H.den[0][0],
             rtol=1e-7,
             atol=1e-8,
@@ -1079,7 +1079,7 @@ class TestConditionalMethodsComparison:
         config.nc = 1
         identifier = SystemIdentification(config)
 
-        model_harold = identifier.identify(y=data["y"], u=None)
+        model_control = identifier.identify(y=data["y"], u=None)
 
         # Master branch identification
         model_master = master_sysid(
@@ -1091,7 +1091,7 @@ class TestConditionalMethodsComparison:
         )
 
         np.testing.assert_allclose(
-            model_harold.Yid, model_master.Yid, rtol=1e-10, atol=1e-12
+            model_control.Yid, model_master.Yid, rtol=1e-10, atol=1e-12
         )
 
 
@@ -1117,7 +1117,7 @@ class TestFormerKnownFailuresComparison:
         # master OE_orders theta=1 corresponds to nk=2 (first B coeff at u[k-2])
         config.nk = 2
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -1134,32 +1134,32 @@ class TestFormerKnownFailuresComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from harold (if available)
-            if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0][0]
-                harold_den = model_harold.G_tf.den[0][0]
+            # Extract transfer function from control (if available)
+            if model_control.G_tf is not None:
+                control_num = model_control.G_tf.num[0][0]
+                control_den = model_control.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
-                harold_num_stripped = np.trim_zeros(harold_num, "fb")
+                control_num_stripped = np.trim_zeros(control_num, "fb")
                 master_den_stripped = np.trim_zeros(master_den, "fb")
-                harold_den_stripped = np.trim_zeros(harold_den, "fb")
+                control_den_stripped = np.trim_zeros(control_den, "fb")
 
                 # Normalize by leading denominator coefficient
                 master_num_norm = master_num_stripped / master_den_stripped[0]
                 master_den_norm = master_den_stripped / master_den_stripped[0]
-                harold_num_norm = harold_num_stripped / harold_den_stripped[0]
-                harold_den_norm = harold_den_stripped / harold_den_stripped[0]
+                control_num_norm = control_num_stripped / control_den_stripped[0]
+                control_den_norm = control_den_stripped / control_den_stripped[0]
 
                 # Compare coefficients
-                num_error = np.max(np.abs(harold_num_norm - master_num_norm))
-                den_error = np.max(np.abs(harold_den_norm - master_den_norm))
+                num_error = np.max(np.abs(control_num_norm - master_num_norm))
+                den_error = np.max(np.abs(control_den_norm - master_den_norm))
 
                 print("\nOE Transfer Function Comparison:")
                 print(f"Master numerator:  {master_num_stripped}")
-                print(f"Harold numerator:  {harold_num_stripped}")
+                print(f"python-control numerator:  {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"Harold denominator: {harold_den_stripped}")
+                print(f"python-control denominator: {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -1173,7 +1173,7 @@ class TestFormerKnownFailuresComparison:
                     }
                 }
             else:
-                pytest.skip("Harold G_tf not available for comparison")
+                pytest.skip("python-control G_tf not available for comparison")
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
@@ -1195,7 +1195,7 @@ class TestFormerKnownFailuresComparison:
         # master BJ_orders theta=1 corresponds to nk=2 (first B coeff at u[k-2])
         config.nk = 2
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -1212,32 +1212,32 @@ class TestFormerKnownFailuresComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from harold (if available)
-            if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0][0]
-                harold_den = model_harold.G_tf.den[0][0]
+            # Extract transfer function from control (if available)
+            if model_control.G_tf is not None:
+                control_num = model_control.G_tf.num[0][0]
+                control_den = model_control.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
-                harold_num_stripped = np.trim_zeros(harold_num, "fb")
+                control_num_stripped = np.trim_zeros(control_num, "fb")
                 master_den_stripped = np.trim_zeros(master_den, "fb")
-                harold_den_stripped = np.trim_zeros(harold_den, "fb")
+                control_den_stripped = np.trim_zeros(control_den, "fb")
 
                 # Normalize by leading denominator coefficient
                 master_num_norm = master_num_stripped / master_den_stripped[0]
                 master_den_norm = master_den_stripped / master_den_stripped[0]
-                harold_num_norm = harold_num_stripped / harold_den_stripped[0]
-                harold_den_norm = harold_den_stripped / harold_den_stripped[0]
+                control_num_norm = control_num_stripped / control_den_stripped[0]
+                control_den_norm = control_den_stripped / control_den_stripped[0]
 
                 # Compare coefficients
-                num_error = np.max(np.abs(harold_num_norm - master_num_norm))
-                den_error = np.max(np.abs(harold_den_norm - master_den_norm))
+                num_error = np.max(np.abs(control_num_norm - master_num_norm))
+                den_error = np.max(np.abs(control_den_norm - master_den_norm))
 
                 print("\nBJ Transfer Function Comparison:")
                 print(f"Master numerator:  {master_num_stripped}")
-                print(f"Harold numerator:  {harold_num_stripped}")
+                print(f"python-control numerator:  {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"Harold denominator: {harold_den_stripped}")
+                print(f"python-control denominator: {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -1251,7 +1251,7 @@ class TestFormerKnownFailuresComparison:
                     }
                 }
             else:
-                pytest.skip("Harold G_tf not available for comparison")
+                pytest.skip("python-control G_tf not available for comparison")
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
@@ -1272,7 +1272,7 @@ class TestFormerKnownFailuresComparison:
         # master ARARMAX_orders theta=1 corresponds to nk=2 (first B coeff at u[k-2])
         config.nk = 2
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -1290,32 +1290,32 @@ class TestFormerKnownFailuresComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from harold (if available)
-            if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0][0]
-                harold_den = model_harold.G_tf.den[0][0]
+            # Extract transfer function from control (if available)
+            if model_control.G_tf is not None:
+                control_num = model_control.G_tf.num[0][0]
+                control_den = model_control.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
-                harold_num_stripped = np.trim_zeros(harold_num, "fb")
+                control_num_stripped = np.trim_zeros(control_num, "fb")
                 master_den_stripped = np.trim_zeros(master_den, "fb")
-                harold_den_stripped = np.trim_zeros(harold_den, "fb")
+                control_den_stripped = np.trim_zeros(control_den, "fb")
 
                 # Normalize by leading denominator coefficient
                 master_num_norm = master_num_stripped / master_den_stripped[0]
                 master_den_norm = master_den_stripped / master_den_stripped[0]
-                harold_num_norm = harold_num_stripped / harold_den_stripped[0]
-                harold_den_norm = harold_den_stripped / harold_den_stripped[0]
+                control_num_norm = control_num_stripped / control_den_stripped[0]
+                control_den_norm = control_den_stripped / control_den_stripped[0]
 
                 # Compare coefficients
-                num_error = np.max(np.abs(harold_num_norm - master_num_norm))
-                den_error = np.max(np.abs(harold_den_norm - master_den_norm))
+                num_error = np.max(np.abs(control_num_norm - master_num_norm))
+                den_error = np.max(np.abs(control_den_norm - master_den_norm))
 
                 print("\nARARMAX Transfer Function Comparison:")
                 print(f"Master numerator:    {master_num_stripped}")
-                print(f"Harold numerator:    {harold_num_stripped}")
+                print(f"python-control numerator:    {control_num_stripped}")
                 print(f"Master denominator:  {master_den_stripped}")
-                print(f"Harold denominator:  {harold_den_stripped}")
+                print(f"python-control denominator:  {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -1329,7 +1329,7 @@ class TestFormerKnownFailuresComparison:
                     }
                 }
             else:
-                pytest.skip("Harold G_tf not available for comparison")
+                pytest.skip("python-control G_tf not available for comparison")
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
@@ -1371,9 +1371,9 @@ class TestPARSIMComparison:
         identifier = SystemIdentification(config)
 
         try:
-            model_harold = identifier.identify(y=data["y"], u=data["u"])
+            model_control = identifier.identify(y=data["y"], u=data["u"])
         except Exception as e:
-            pytest.skip(f"PARSIM-K harold failed: {e}")
+            pytest.skip(f"PARSIM-K control failed: {e}")
 
         # Master branch identification
         try:
@@ -1390,9 +1390,9 @@ class TestPARSIMComparison:
 
         # Compute error metrics - master returns SS_PARSIM_model object
         metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, model_master.A, "A"),
-            "B matrix": compute_matrix_error(model_harold.B, model_master.B, "B"),
-            "C matrix": compute_matrix_error(model_harold.C, model_master.C, "C"),
+            "A matrix": compute_matrix_error(model_control.A, model_master.A, "A"),
+            "B matrix": compute_matrix_error(model_control.B, model_master.B, "B"),
+            "C matrix": compute_matrix_error(model_control.C, model_master.C, "C"),
         }
 
         # Print report with relaxed tolerance
@@ -1413,7 +1413,7 @@ class TestPARSIMComparison:
         config.ss_fixed_order = 2
         config.ss_f = 10
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -1427,9 +1427,9 @@ class TestPARSIMComparison:
 
         # Compute error metrics - master returns SS_PARSIM_model object
         metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, model_master.A, "A"),
-            "B matrix": compute_matrix_error(model_harold.B, model_master.B, "B"),
-            "C matrix": compute_matrix_error(model_harold.C, model_master.C, "C"),
+            "A matrix": compute_matrix_error(model_control.A, model_master.A, "A"),
+            "B matrix": compute_matrix_error(model_control.B, model_master.B, "B"),
+            "C matrix": compute_matrix_error(model_control.C, model_master.C, "C"),
         }
 
         # Print report
@@ -1453,7 +1453,7 @@ class TestPARSIMComparison:
         config.ss_fixed_order = 2
         config.ss_f = 10
         identifier = SystemIdentification(config)
-        model_harold = identifier.identify(y=data["y"], u=data["u"])
+        model_control = identifier.identify(y=data["y"], u=data["u"])
 
         # Master branch identification
         model_master = master_sysid(
@@ -1467,9 +1467,9 @@ class TestPARSIMComparison:
 
         # Compute error metrics - master returns SS_PARSIM_model object
         metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, model_master.A, "A"),
-            "B matrix": compute_matrix_error(model_harold.B, model_master.B, "B"),
-            "C matrix": compute_matrix_error(model_harold.C, model_master.C, "C"),
+            "A matrix": compute_matrix_error(model_control.A, model_master.A, "A"),
+            "B matrix": compute_matrix_error(model_control.B, model_master.B, "B"),
+            "C matrix": compute_matrix_error(model_control.C, model_master.C, "C"),
         }
 
         # Print report

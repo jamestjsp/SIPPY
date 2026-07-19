@@ -59,7 +59,7 @@ def colored_noise_scenario():
 @pytest.mark.parametrize(
     "method,orders", POLYNOMIAL_METHODS, ids=lambda value: str(value)
 )
-def test_polynomial_method_predicts_held_out_harold_simulation(
+def test_polynomial_method_predicts_held_out_control_simulation(
     method, orders, colored_noise_scenario
 ):
     scenario = colored_noise_scenario
@@ -77,7 +77,7 @@ def test_polynomial_method_predicts_held_out_harold_simulation(
     assert np.all(error < 0.35), f"{method} held-out NRMSE: {error}"
 
 
-def test_armax_predicts_correlated_input_mimo_harold_simulation():
+def test_armax_predicts_correlated_input_mimo_control_simulation():
     scenario = simulate_scenario(
         stable_mimo_plant(direct_feedthrough=False),
         n_train=1400,
@@ -124,7 +124,7 @@ def correlated_mimo_scenario():
 @pytest.mark.parametrize(
     "method,orders", MIMO_POLYNOMIAL_METHODS, ids=lambda value: str(value)
 )
-def test_polynomial_method_predicts_correlated_input_mimo_harold_simulation(
+def test_polynomial_method_predicts_correlated_input_mimo_control_simulation(
     method, orders, correlated_mimo_scenario
 ):
     scenario = correlated_mimo_scenario

@@ -21,7 +21,7 @@ from .simulation_scenarios import (
     ],
     ids=["siso", "mimo"],
 )
-def test_arx_predicts_held_out_harold_simulation(plant, orders, tolerance, seed):
+def test_arx_predicts_held_out_control_simulation(plant, orders, tolerance, seed):
     scenario = simulate_scenario(
         plant,
         n_train=1400,
@@ -44,7 +44,7 @@ def test_arx_predicts_held_out_harold_simulation(plant, orders, tolerance, seed)
     assert np.all(error < tolerance), f"ARX held-out NRMSE: {error}"
 
 
-def test_fir_predicts_long_delay_harold_simulation():
+def test_fir_predicts_long_delay_control_simulation():
     delay = 16
     scenario = simulate_scenario(
         delayed_siso_plant(delay),
@@ -68,7 +68,7 @@ def test_fir_predicts_long_delay_harold_simulation():
     assert np.all(error < 0.08), f"FIR long-delay held-out NRMSE: {error}"
 
 
-def test_fir_predicts_correlated_input_mimo_harold_simulation():
+def test_fir_predicts_correlated_input_mimo_control_simulation():
     scenario = simulate_scenario(
         stable_mimo_plant(),
         n_train=1800,

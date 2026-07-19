@@ -48,9 +48,9 @@ time in returned models.
 - Preserve numerical accuracy and cover regressions with behavioral assertions.
 - Test applicable SISO and MIMO cases, delays, low and high SNR, correlated
   inputs, colored noise, and unstable dynamics.
-- Use Harold for transfer functions, state-space models, and simulation. Pass
-  discrete sample time as `dt=...`; Harold state matrices use lowercase
-  attributes.
+- Use python-control for transfer functions, state-space models, and simulation.
+  Pass discrete sample time as `dt=...`; control state matrices use uppercase
+  attributes. Slycot is required for transfer-function realization.
 - Put algorithm implementations in `identification/algorithms/` and register
   them in `algorithms/__init__.py`.
 - Reuse `compiled_utils.py` only when it preserves correctness and robustness.

@@ -3,20 +3,20 @@
 @author: Giuseppe Armenise, revised by RBdC
 """
 
+import warnings
+
 import control.matlab as cnt
 import matplotlib.pyplot as plt
 import numpy as np
-import warnings
-
-from sippy.identification import SystemIdentification, IDData
 import pandas as pd
 
-# Suppress the harmless control library warning about return_x
-warnings.filterwarnings(action='ignore', message='return_x specified for a transfer function system')
+from sippy.identification import IDData, SystemIdentification
 from sippy.utils.signal_utils import GBN_seq, white_noise_var
 
 # Suppress the harmless control library warning about return_x
-warnings.filterwarnings(action='ignore', message='return_x specified for a transfer function system')
+warnings.filterwarnings(
+    action="ignore", message="return_x specified for a transfer function system"
+)
 
 ## TEST RECURSIVE IDENTIFICATION METHODS
 
@@ -131,8 +131,9 @@ plt.grid()
 mode = "FIXED"
 
 # Create IDData object - need to convert from numpy arrays to DataFrame
-import pandas as pd
-time_index = pd.date_range("2023-01-01", periods=npts, freq=f"{int(sampling_time*1000)}ms")
+time_index = pd.date_range(
+    "2023-01-01", periods=npts, freq=f"{int(sampling_time * 1000)}ms"
+)
 data_dict = {}
 data_dict["u"] = Usim
 data_dict["y"] = Ytot
@@ -147,23 +148,37 @@ if mode == "IC":
 
     sys_id_armax = SystemIdentification()
     Id_ARMAX = sys_id_armax.identify(
-        y=data.get_output_array(), u=data.get_input_array(), 
-        id_method="ARMAX", na=[4], nb=[3], nc=[2], theta=[11],
-        max_iterations=300, ARMAX_mod="RLLS"
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARMAX",
+        na=[4],
+        nb=[3],
+        nc=[2],
+        theta=[11],
+        max_iterations=300,
+        ARMAX_mod="RLLS",
     )
 
     sys_id_arx = SystemIdentification()
     Id_ARX = sys_id_arx.identify(
-        y=data.get_output_array(), u=data.get_input_array(),
-        id_method="ARX", na=[4], nb=[3], theta=[11],
-        max_iterations=300
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARX",
+        na=[4],
+        nb=[3],
+        theta=[11],
+        max_iterations=300,
     )
 
     sys_id_oe = SystemIdentification()
     Id_OE = sys_id_oe.identify(
-        y=data.get_output_array(), u=data.get_input_array(),
-        id_method="OE", nb=[3], nf=[4], theta=[11],
-        max_iterations=300
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="OE",
+        nb=[3],
+        nf=[4],
+        theta=[11],
+        max_iterations=300,
     )
 
 
@@ -178,27 +193,55 @@ elif mode == "FIXED":
 
     sys_id_armax = SystemIdentification()
     Id_ARMAX = sys_id_armax.identify(
-        y=data.get_output_array(), u=data.get_input_array(), 
-        id_method="ARMAX", na=na_ord, nb=nb_ord, nc=nc_ord, theta=theta,
-        max_iterations=300, ARMAX_mod="RLLS"
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARMAX",
+        na=na_ord,
+        nb=nb_ord,
+        nc=nc_ord,
+        theta=theta,
+        max_iterations=300,
+        ARMAX_mod="RLLS",
     )
 
     sys_id_arx = SystemIdentification()
     Id_ARX = sys_id_arx.identify(
-        y=data.get_output_array(), u=data.get_input_array(),
-        id_method="ARX", na=na_ord, nb=nb_ord, theta=theta, max_iterations=300
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARX",
+        na=na_ord,
+        nb=nb_ord,
+        theta=theta,
+        max_iterations=300,
     )
 
     sys_id_oe = SystemIdentification()
     Id_OE = sys_id_oe.identify(
-        y=data.get_output_array(), u=data.get_input_array(),
-        id_method="OE", nb=nb_ord, nf=nf_ord, theta=theta, max_iterations=300
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="OE",
+        nb=nb_ord,
+        nf=nf_ord,
+        theta=theta,
+        max_iterations=300,
     )
 
 # Use one-step-ahead predictions (Yid) for identification data
-Y_armax = Id_ARMAX.Yid.squeeze() if Id_ARMAX.Yid is not None else Id_ARMAX.simulate(Usim.reshape(1, -1))[1].squeeze()
-Y_arx = Id_ARX.Yid.squeeze() if Id_ARX.Yid is not None else Id_ARX.simulate(Usim.reshape(1, -1))[1].squeeze()
-Y_oe = Id_OE.Yid.squeeze() if Id_OE.Yid is not None else Id_OE.simulate(Usim.reshape(1, -1))[1].squeeze()
+Y_armax = (
+    Id_ARMAX.Yid.squeeze()
+    if Id_ARMAX.Yid is not None
+    else Id_ARMAX.simulate(Usim.reshape(1, -1))[1].squeeze()
+)
+Y_arx = (
+    Id_ARX.Yid.squeeze()
+    if Id_ARX.Yid is not None
+    else Id_ARX.simulate(Usim.reshape(1, -1))[1].squeeze()
+)
+Y_oe = (
+    Id_OE.Yid.squeeze()
+    if Id_OE.Yid is not None
+    else Id_OE.simulate(Usim.reshape(1, -1))[1].squeeze()
+)
 
 
 # ## Check consistency of the identified system
@@ -277,9 +320,7 @@ plt.show(block=False)
 
 # rmse = np.round(np.sqrt(np.mean((Ytotvalid - Yv_armaxi.T) ** 2)), 2)
 EV = 100 * (
-    np.round(
-        (1.0 - np.mean((Ytotvalid - Yv_armax) ** 2) / np.std(Ytotvalid)), 2
-    )
+    np.round((1.0 - np.mean((Ytotvalid - Yv_armax) ** 2) / np.std(Ytotvalid)), 2)
 )
 # plt.title("Validation: | RMSE ARMAX_i = {}".format(rmse))
 plt.title(f"Validation: | Explained Variance ARMAX = {EV}%")
@@ -291,25 +332,41 @@ plt.figure(7)
 
 # Get frequency responses for G(z) - deterministic transfer function
 mag, fi, om = cnt.frequency_response(g_sample, w_v)
-mag1, fi1, om = cnt.frequency_response(Id_ARMAX.G_tf, w_v) if Id_ARMAX.G_tf else cnt.freqresp(cnt.ss(Id_ARMAX.A, Id_ARMAX.B, Id_ARMAX.C, Id_ARMAX.D, sampling_time), w_v)
-mag2, fi2, om = cnt.frequency_response(Id_ARX.G_tf, w_v) if Id_ARX.G_tf else cnt.freqresp(cnt.ss(Id_ARX.A, Id_ARX.B, Id_ARX.C, Id_ARX.D, sampling_time), w_v)
-mag3, fi3, om = cnt.frequency_response(Id_OE.G_tf, w_v) if Id_OE.G_tf else cnt.freqresp(cnt.ss(Id_OE.A, Id_OE.B, Id_OE.C, Id_OE.D, sampling_time), w_v)
+mag1, fi1, om = (
+    cnt.frequency_response(Id_ARMAX.G_tf, w_v)
+    if Id_ARMAX.G_tf
+    else cnt.freqresp(
+        cnt.ss(Id_ARMAX.A, Id_ARMAX.B, Id_ARMAX.C, Id_ARMAX.D, sampling_time), w_v
+    )
+)
+mag2, fi2, om = (
+    cnt.frequency_response(Id_ARX.G_tf, w_v)
+    if Id_ARX.G_tf
+    else cnt.freqresp(
+        cnt.ss(Id_ARX.A, Id_ARX.B, Id_ARX.C, Id_ARX.D, sampling_time), w_v
+    )
+)
+mag3, fi3, om = (
+    cnt.frequency_response(Id_OE.G_tf, w_v)
+    if Id_OE.G_tf
+    else cnt.freqresp(cnt.ss(Id_OE.A, Id_OE.B, Id_OE.C, Id_OE.D, sampling_time), w_v)
+)
 
 plt.subplot(2, 1, 1)
 plt.loglog(om, mag)
 plt.grid()
-plt.loglog(om, mag1.squeeze() if hasattr(mag1, 'squeeze') else mag1)
-plt.loglog(om, mag2.squeeze() if hasattr(mag2, 'squeeze') else mag2)
-plt.loglog(om, mag3.squeeze() if hasattr(mag3, 'squeeze') else mag3)
+plt.loglog(om, mag1.squeeze() if hasattr(mag1, "squeeze") else mag1)
+plt.loglog(om, mag2.squeeze() if hasattr(mag2, "squeeze") else mag2)
+plt.loglog(om, mag3.squeeze() if hasattr(mag3, "squeeze") else mag3)
 plt.xlabel("w")
 plt.ylabel("Amplitude Ratio")
 plt.title("Bode Plot G(iw)")
 plt.subplot(2, 1, 2)
 plt.semilogx(om, fi)
 plt.grid()
-plt.semilogx(om, fi1.squeeze() if hasattr(fi1, 'squeeze') else fi1)
-plt.semilogx(om, fi2.squeeze() if hasattr(fi2, 'squeeze') else fi2)
-plt.semilogx(om, fi3.squeeze() if hasattr(fi3, 'squeeze') else fi3)
+plt.semilogx(om, fi1.squeeze() if hasattr(fi1, "squeeze") else fi1)
+plt.semilogx(om, fi2.squeeze() if hasattr(fi2, "squeeze") else fi2)
+plt.semilogx(om, fi3.squeeze() if hasattr(fi3, "squeeze") else fi3)
 plt.xlabel("w")
 plt.ylabel("phase")
 plt.legend(["System", "ARMAX", "ARX", "OE"])
@@ -317,25 +374,41 @@ plt.legend(["System", "ARMAX", "ARX", "OE"])
 plt.figure(8)
 # Get frequency responses for H(z) - noise transfer function
 mag, fi, om = cnt.frequency_response(h_sample, w_v)
-mag1, fi1, om = cnt.frequency_response(Id_ARMAX.H_tf, w_v) if Id_ARMAX.H_tf else cnt.freqresp(cnt.ss(Id_ARMAX.A, Id_ARMAX.B, Id_ARMAX.C, Id_ARMAX.D, sampling_time), w_v)
-mag2, fi2, om = cnt.frequency_response(Id_ARX.H_tf, w_v) if Id_ARX.H_tf else cnt.freqresp(cnt.ss(Id_ARX.A, Id_ARX.B, Id_ARX.C, Id_ARX.D, sampling_time), w_v)
-mag3, fi3, om = cnt.frequency_response(Id_OE.H_tf, w_v) if Id_OE.H_tf else cnt.freqresp(cnt.ss(Id_OE.A, Id_OE.B, Id_OE.C, Id_OE.D, sampling_time), w_v)
+mag1, fi1, om = (
+    cnt.frequency_response(Id_ARMAX.H_tf, w_v)
+    if Id_ARMAX.H_tf
+    else cnt.freqresp(
+        cnt.ss(Id_ARMAX.A, Id_ARMAX.B, Id_ARMAX.C, Id_ARMAX.D, sampling_time), w_v
+    )
+)
+mag2, fi2, om = (
+    cnt.frequency_response(Id_ARX.H_tf, w_v)
+    if Id_ARX.H_tf
+    else cnt.freqresp(
+        cnt.ss(Id_ARX.A, Id_ARX.B, Id_ARX.C, Id_ARX.D, sampling_time), w_v
+    )
+)
+mag3, fi3, om = (
+    cnt.frequency_response(Id_OE.H_tf, w_v)
+    if Id_OE.H_tf
+    else cnt.freqresp(cnt.ss(Id_OE.A, Id_OE.B, Id_OE.C, Id_OE.D, sampling_time), w_v)
+)
 
 plt.subplot(2, 1, 1)
 plt.loglog(om, mag)
 plt.grid()
-plt.loglog(om, mag1.squeeze() if hasattr(mag1, 'squeeze') else mag1)
-plt.loglog(om, mag2.squeeze() if hasattr(mag2, 'squeeze') else mag2)
-plt.loglog(om, mag3.squeeze() if hasattr(mag3, 'squeeze') else mag3)
+plt.loglog(om, mag1.squeeze() if hasattr(mag1, "squeeze") else mag1)
+plt.loglog(om, mag2.squeeze() if hasattr(mag2, "squeeze") else mag2)
+plt.loglog(om, mag3.squeeze() if hasattr(mag3, "squeeze") else mag3)
 plt.xlabel("w")
 plt.ylabel("Amplitude Ratio")
 plt.title("Bode Plot H(iw)")
 plt.subplot(2, 1, 2)
 plt.semilogx(om, fi)
 plt.grid()
-plt.semilogx(om, fi1.squeeze() if hasattr(fi1, 'squeeze') else fi1)
-plt.semilogx(om, fi2.squeeze() if hasattr(fi2, 'squeeze') else fi2)
-plt.semilogx(om, fi3.squeeze() if hasattr(fi3, 'squeeze') else fi3)
+plt.semilogx(om, fi1.squeeze() if hasattr(fi1, "squeeze") else fi1)
+plt.semilogx(om, fi2.squeeze() if hasattr(fi2, "squeeze") else fi2)
+plt.semilogx(om, fi3.squeeze() if hasattr(fi3, "squeeze") else fi3)
 plt.xlabel("w")
 plt.ylabel("phase")
 plt.legend(["System", "ARMAX", "ARX", "OE"])
@@ -349,9 +422,21 @@ step_input = np.ones((1, len(Time)))
 yg1, _, _ = cnt.lsim(g_sample, step_input[0, :], Time)
 
 # Identified models step responses using G_tf
-yg2, _, _ = cnt.lsim(Id_ARMAX.G_tf, step_input[0, :], Time) if Id_ARMAX.G_tf else (Id_ARMAX.simulate(step_input)[1].squeeze(), None, None)
-yg3, _, _ = cnt.lsim(Id_ARX.G_tf, step_input[0, :], Time) if Id_ARX.G_tf else (Id_ARX.simulate(step_input)[1].squeeze(), None, None)
-yg4, _, _ = cnt.lsim(Id_OE.G_tf, step_input[0, :], Time) if Id_OE.G_tf else (Id_OE.simulate(step_input)[1].squeeze(), None, None)
+yg2, _, _ = (
+    cnt.lsim(Id_ARMAX.G_tf, step_input[0, :], Time)
+    if Id_ARMAX.G_tf
+    else (Id_ARMAX.simulate(step_input)[1].squeeze(), None, None)
+)
+yg3, _, _ = (
+    cnt.lsim(Id_ARX.G_tf, step_input[0, :], Time)
+    if Id_ARX.G_tf
+    else (Id_ARX.simulate(step_input)[1].squeeze(), None, None)
+)
+yg4, _, _ = (
+    cnt.lsim(Id_OE.G_tf, step_input[0, :], Time)
+    if Id_OE.G_tf
+    else (Id_OE.simulate(step_input)[1].squeeze(), None, None)
+)
 
 plt.plot(Time, yg1)
 plt.plot(Time, yg2)
@@ -369,9 +454,17 @@ plt.figure(10)
 yh1, _, _ = cnt.lsim(h_sample, step_input[0, :], Time)
 
 # Identified models step responses using H_tf (now available!)
-yh2, _, _ = cnt.lsim(Id_ARMAX.H_tf, step_input[0, :], Time) if Id_ARMAX.H_tf else (yg2, None, None)
-yh3, _, _ = cnt.lsim(Id_ARX.H_tf, step_input[0, :], Time) if Id_ARX.H_tf else (yg3, None, None)
-yh4, _, _ = cnt.lsim(Id_OE.H_tf, step_input[0, :], Time) if Id_OE.H_tf else (yg4, None, None)
+yh2, _, _ = (
+    cnt.lsim(Id_ARMAX.H_tf, step_input[0, :], Time)
+    if Id_ARMAX.H_tf
+    else (yg2, None, None)
+)
+yh3, _, _ = (
+    cnt.lsim(Id_ARX.H_tf, step_input[0, :], Time) if Id_ARX.H_tf else (yg3, None, None)
+)
+yh4, _, _ = (
+    cnt.lsim(Id_OE.H_tf, step_input[0, :], Time) if Id_OE.H_tf else (yg4, None, None)
+)
 
 plt.plot(Time, yh1)
 plt.plot(Time, yh2)

@@ -4,6 +4,7 @@ Demonstration of PARSIM algorithms in the new SIPPY architecture.
 This example shows how to use the three PARSIM algorithms (PARSIM-K, PARSIM-S, PARSIM-P)
 with the modern object-oriented identification interface.
 """
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -58,11 +59,11 @@ def test_parsim_algorithms():
     config = SystemIdentificationConfig(
         ss_threshold=0.05,
         ss_fixed_order=2,  # We know it's a 2nd order system
-        ss_d_required=True
+        ss_d_required=True,
     )
 
     # List of algorithms to test
-    algorithms = ['PARSIM-K', 'PARSIM-S', 'PARSIM-P']
+    algorithms = ["PARSIM-K", "PARSIM-S", "PARSIM-P"]
     results = {}
 
     print("\nTesting PARSIM algorithms...")
@@ -77,7 +78,7 @@ def test_parsim_algorithms():
                 method=algo_name,
                 ss_threshold=config.ss_threshold,
                 ss_fixed_order=config.ss_fixed_order,
-                ss_d_required=config.ss_d_required
+                ss_d_required=config.ss_d_required,
             )
 
             # Perform identification
@@ -115,55 +116,70 @@ def compare_algorithms(results, y, u, true_system):
             continue
 
         # Compare system order
-        print(f"{algo_name:12s}: Order={model.n:2d}, Vn={model.Vn:.4f}, Stable={'Y' if model.is_stable() else 'N'}")
+        print(
+            f"{algo_name:12s}: Order={model.n:2d}, Vn={model.Vn:.4f}, Stable={'Y' if model.is_stable() else 'N'}"
+        )
 
     # Plot comparisons if matplotlib is available
     try:
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-        fig.suptitle('PARSIM Algorithm Comparison', fontsize=16)
+        fig.suptitle("PARSIM Algorithm Comparison", fontsize=16)
 
         # Plot input signals
-        axes[0, 0].plot(u[0, :], label='Input 1')
-        axes[0, 0].plot(u[1, :], label='Input 2')
-        axes[0, 0].set_title('Input Signals')
-        axes[0, 0].set_xlabel('Time step')
-        axes[0, 0].set_ylabel('Amplitude')
+        axes[0, 0].plot(u[0, :], label="Input 1")
+        axes[0, 0].plot(u[1, :], label="Input 2")
+        axes[0, 0].set_title("Input Signals")
+        axes[0, 0].set_xlabel("Time step")
+        axes[0, 0].set_ylabel("Amplitude")
         axes[0, 0].legend()
         axes[0, 0].grid(True)
 
         # Plot output signal
-        axes[0, 1].plot(y[0, :], 'b-', label='Actual Output', linewidth=2)
-        axes[0, 1].set_title('Output Signal')
-        axes[0, 1].set_xlabel('Time step')
-        axes[0, 1].set_ylabel('Output')
+        axes[0, 1].plot(y[0, :], "b-", label="Actual Output", linewidth=2)
+        axes[0, 1].set_title("Output Signal")
+        axes[0, 1].set_xlabel("Time step")
+        axes[0, 1].set_ylabel("Output")
         axes[0, 1].legend()
         axes[0, 1].grid(True)
 
         # Compare models if we have successful results
-        successful_algos = [(name, model) for name, model in results.items() if model is not None]
+        successful_algos = [
+            (name, model) for name, model in results.items() if model is not None
+        ]
 
         if successful_algos:
             # Plot noise variance comparison
             algo_names = [name for name, _ in successful_algos]
             vn_values = [model.Vn for _, model in successful_algos]
 
-            bars = axes[1, 0].bar(algo_names, vn_values, color=['red', 'blue', 'green'][:len(algo_names)])
-            axes[1, 0].set_title('Noise Variance Comparison')
-            axes[1, 0].set_ylabel('Vn')
-            axes[1, 0].tick_params(axis='x', rotation=45)
+            bars = axes[1, 0].bar(
+                algo_names, vn_values, color=["red", "blue", "green"][: len(algo_names)]
+            )
+            axes[1, 0].set_title("Noise Variance Comparison")
+            axes[1, 0].set_ylabel("Vn")
+            axes[1, 0].tick_params(axis="x", rotation=45)
 
             # Add value labels on bars
             for bar, vn in zip(bars, vn_values):
                 height = bar.get_height()
-                axes[1, 0].text(bar.get_x() + bar.get_width()/2., height,
-                               f'{vn:.3f}', ha='center', va='bottom')
+                axes[1, 0].text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height,
+                    f"{vn:.3f}",
+                    ha="center",
+                    va="bottom",
+                )
 
             # System order comparison
             orders = [model.n for _, model in successful_algos]
-            axes[1, 1].bar(algo_names, orders, color=['orange', 'purple', 'cyan'][:len(algo_names)])
-            axes[1, 1].set_title('Identified Order')
-            axes[1, 1].set_ylabel('System Order')
-            axes[1, 1].tick_params(axis='x', rotation=45)
+            axes[1, 1].bar(
+                algo_names,
+                orders,
+                color=["orange", "purple", "cyan"][: len(algo_names)],
+            )
+            axes[1, 1].set_title("Identified Order")
+            axes[1, 1].set_ylabel("System Order")
+            axes[1, 1].tick_params(axis="x", rotation=45)
 
         plt.tight_layout()
         plt.show()
@@ -189,12 +205,14 @@ def main():
 
         # Show available algorithms
         from sippy.identification.factory import AlgorithmFactory
+
         available_algos = AlgorithmFactory.list_algorithms()
         print(f"\nAvailable algorithms: {available_algos}")
 
     except Exception as e:
         print(f"\nDemonstration failed with error: {str(e)}")
         import traceback
+
         traceback.print_exc()
 
 

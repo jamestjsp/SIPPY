@@ -6,8 +6,9 @@
 import control.matlab as cnt
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
-from sippy.identification import SystemIdentification, IDData
+from sippy.identification import IDData, SystemIdentification
 from sippy.utils.signal_utils import GBN_seq, white_noise_var
 
 ## TEST OPTIMIZATION-BASED IDENTIFICATION METHODS for GENERAL INPUT-OUTPUT MODEL
@@ -113,8 +114,9 @@ plt.grid()
 mode = "FIXED"
 
 # Create IDData object
-import pandas as pd
-time_index = pd.date_range("2023-01-01", periods=npts, freq=f"{int(sampling_time*1000)}ms")
+time_index = pd.date_range(
+    "2023-01-01", periods=npts, freq=f"{int(sampling_time * 1000)}ms"
+)
 data_df = pd.DataFrame({"u": Usim[0, :], "y": Ytot.flatten()}, index=time_index)
 data = IDData(data=data_df, inputs=["u"], outputs=["y"], tsample=sampling_time)
 
@@ -123,35 +125,85 @@ if mode == "IC":
 
     # ARMA - ARARX - ARARMAX
     sys_id_arma = SystemIdentification()
-    Id_ARMA = sys_id_arma.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                   id_method="ARMA", criterion="BIC", na=[2, 2], nc=[2, 2], delays=[11, 11], 
-                                   max_iterations=300)
+    Id_ARMA = sys_id_arma.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARMA",
+        criterion="BIC",
+        na=[2, 2],
+        nc=[2, 2],
+        delays=[11, 11],
+        max_iterations=300,
+    )
 
     sys_id_ararx = SystemIdentification()
-    Id_ARARX = sys_id_ararx.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                     id_method="ARARX", criterion="BIC", na=[4, 4], nb=[3, 3], nd=[3, 3], 
-                                     delays=[11, 11], max_iterations=300)
+    Id_ARARX = sys_id_ararx.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARARX",
+        criterion="BIC",
+        na=[4, 4],
+        nb=[3, 3],
+        nd=[3, 3],
+        delays=[11, 11],
+        max_iterations=300,
+    )
 
     sys_id_ararmax = SystemIdentification()
-    Id_ARARMAX = sys_id_ararmax.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                         id_method="ARARMAX", criterion="BIC", na=[4, 4], nb=[3, 3], nc=[2, 2], nd=[3, 3],
-                                         delays=[11, 11], max_iterations=300)
+    Id_ARARMAX = sys_id_ararmax.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARARMAX",
+        criterion="BIC",
+        na=[4, 4],
+        nb=[3, 3],
+        nc=[2, 2],
+        nd=[3, 3],
+        delays=[11, 11],
+        max_iterations=300,
+    )
 
     # OE - BJ - GEN
     sys_id_oe = SystemIdentification()
-    Id_OE = sys_id_oe.identify(y=data.get_output_array(), u=data.get_input_array(),
-                               id_method="OE", criterion="BIC", nb=[3, 3], nf=[4, 4], delays=[11, 11],
-                               max_iterations=300)
+    Id_OE = sys_id_oe.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="OE",
+        criterion="BIC",
+        nb=[3, 3],
+        nf=[4, 4],
+        delays=[11, 11],
+        max_iterations=300,
+    )
     #
     sys_id_bj = SystemIdentification()
-    Id_BJ = sys_id_bj.identify(y=data.get_output_array(), u=data.get_input_array(),
-                              id_method="BJ", criterion="BIC", nb=[3, 3], nc=[2, 2], nd=[3, 3], nf=[4, 4],
-                              delays=[11, 11], max_iterations=300)
+    Id_BJ = sys_id_bj.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="BJ",
+        criterion="BIC",
+        nb=[3, 3],
+        nc=[2, 2],
+        nd=[3, 3],
+        nf=[4, 4],
+        delays=[11, 11],
+        max_iterations=300,
+    )
     # #
     sys_id_gen = SystemIdentification()
-    Id_GEN = sys_id_gen.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                 id_method="GEN", criterion="BIC", na=[2, 2], nb=[3, 3], nc=[2, 2], nd=[3, 3], 
-                                 nf=[4, 4], delays=[11, 11], max_iterations=300)
+    Id_GEN = sys_id_gen.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="GEN",
+        criterion="BIC",
+        na=[2, 2],
+        nb=[3, 3],
+        nc=[2, 2],
+        nd=[3, 3],
+        nf=[4, 4],
+        delays=[11, 11],
+        max_iterations=300,
+    )
 
 
 elif mode == "FIXED":
@@ -166,32 +218,78 @@ elif mode == "FIXED":
 
     # ARMA - ARARX - ARARMAX
     sys_id_arma = SystemIdentification()
-    Id_ARMA = sys_id_arma.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                   id_method="ARMA", na=na_ord, nc=nc_ord, theta=theta)
+    Id_ARMA = sys_id_arma.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARMA",
+        na=na_ord,
+        nc=nc_ord,
+        theta=theta,
+    )
     # #
     sys_id_ararx = SystemIdentification()
-    Id_ARARX = sys_id_ararx.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                     id_method="ARARX", na=na_ord, nb=nb_ord, nd=nd_ord, theta=theta, max_iterations=300)
+    Id_ARARX = sys_id_ararx.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARARX",
+        na=na_ord,
+        nb=nb_ord,
+        nd=nd_ord,
+        theta=theta,
+        max_iterations=300,
+    )
     # #
     sys_id_ararmax = SystemIdentification()
-    Id_ARARMAX = sys_id_ararmax.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                         id_method="ARARMAX", na=na_ord, nb=nb_ord, nc=nc_ord, nd=nd_ord, theta=theta,
-                                         max_iterations=300)
+    Id_ARARMAX = sys_id_ararmax.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="ARARMAX",
+        na=na_ord,
+        nb=nb_ord,
+        nc=nc_ord,
+        nd=nd_ord,
+        theta=theta,
+        max_iterations=300,
+    )
 
     # OE - BJ - GEN
     sys_id_oe = SystemIdentification()
-    Id_OE = sys_id_oe.identify(y=data.get_output_array(), u=data.get_input_array(),
-                               id_method="OE", nb=nb_ord, nf=nf_ord, theta=theta, max_iterations=300)
+    Id_OE = sys_id_oe.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="OE",
+        nb=nb_ord,
+        nf=nf_ord,
+        theta=theta,
+        max_iterations=300,
+    )
     #
     sys_id_bj = SystemIdentification()
-    Id_BJ = sys_id_bj.identify(y=data.get_output_array(), u=data.get_input_array(),
-                              id_method="BJ", nb=nb_ord, nc=nc_ord, nd=nd_ord, nf=nf_ord, theta=theta,
-                              max_iterations=300)
+    Id_BJ = sys_id_bj.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="BJ",
+        nb=nb_ord,
+        nc=nc_ord,
+        nd=nd_ord,
+        nf=nf_ord,
+        theta=theta,
+        max_iterations=300,
+    )
     # #
     sys_id_gen = SystemIdentification()
-    Id_GEN = sys_id_gen.identify(y=data.get_output_array(), u=data.get_input_array(),
-                                 id_method="GEN", na=na_ord, nb=nb_ord, nc=nc_ord, nd=nd_ord, nf=nf_ord, theta=theta,
-                                 max_iterations=300)
+    Id_GEN = sys_id_gen.identify(
+        y=data.get_output_array(),
+        u=data.get_input_array(),
+        id_method="GEN",
+        na=na_ord,
+        nb=nb_ord,
+        nc=nc_ord,
+        nd=nd_ord,
+        nf=nf_ord,
+        theta=theta,
+        max_iterations=300,
+    )
 #
 _, Y_arma = Id_ARMA.simulate(Usim)
 _, Y_ararx = Id_ARARX.simulate(Usim)
@@ -304,6 +402,7 @@ EV = 100.0 * (
 plt.title(f"Validation: | Explained Variance BJ = {EV}%")
 
 
-## Note: Advanced plotting (Bode plots, Step responses) would need TF extraction from Harold State objects
-## This requires additional implementation to work with control library
-print("\n🔍 Advanced analysis features (Bode plots, step responses) require TF extraction from Harold objects")
+## Advanced plotting can use model.G and model.G_tf with python-control.
+print(
+    "\n🔍 Use python-control with model.G or model.G_tf for Bode and step-response analysis"
+)

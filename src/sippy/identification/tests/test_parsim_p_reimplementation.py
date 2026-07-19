@@ -315,7 +315,7 @@ class TestParsimPVsMaster:
         p = 10
         threshold = 0.1
 
-        # Harold implementation
+        # python-control implementation
         A_K_h, C_h, B_K_h, D_h, K_h, A_h, B_h, x0_h, Vn_h = (
             ParsimCoreAlgorithm.parsim_p(y, u, f=f, p=p, threshold=threshold)
         )
