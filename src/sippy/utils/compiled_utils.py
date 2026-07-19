@@ -278,7 +278,7 @@ def simulate_ss_system_compiled_simd(A, B, C, D, u, x0=None):
     return x, y
 
 
-@jit(parallel=True)
+@jit
 def ss_lsim_predictor_form_compiled(A_K, B_K, C, D, K, y, u, x0=None):
     """
     Compiled predictor-form state-space simulation.
@@ -314,10 +314,11 @@ def ss_lsim_predictor_form_compiled(A_K, B_K, C, D, K, y, u, x0=None):
         for i in range(n):
             x[i, 0] = x0[i, 0]
 
-    # Time loop (sequential due to recursion); inner ops parallelized
+    # These matrices are normally small; launching parallel work inside every
+    # sample costs far more than the arithmetic and can make prediction slower.
     for t in range(L):
         # Output: y_hat[:, t] = C @ x[:, t] + D @ u[:, t]
-        for i in prange(l):
+        for i in range(l):
             acc = 0.0
             for j in range(n):
                 acc += C[i, j] * x[j, t]
@@ -326,7 +327,7 @@ def ss_lsim_predictor_form_compiled(A_K, B_K, C, D, K, y, u, x0=None):
             y_hat[i, t] = acc
 
         # State update: x[:, t+1] = A_K x[:, t] + B_K u[:, t] + K y[:, t]
-        for i in prange(n):
+        for i in range(n):
             acc = 0.0
             for j in range(n):
                 acc += A_K[i, j] * x[j, t]

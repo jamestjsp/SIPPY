@@ -1,7 +1,11 @@
+import threading
+import time
+
 import numpy as np
 import pytest
 from scipy.linalg import solve_discrete_are
 
+from sippy.identification.algorithms import subspace_core as subspace_core_module
 from sippy.identification.algorithms.subspace_core import SubspaceCoreAlgorithm
 from sippy.identification.factory import create_algorithm
 from sippy.utils.signal_utils import rescale
@@ -110,6 +114,107 @@ def test_cva_handles_rank_deficient_output_covariance():
     assert model.K.shape == (1, 2)
     assert np.all(np.isfinite(model.K))
     np.testing.assert_allclose(model.C[0], model.C[1], rtol=1e-10, atol=1e-10)
+
+
+def test_subspace_order_selection_uses_causal_innovation_likelihood():
+    rng = np.random.default_rng(44)
+    sample_count = 60
+    u = rng.normal(size=(1, sample_count))
+    state = np.zeros((2, sample_count))
+    y = np.zeros((1, sample_count))
+    A = np.array([[1.5, -0.56], [1.0, 0.0]])
+    B = np.array([[0.4], [0.0]])
+    for sample in range(sample_count - 1):
+        state[:, sample + 1] = A @ state[:, sample] + B[:, 0] * u[0, sample]
+    y[:] = state[:1] + 0.5 * rng.normal(size=(1, sample_count))
+
+    selected_A, *_ = SubspaceCoreAlgorithm.select_order(
+        y,
+        u,
+        f=6,
+        weights="N4SID",
+        method="BIC",
+        orders=[1, 6],
+        n_jobs=1,
+    )
+
+    assert selected_A.shape == (2, 2)
+
+
+def test_innovation_information_criterion_uses_mimo_log_determinant():
+    errors = np.array(
+        [
+            [1.0, -1.0, 2.0, -2.0, 0.5],
+            [0.2, 0.8, -0.4, -1.2, 1.5],
+        ]
+    )
+    parameter_count = 7
+    sample_count = errors.shape[1]
+    covariance = errors @ errors.T / sample_count
+    _, log_determinant = np.linalg.slogdet(covariance)
+    expected = sample_count * log_determinant + parameter_count * np.log(sample_count)
+
+    actual = subspace_core_module._innovation_information_criterion(
+        errors,
+        parameter_count,
+        "BIC",
+    )
+
+    assert actual == pytest.approx(expected)
+
+
+def test_subspace_order_selection_honors_parallel_n_jobs(monkeypatch):
+    rng = np.random.default_rng(16)
+    sample_count = 120
+    u = rng.normal(size=(1, sample_count))
+    y = np.zeros((1, sample_count))
+    for sample in range(1, sample_count):
+        y[0, sample] = 0.7 * y[0, sample - 1] + 0.3 * u[0, sample - 1]
+
+    sequential = SubspaceCoreAlgorithm.select_order(
+        y,
+        u,
+        f=8,
+        weights="N4SID",
+        method="BIC",
+        orders=[1, 4],
+        n_jobs=1,
+    )
+
+    thread_ids = set()
+    thread_lock = threading.Lock()
+    original = subspace_core_module._causal_prediction_errors
+
+    def tracked_prediction_errors(*args, **kwargs):
+        with thread_lock:
+            thread_ids.add(threading.get_ident())
+        time.sleep(0.01)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        subspace_core_module,
+        "_causal_prediction_errors",
+        tracked_prediction_errors,
+    )
+
+    parallel = SubspaceCoreAlgorithm.select_order(
+        y,
+        u,
+        f=8,
+        weights="N4SID",
+        method="BIC",
+        orders=[1, 4],
+        n_jobs=2,
+    )
+
+    assert len(thread_ids) > 1
+    for sequential_value, parallel_value in zip(sequential, parallel):
+        np.testing.assert_allclose(
+            parallel_value,
+            sequential_value,
+            rtol=1e-9,
+            atol=1e-10,
+        )
 
 
 @pytest.mark.parametrize("method", ["PARSIM-K", "PARSIM-S", "PARSIM-P"])

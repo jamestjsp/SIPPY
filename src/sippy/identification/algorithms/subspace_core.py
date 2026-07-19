@@ -2,12 +2,15 @@
 Core subspace identification algorithms implementation.
 """
 
+import os
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from numpy.linalg import pinv
+from scipy import signal
 
-from ...utils.signal_utils import information_criterion, rescale
+from ...utils.signal_utils import rescale
 from ...utils.simulation_utils import (
     K_calc,
     Vn_mat,
@@ -18,6 +21,7 @@ from ...utils.simulation_utils import (
     ordinate_sequence,
     reducingOrder,
     simulate_ss_system,
+    ss_lsim_predictor_form,
 )
 
 # Import compiled utilities for performance
@@ -26,7 +30,6 @@ try:
         NUMBA_AVAILABLE,
         Z_dot_PIort_compiled,
         covariance_symmetric_compiled,
-        information_criterion_compiled,
         pinv_compiled_svd,
         rescale_compiled,
         subspace_weighted_svd_compiled,
@@ -35,9 +38,64 @@ except ImportError:
     NUMBA_AVAILABLE = False
     Z_dot_PIort_compiled = None
     covariance_symmetric_compiled = None
-    information_criterion_compiled = None
     rescale_compiled = None
     subspace_weighted_svd_compiled = None
+
+
+def _causal_prediction_errors(A, B, C, D, K, y, u, initial_state, use_compiled=True):
+    predictor_a = A - K @ C
+    predictor_b = B - K @ D
+    if use_compiled:
+        _, prediction = ss_lsim_predictor_form(
+            predictor_a,
+            predictor_b,
+            C,
+            D,
+            K,
+            y,
+            u,
+            np.asarray(initial_state, dtype=float).reshape(-1, 1),
+        )
+    else:
+        predictor_input = np.vstack((u, y)).T
+        input_matrix = np.hstack((predictor_b, K))
+        feedthrough = np.hstack((D, np.zeros((C.shape[0], C.shape[0]))))
+        _, prediction, _ = signal.dlsim(
+            (predictor_a, input_matrix, C, feedthrough, 1.0),
+            predictor_input,
+            x0=initial_state,
+        )
+        prediction = prediction.T
+    return y - prediction
+
+
+def _innovation_information_criterion(errors, parameter_count, method):
+    sample_count = errors.shape[1]
+    if sample_count == 0 or not np.all(np.isfinite(errors)):
+        return np.inf
+
+    covariance = errors @ errors.T / sample_count
+    covariance = 0.5 * (covariance + covariance.T)
+    eigenvalues = np.linalg.eigvalsh(covariance)
+    scale = max(float(eigenvalues[-1]), np.finfo(np.float64).tiny)
+    eigenvalue_floor = max(
+        np.finfo(np.float64).tiny,
+        np.finfo(np.float64).eps * scale,
+    )
+    log_determinant = float(np.sum(np.log(np.maximum(eigenvalues, eigenvalue_floor))))
+    likelihood = sample_count * log_determinant
+
+    if method == "AIC":
+        return likelihood + 2 * parameter_count
+    if method == "AICc":
+        denominator = sample_count - parameter_count - 1
+        if denominator <= 0:
+            return np.inf
+        correction = 2 * parameter_count * (parameter_count + 1) / denominator
+        return likelihood + 2 * parameter_count + correction
+    if method == "BIC":
+        return likelihood + parameter_count * np.log(sample_count)
+    raise ValueError(f"Unknown method: {method}")
 
 
 class SubspaceCoreAlgorithm:
@@ -112,15 +170,12 @@ class SubspaceCoreAlgorithm:
         elif weights == "CVA":
             YfdotPIort_Uf_YfdotPIort_Uf_T = np.dot(YfdotPIort_Uf, YfdotPIort_Uf.T)
             covariance = 0.5 * (
-                YfdotPIort_Uf_YfdotPIort_Uf_T
-                + YfdotPIort_Uf_YfdotPIort_Uf_T.T
+                YfdotPIort_Uf_YfdotPIort_Uf_T + YfdotPIort_Uf_YfdotPIort_Uf_T.T
             )
             eigenvalues, eigenvectors = np.linalg.eigh(covariance)
             largest_eigenvalue = max(float(eigenvalues[-1]), 0.0)
             tolerance = (
-                max(covariance.shape)
-                * np.finfo(np.float64).eps
-                * largest_eigenvalue
+                max(covariance.shape) * np.finfo(np.float64).eps * largest_eigenvalue
             )
             retained = eigenvalues > tolerance
             if not np.any(retained):
@@ -528,8 +583,9 @@ class SubspaceCoreAlgorithm:
         A_stability : bool
             Whether to force A stability
         n_jobs : int, optional
-            Kept for backward compatibility; order evaluation shares one SVD
-            and is always sequential. Must be -1 or a positive integer.
+            Number of shared-memory prediction-error scoring workers. ``-1``
+            selects the compiled sequential path when available and otherwise
+            uses the available CPUs. A positive value requests that many workers.
 
         Returns:
         --------
@@ -592,12 +648,7 @@ class SubspaceCoreAlgorithm:
 
         order_range = list(range(min_ord, max_ord))
 
-        # The SVD above is shared across all candidate orders, so each order
-        # evaluation is just a truncation plus small least-squares solves —
-        # too cheap to justify spawning worker processes (n_jobs is kept for
-        # backward compatibility but evaluation is always sequential).
-        n_min = min_ord
-        for i in order_range:
+        def build_candidate(i):
             Ob, X_fd, M, n, residuals = SubspaceCoreAlgorithm.algorithm_1(
                 y,
                 u,
@@ -615,36 +666,74 @@ class SubspaceCoreAlgorithm:
                 D_required,
             )
 
+            forced_a = False
             if A_stability:
-                _, _, ForcedA = SubspaceCoreAlgorithm.force_a_stability(
-                    M, n, Ob, l, X_fd, N, u, f
+                M, state_residuals, forced_a = SubspaceCoreAlgorithm.force_a_stability(
+                    M,
+                    n,
+                    Ob,
+                    l,
+                    X_fd,
+                    N,
+                    u,
+                    f,
                 )
-                if ForcedA:
-                    warnings.warn(f"A stability forced at n={n}")
+                residuals[:n, :] = state_residuals
 
-            # One-step output-equation residual variance for the
-            # likelihood-based information criteria (prediction error,
-            # not free-run simulation error).
-            output_residuals = residuals[n:, :]
-            Vn = max(float(np.mean(output_residuals**2)), np.finfo(np.float64).tiny)
+            A, B, C, D = SubspaceCoreAlgorithm.extract_matrices(M, n)
+            covariance = residuals @ residuals.T / residuals.shape[1]
+            Q = covariance[:n, :n]
+            R = covariance[n:, n:]
+            S = covariance[:n, n:]
+            K, _ = K_calc(A, C, Q, R, S)
+            return i, n, A, B, C, D, K, forced_a
 
-            # Calculate number of parameters
-            K_par = n * l + m * n
+        candidates = [build_candidate(i) for i in order_range]
+
+        def evaluate_candidate(candidate):
+            i, n, A, B, C, D, K, forced_a = candidate
+            prediction_errors = _causal_prediction_errors(
+                A,
+                B,
+                C,
+                D,
+                K,
+                y,
+                u,
+                np.zeros(n),
+                use_compiled=worker_count == 1,
+            )
+            errors = prediction_errors[:, 2 * f :]
+
+            K_par = n * (m + 2 * l) + l * (l + 1) // 2
             if D_required:
                 K_par = K_par + l * m
+            criterion = _innovation_information_criterion(errors, K_par, method)
+            return i, criterion, forced_a
 
-            # Use compiled information criterion if available
-            if NUMBA_AVAILABLE and information_criterion_compiled is not None:
-                method_map = {"AIC": 0, "AICc": 1, "BIC": 2}
-                method_code = method_map.get(method, 0)
-                IC = information_criterion_compiled(K_par, L, Vn, method_code)
+        worker_count = 1
+        if len(order_range) > 1 and n_jobs != 1:
+            if n_jobs == -1:
+                requested_workers = 1 if NUMBA_AVAILABLE else (os.cpu_count() or 1)
             else:
-                IC = information_criterion(K_par, L, Vn, method)
+                requested_workers = n_jobs
+            worker_count = min(len(order_range), requested_workers)
+
+        if worker_count == 1:
+            results = map(evaluate_candidate, candidates)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                results = list(executor.map(evaluate_candidate, candidates))
+
+        n_min = min_ord
+        for i, IC, forced_a in results:
+            if forced_a:
+                warnings.warn(f"A stability forced at n={i}")
             if IC < IC_old:
                 n_min = i
                 IC_old = IC
 
-        print(f"The suggested order is: n={n_min}")
+        warnings.warn(f"The suggested order is: n={n_min}")
 
         # Final identification with selected order
         Ob, X_fd, M, n, residuals = SubspaceCoreAlgorithm.algorithm_1(
