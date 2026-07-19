@@ -191,7 +191,7 @@ class ARXAlgorithm(IdentificationAlgorithm):
                     u, y, na, nb, nk, ny, nu, N
                 )
 
-            A_coeffs = np.zeros((ny, na))
+            A_coeffs = np.zeros((ny, na, ny))
             B_coeffs = np.zeros((ny, nb * nu))
             for i in range(ny):
                 if use_compiled_mimo:
@@ -220,9 +220,7 @@ class ARXAlgorithm(IdentificationAlgorithm):
 
                 theta_i, residuals_i, rank_i, s_i = lstsq(Phi_i, y_target, rcond=None)
 
-                for lag in range(na):
-                    idx = lag * ny + i
-                    A_coeffs[i, lag] = theta_i[idx]
+                A_coeffs[i, :, :] = theta_i[: na * ny].reshape(na, ny)
 
                 B_coeffs[i, :] = theta_i[na * ny :]
 
@@ -237,9 +235,7 @@ class ARXAlgorithm(IdentificationAlgorithm):
                 if use_compiled_mimo:
                     Phi_i = np.ascontiguousarray(Phi_batches[i, :, :])
                     theta_i = np.zeros(na * ny + nb * nu)
-                    for lag in range(na):
-                        idx = lag * ny + i
-                        theta_i[idx] = A_coeffs[i, lag]
+                    theta_i[: na * ny] = A_coeffs[i].reshape(-1)
                     theta_i[na * ny :] = B_coeffs[i, :]
                     Yid[i, max_lag:] = np.dot(Phi_i, theta_i)
                 else:
@@ -261,9 +257,7 @@ class ARXAlgorithm(IdentificationAlgorithm):
                             col += 1
 
                     theta_i = np.zeros(n_params_i)
-                    for lag in range(na):
-                        idx = lag * ny + i
-                        theta_i[idx] = A_coeffs[i, lag]
+                    theta_i[: na * ny] = A_coeffs[i].reshape(-1)
                     theta_i[na * ny :] = B_coeffs[i, :]
                     Yid[i, max_lag:] = np.dot(Phi_i, theta_i)
 
@@ -370,6 +364,9 @@ class ARXAlgorithm(IdentificationAlgorithm):
             Transfer functions (None if harold not available)
         """
         if not HAROLD_AVAILABLE or harold is None:
+            return None, None
+
+        if ny != 1 or nu != 1:
             return None, None
 
         try:
@@ -484,41 +481,7 @@ class ARXAlgorithm(IdentificationAlgorithm):
 
                 D = np.zeros((ny, nu))
         else:
-            # For MIMO case, create a simple state-space representation
-            # using companion form for each output
-            n_states = na * ny
-            A = np.zeros((n_states, n_states))
-            B = np.zeros((n_states, nu))
-            C = np.zeros((ny, n_states))
-            D = np.zeros((ny, nu))
-
-            # Build companion form matrices
-            for i in range(ny):  # For each output
-                # A matrix (companion form)
-                if na > 1:
-                    A[i * na : (i + 1) * na - 1, i * na + 1 : (i + 1) * na] = np.eye(
-                        na - 1
-                    )
-                if na > 0:
-                    A[(i + 1) * na - 1, i * na : (i + 1) * na] = -A_coeffs[i, :]
-
-                # B matrix
-                if nu > 0:
-                    B[(i + 1) * na - 1, :] = (
-                        B_coeffs[i, :].reshape(-1, nu)[:nu]
-                        if nb == 1
-                        else B_coeffs[i, :nu]
-                    )
-
-                # C matrix
-                C[i, (i + 1) * na - 1] = 1
-
-            # Create harold StateSpace object
-            # Use modern Harold API if available, fallback to legacy
-            if hasattr(harold, "State"):
-                ss_model = harold.State(A, B, C, D, dt=Ts)
-            else:
-                ss_model = harold.StateSpace(A, B, C, D, dt=Ts)
+            A, B, C, D = self._realize_mimo_arx(A_coeffs, B_coeffs, na, nb, nk, ny, nu)
 
         # Use local matrices (not ss_model attributes) for dimensions
         # This ensures tests with mocked harold don't break
@@ -534,6 +497,51 @@ class ARXAlgorithm(IdentificationAlgorithm):
             ts=Ts,
             Vn=0.01,
         )
+
+    def _realize_mimo_arx(self, A_coeffs, B_coeffs, na, nb, nk, ny, nu):
+        input_history = max(0, nk + nb - 1)
+        output_states = na * ny
+        input_states = input_history * nu
+        n_states = max(1, output_states + input_states)
+
+        A = np.zeros((n_states, n_states))
+        B = np.zeros((n_states, nu))
+        C = np.zeros((ny, n_states))
+        D = np.zeros((ny, nu))
+
+        for lag in range(na):
+            block = slice(lag * ny, (lag + 1) * ny)
+            C[:, block] = A_coeffs[:, lag, :]
+
+        input_offset = output_states
+        coefficient_blocks = B_coeffs.reshape(ny, nb, nu)
+        for lag in range(nb):
+            delay = nk + lag
+            if delay == 0:
+                D += coefficient_blocks[:, lag, :]
+            else:
+                block_start = input_offset + (delay - 1) * nu
+                C[:, block_start : block_start + nu] += coefficient_blocks[:, lag, :]
+
+        if na > 0:
+            A[:ny, :] = C
+            B[:ny, :] = D
+            for lag in range(1, na):
+                destination = slice(lag * ny, (lag + 1) * ny)
+                source = slice((lag - 1) * ny, lag * ny)
+                A[destination, source] = np.eye(ny)
+
+        if input_history > 0:
+            B[input_offset : input_offset + nu, :] = np.eye(nu)
+            for lag in range(1, input_history):
+                destination_start = input_offset + lag * nu
+                source_start = input_offset + (lag - 1) * nu
+                A[
+                    destination_start : destination_start + nu,
+                    source_start : source_start + nu,
+                ] = np.eye(nu)
+
+        return A, B, C, D
 
     def _create_mock_model(self, A_coeffs, B_coeffs, na, nb, nk, ny, nu, Ts):
         """

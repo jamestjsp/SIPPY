@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 
 from ..base import IdentificationAlgorithm, StateSpaceModel
-from .opt_support import gen_miso_id
 from .ararx import _state_space_from_single_result
+from .opt_support import gen_miso_id
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..iddata import IDData
@@ -54,7 +54,9 @@ class ARMAAlgorithm(IdentificationAlgorithm):
         nc = int(kwargs.get("nc", 1))
         max_iterations = kwargs.get("max_iterations", 200)
         stability_margin = kwargs.get("stability_margin", kwargs.get("stab_marg", 1.0))
-        enforce_stability = kwargs.get("stability_constraint", kwargs.get("stab_cons", False))
+        enforce_stability = kwargs.get(
+            "stability_constraint", kwargs.get("stab_cons", False)
+        )
 
         empty_input = np.zeros((0, y.shape[1]))
 
@@ -74,6 +76,8 @@ class ARMAAlgorithm(IdentificationAlgorithm):
                 enforce_stability=enforce_stability,
             )
         except RuntimeError as exc:
-            raise RuntimeError("CasADi is required for ARMA NLP identification") from exc
+            raise RuntimeError(
+                "CasADi is required for ARMA NLP identification"
+            ) from exc
 
         return _state_space_from_single_result(result, nu=0, sample_time=sample_time)

@@ -33,15 +33,12 @@ class TestGENAlgorithm:
         self.n_samples = 1000
 
         # Create test data for GEN (SISO system with full structure)
-        t = np.linspace(0, 100, self.n_samples)
+        np.linspace(0, 100, self.n_samples)
         u = np.random.normal(0, 1, self.n_samples)  # Input signal
 
         # Generate GEN process: A(q)*y[k] = [B(q)/F(q)]*u[k] + [C(q)/D(q)]*e[k]
         # GEN(1,2,1,1,1) model as example
-        na = 1  # AR order for output
         nb = 2  # Input numerator order
-        nc = 1  # Noise numerator order
-        nd = 1  # Noise denominator order
         nf = 1  # Input denominator order
         nk = 1  # Input delay
 
@@ -67,7 +64,9 @@ class TestGENAlgorithm:
                 noise_part = e[k] + 0.3 * e[k - 1]  # C(q)
                 # D(q) would be in denominator, simplified here
                 if k >= 1:
-                    noise_part -= 0.2 * (e[k - 1] + 0.3 * e[k - 2] if k >= 2 else 0)  # D(q)
+                    noise_part -= 0.2 * (
+                        e[k - 1] + 0.3 * e[k - 2] if k >= 2 else 0
+                    )  # D(q)
             else:
                 noise_part = e[k]
 
@@ -95,15 +94,7 @@ class TestGENAlgorithm:
 
         # GEN(1,2,1,1,1,1) - full structure
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=1,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=1,
-            nk=1
+            y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
         )
 
         assert result is not None
@@ -119,15 +110,7 @@ class TestGENAlgorithm:
 
         # GEN with nc=nd=nf=0 should behave like ARX
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=2,
-            nb=2,
-            nc=0,
-            nd=0,
-            nf=0,
-            nk=1
+            y=None, u=None, iddata=self.data, na=2, nb=2, nc=0, nd=0, nf=0, nk=1
         )
 
         assert result is not None
@@ -139,15 +122,7 @@ class TestGENAlgorithm:
 
         # GEN with nd=nf=0 should behave like ARMAX
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=2,
-            nb=2,
-            nc=1,
-            nd=0,
-            nf=0,
-            nk=1
+            y=None, u=None, iddata=self.data, na=2, nb=2, nc=1, nd=0, nf=0, nk=1
         )
 
         assert result is not None
@@ -159,15 +134,7 @@ class TestGENAlgorithm:
 
         # GEN with nc=nd=0 should behave like ARARX
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=2,
-            nb=2,
-            nc=0,
-            nd=0,
-            nf=1,
-            nk=1
+            y=None, u=None, iddata=self.data, na=2, nb=2, nc=0, nd=0, nf=1, nk=1
         )
 
         assert result is not None
@@ -179,15 +146,7 @@ class TestGENAlgorithm:
 
         # GEN with nf=0 should behave like ARARMAX
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=2,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=0,
-            nk=1
+            y=None, u=None, iddata=self.data, na=2, nb=2, nc=1, nd=1, nf=0, nk=1
         )
 
         assert result is not None
@@ -199,15 +158,7 @@ class TestGENAlgorithm:
 
         # GEN with na=nc=nd=0 should behave like OE
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=0,
-            nb=2,
-            nc=0,
-            nd=0,
-            nf=2,
-            nk=1
+            y=None, u=None, iddata=self.data, na=0, nb=2, nc=0, nd=0, nf=2, nk=1
         )
 
         assert result is not None
@@ -219,15 +170,7 @@ class TestGENAlgorithm:
 
         # GEN with na=0 should behave like BJ
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=0,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=2,
-            nk=1
+            y=None, u=None, iddata=self.data, na=0, nb=2, nc=1, nd=1, nf=2, nk=1
         )
 
         assert result is not None
@@ -248,7 +191,7 @@ class TestGENAlgorithm:
                 nc=1,
                 nd=1,
                 nf=1,
-                nk=1
+                nk=1,
             )
 
         # Test with negative orders
@@ -262,7 +205,7 @@ class TestGENAlgorithm:
                 nc=1,
                 nd=1,
                 nf=1,
-                nk=1
+                nk=1,
             )
 
     def test_gen_with_different_orders(self):
@@ -289,7 +232,7 @@ class TestGENAlgorithm:
                 nc=nc,
                 nd=nd,
                 nf=nf,
-                nk=1
+                nk=1,
             )
             assert result is not None
             assert isinstance(result, StateSpaceModel)
@@ -300,15 +243,7 @@ class TestGENAlgorithm:
 
         with patch("sippy.identification.algorithms.gen.HAROLD_AVAILABLE", False):
             result = algorithm.identify(
-                y=None,
-                u=None,
-                iddata=self.data,
-                na=1,
-                nb=2,
-                nc=1,
-                nd=1,
-                nf=1,
-                nk=1
+                y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
             )
             assert result is not None
             assert isinstance(result, StateSpaceModel)
@@ -331,15 +266,7 @@ class TestGENAlgorithm:
         # Orders that require more data than available
         with pytest.raises(ValueError, match="Insufficient data|Not enough data"):
             algorithm.identify(
-                y=None,
-                u=None,
-                iddata=short_data,
-                na=3,
-                nb=3,
-                nc=3,
-                nd=3,
-                nf=3,
-                nk=1
+                y=None, u=None, iddata=short_data, na=3, nb=3, nc=3, nd=3, nf=3, nk=1
             )
 
     def test_gen_state_space_models(self):
@@ -347,15 +274,7 @@ class TestGENAlgorithm:
         algorithm = GENAlgorithm()
 
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=1,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=1,
-            nk=1
+            y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
         )
 
         # Check state-space model properties
@@ -376,15 +295,7 @@ class TestGENAlgorithm:
         algorithm = GENAlgorithm()
 
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=1,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=1,
-            nk=1
+            y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
         )
 
         # Check that transfer functions are created (when harold available)
@@ -396,15 +307,7 @@ class TestGENAlgorithm:
         algorithm = GENAlgorithm()
 
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=1,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=1,
-            nk=1
+            y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
         )
 
         # Check that Yid is computed
@@ -429,15 +332,7 @@ class TestGENAlgorithm:
         algorithm = GENAlgorithm()
 
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=na,
-            nb=nb,
-            nc=nc,
-            nd=nd,
-            nf=nf,
-            nk=1
+            y=None, u=None, iddata=self.data, na=na, nb=nb, nc=nc, nd=nd, nf=nf, nk=1
         )
         assert result is not None
         assert isinstance(result, StateSpaceModel)
@@ -456,7 +351,7 @@ class TestGENAlgorithm:
         e_colored = np.zeros(n_samples)
         for k in range(2, n_samples):
             e_colored[k] = e_white[k] + 0.4 * e_white[k - 1]  # C(q)
-            e_colored[k] /= (1 + 0.3)  # Approximate D(q)
+            e_colored[k] /= 1 + 0.3  # Approximate D(q)
 
         # Dynamics with AR and input terms
         y = np.zeros(n_samples)
@@ -469,15 +364,7 @@ class TestGENAlgorithm:
         data = IDData(data=data_df, inputs=["u1"], outputs=["y1"], tsample=1.0)
 
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=data,
-            na=1,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=1,
-            nk=1
+            y=None, u=None, iddata=data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
         )
         assert result is not None
         assert isinstance(result, StateSpaceModel)
@@ -489,15 +376,7 @@ class TestGENAlgorithm:
         # Test with various delays
         for nk in [0, 1, 2, 3]:
             result = algorithm.identify(
-                y=None,
-                u=None,
-                iddata=self.data,
-                na=1,
-                nb=2,
-                nc=1,
-                nd=1,
-                nf=1,
-                nk=nk
+                y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=nk
             )
             assert result is not None
             assert isinstance(result, StateSpaceModel)
@@ -511,15 +390,7 @@ class TestGENAlgorithm:
 
         # Test modern API with numpy arrays
         result = algorithm.identify(
-            y=y,
-            u=u,
-            na=1,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=1,
-            nk=1,
-            tsample=1.0
+            y=y, u=u, na=1, nb=2, nc=1, nd=1, nf=1, nk=1, tsample=1.0
         )
 
         assert result is not None
@@ -531,15 +402,7 @@ class TestGENAlgorithm:
 
         # For GEN, state dimension should reflect all dynamics
         result = algorithm.identify(
-            y=None,
-            u=None,
-            iddata=self.data,
-            na=2,
-            nb=2,
-            nc=1,
-            nd=1,
-            nf=2,
-            nk=1
+            y=None, u=None, iddata=self.data, na=2, nb=2, nc=1, nd=1, nf=2, nk=1
         )
 
         # The algorithm should create a model with appropriate state dimension
@@ -565,7 +428,7 @@ class TestGENAlgorithm:
             nd=1,
             nf=1,
             nk=1,
-            max_iterations=100  # Parameter for NLP
+            max_iterations=100,  # Parameter for NLP
         )
 
         assert result is not None
@@ -577,15 +440,7 @@ class TestGENAlgorithm:
 
         with patch("sippy.identification.algorithms.gen.CASADI_AVAILABLE", False):
             result = algorithm.identify(
-                y=None,
-                u=None,
-                iddata=self.data,
-                na=1,
-                nb=2,
-                nc=1,
-                nd=1,
-                nf=1,
-                nk=1
+                y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
             )
             assert result is not None
             assert isinstance(result, StateSpaceModel)

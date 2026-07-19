@@ -64,7 +64,9 @@ class SystemIdentification:
         if iddata is None and y is None:
             raise ValueError("Must provide either iddata or y")
         if iddata is None and u is None and not is_time_series_method:
-            raise ValueError("Must provide either iddata or both y and u (unless using ARMA)")
+            raise ValueError(
+                "Must provide either iddata or both y and u (unless using ARMA)"
+            )
 
         # Extract data if IDData is provided
         if iddata is not None:
@@ -90,7 +92,9 @@ class SystemIdentification:
 
         return model
 
-    def _apply_centering(self, y: np.ndarray, u: Optional[np.ndarray], centering: str) -> tuple:
+    def _apply_centering(
+        self, y: np.ndarray, u: Optional[np.ndarray], centering: str
+    ) -> tuple:
         """Apply data centering preprocessing."""
         y = 1.0 * np.atleast_2d(y)
 
@@ -111,7 +115,9 @@ class SystemIdentification:
 
             # Checking data consistency
             if ulength != ylength:
-                print("Warning: y and u lengths are not the same. Using minimum length.")
+                print(
+                    "Warning: y and u lengths are not the same. Using minimum length."
+                )
                 minlength = min(ulength, ylength)
                 y = y[:, :minlength]
                 u = u[:, :minlength]

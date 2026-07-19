@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -38,11 +38,15 @@ def _block_diag(mats: Sequence[np.ndarray]) -> np.ndarray:
     return out
 
 
-def _companion_from_polynomials(result: MISOResult, nu: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _companion_from_polynomials(
+    result: MISOResult, nu: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Create a simple companion-form realisation when harold is unavailable."""
 
     # State order should reflect the highest order across all coefficients
-    max_b_order = max(len(coeffs) for coeffs in result.b_coeffs) if result.b_coeffs else 0
+    max_b_order = (
+        max(len(coeffs) for coeffs in result.b_coeffs) if result.b_coeffs else 0
+    )
     order = max(len(result.a_coeffs), max_b_order, 1)
     A = np.zeros((order, order))
     if order > 1:
@@ -67,10 +71,28 @@ def _companion_from_polynomials(result: MISOResult, nu: int) -> tuple[np.ndarray
     return A, B, C, D
 
 
-def _ss_matrices_from_result(result: MISOResult, nu: int, sample_time: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Optional[object], Optional[object]]:
+def _ss_matrices_from_result(
+    result: MISOResult, nu: int, sample_time: float
+) -> tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, Optional[object], Optional[object]
+]:
     """Return state-space matrices (and optional TFs) for a MISO result."""
 
     if nu == 0:
+        if HAROLD_AVAILABLE:
+            try:
+                _, H_tf = result.build_transfer_function(sample_time)
+                if H_tf is not None:
+                    noise_model = harold.transfer_to_state(H_tf)
+                    A = noise_model.a
+                    B = np.zeros((A.shape[0], 0))
+                    C = noise_model.c
+                    D = np.zeros((C.shape[0], 0))
+                    return A, B, C, D, None, H_tf
+            except Exception as exc:
+                warnings.warn(
+                    f"harold noise-model realization failed, using companion fallback: {exc}"
+                )
         A, B, C, D = _companion_from_polynomials(result, nu)
         return A, B, C, D, None, None
 
@@ -82,13 +104,17 @@ def _ss_matrices_from_result(result: MISOResult, nu: int, sample_time: float) ->
                 if ss_model.b.shape[1] == nu and ss_model.d.shape[0] == 1:
                     return ss_model.a, ss_model.b, ss_model.c, ss_model.d, G_tf, H_tf
         except Exception as exc:  # pragma: no cover - harold failure is rare
-            warnings.warn(f"harold.transfer_to_state failed, using companion fallback: {exc}")
+            warnings.warn(
+                f"harold.transfer_to_state failed, using companion fallback: {exc}"
+            )
 
     A, B, C, D = _companion_from_polynomials(result, nu)
     return A, B, C, D, None, None
 
 
-def _state_space_from_single_result(result: MISOResult, nu: int, sample_time: float) -> StateSpaceModel:
+def _state_space_from_single_result(
+    result: MISOResult, nu: int, sample_time: float
+) -> StateSpaceModel:
     """Build a ``StateSpaceModel`` for a single output."""
 
     A, B, C, D, G_tf, H_tf = _ss_matrices_from_result(result, nu, sample_time)
@@ -117,7 +143,9 @@ def _state_space_from_single_result(result: MISOResult, nu: int, sample_time: fl
     return model
 
 
-def _state_space_from_results(results: List[MISOResult], nu: int, sample_time: float) -> StateSpaceModel:
+def _state_space_from_results(
+    results: List[MISOResult], nu: int, sample_time: float
+) -> StateSpaceModel:
     """Assemble a MIMO state-space model from per-output MISO results."""
 
     mats_A: List[np.ndarray] = []
@@ -142,7 +170,6 @@ def _state_space_from_results(results: List[MISOResult], nu: int, sample_time: f
     total_states = A.shape[0]
     ny = len(results)
     C = np.zeros((ny, total_states))
-    row_offset = 0
     col_offset = 0
     for idx, C_i in enumerate(mats_C):
         n_states_i = C_i.shape[1]
@@ -176,7 +203,9 @@ def _state_space_from_results(results: List[MISOResult], nu: int, sample_time: f
     return model
 
 
-def _normalize_orders(value: Optional[Sequence[int] | int], length: int, allow_zero: bool = False) -> List[int]:
+def _normalize_orders(
+    value: Optional[Sequence[int] | int], length: int, allow_zero: bool = False
+) -> List[int]:
     """Expand scalar order specification to a list."""
 
     if value is None:
@@ -197,7 +226,12 @@ def _normalize_orders(value: Optional[Sequence[int] | int], length: int, allow_z
     return array.tolist()
 
 
-def _normalize_matrix(value: Optional[Sequence[Sequence[int]] | int], rows: int, cols: int, allow_zero: bool = False) -> np.ndarray:
+def _normalize_matrix(
+    value: Optional[Sequence[Sequence[int]] | int],
+    rows: int,
+    cols: int,
+    allow_zero: bool = False,
+) -> np.ndarray:
     """Expand scalar or list specification to a matrix (rows x cols)."""
 
     if value is None:
@@ -234,7 +268,7 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             na_arr = np.asarray(na)
             if np.any(na_arr < 0):
                 raise ValueError("Output AR order .* must be non-negative")
-        
+
         # Input order validation - must be positive
         if isinstance(nb, (int, np.integer)):
             if nb <= 0:
@@ -243,7 +277,7 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             nb_arr = np.asarray(nb)
             if np.any(nb_arr <= 0):
                 raise ValueError("Input order .* must be positive")
-        
+
         # Denominator order validation - must be positive
         if isinstance(nd, (int, np.integer)):
             if nd <= 0:
@@ -252,7 +286,7 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             nd_arr = np.asarray(nd)
             if np.any(nd_arr <= 0):
                 raise ValueError("Denominator order .* must be positive")
-        
+
         # Input delay validation - must be non-negative
         if isinstance(theta, (int, np.integer)):
             if theta < 0:
@@ -261,8 +295,10 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             theta_arr = np.asarray(theta)
             if np.any(theta_arr < 0):
                 raise ValueError("Input delay .* must be non-negative")
-    
-    def validate_parameters(self, **kwargs) -> bool:  # pragma: no cover - simple validation
+
+    def validate_parameters(
+        self, **kwargs
+    ) -> bool:  # pragma: no cover - simple validation
         na = kwargs.get("na")
         nb = kwargs.get("nb")
         nd = kwargs.get("nd")
@@ -290,30 +326,31 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             else:
                 raise ValueError(f"Unsupported type for {name}: {type(value)}")
         return True
-    
-    def _create_mock_model(self, nu: int, ny: int, sample_time: float = 1.0) -> StateSpaceModel:
+
+    def _create_mock_model(
+        self, nu: int, ny: int, sample_time: float = 1.0
+    ) -> StateSpaceModel:
         """Create a minimal companion-form state-space model for tests.
-        
+
         This method is patchable by tests and provides a fallback when
         the optimization framework is unavailable.
         """
         # Simple companion-form model with minimal state dimension
         n_states = max(1, ny)  # At least one state
-        
+
         A = np.eye(n_states)  # Identity matrix, companion-like
         B = np.zeros((n_states, nu))  # Zero input coupling
         C = np.zeros((ny, n_states))
         C[:ny, :ny] = np.eye(ny)  # Direct output states
         D = np.zeros((ny, nu))
-        
+
         K = np.zeros((n_states, ny))
         Q = np.eye(n_states)
         R = np.eye(ny)
         S = np.zeros((n_states, ny))
-        
+
         return StateSpaceModel(
-            A=A, B=B, C=C, D=D, K=K, Q=Q, R=R, S=S,
-            ts=sample_time, Vn=0.01
+            A=A, B=B, C=C, D=D, K=K, Q=Q, R=R, S=S, ts=sample_time, Vn=0.01
         )
 
     def identify(
@@ -324,14 +361,14 @@ class ARARXAlgorithm(IdentificationAlgorithm):
         **kwargs,
     ) -> StateSpaceModel:
         """Run ARARX identification using shared optimisation helpers.
-        
+
         Supports both legacy (iddata, config) and modern ( kwargs-based) interfaces.
         """
 
         # Handle legacy interface: identify(iddata, config) or identify(IDData, SystemIdentificationConfig)
         iddata_obj = None
         config_obj = None
-        
+
         # Check if the first positional argument (y) is actually IDData (legacy interface)
         if y is not None and IDData is not None and isinstance(y, IDData):
             iddata_obj = y
@@ -343,20 +380,33 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             # If not, might be modern interface with iddata parameter
         elif iddata is not None:
             iddata_obj = iddata
-        
+
         # Check for config in kwargs (modern interface)
-        if 'config' in kwargs and isinstance(kwargs['config'], SystemIdentificationConfig):
-            config_obj = kwargs.pop('config')
-        
+        if "config" in kwargs and isinstance(
+            kwargs["config"], SystemIdentificationConfig
+        ):
+            config_obj = kwargs.pop("config")
+
         # Convert config to kwargs if available
         if config_obj is not None:
-            for attr in ['na', 'nb', 'nd', 'theta', 'tsample', 'max_iterations', 'stab_marg', 'stab_cons']:
+            for attr in [
+                "na",
+                "nb",
+                "nd",
+                "theta",
+                "tsample",
+                "max_iterations",
+                "stab_marg",
+                "stab_cons",
+            ]:
                 if hasattr(config_obj, attr) and attr not in kwargs:
                     kwargs[attr] = getattr(config_obj, attr)
-        
+
         # Extract data from iddata or direct arrays
         if iddata_obj is not None:
-            if y is not None or (u is not None and not isinstance(u, SystemIdentificationConfig)):
+            if y is not None or (
+                u is not None and not isinstance(u, SystemIdentificationConfig)
+            ):
                 raise ValueError("Provide either iddata or (y, u), not both")
             u_data = iddata_obj.get_input_array()
             y_data = iddata_obj.get_output_array()
@@ -380,38 +430,45 @@ class ARARXAlgorithm(IdentificationAlgorithm):
         nb = kwargs.get("nb", 1)
         nd = kwargs.get("nd", 1)
         theta = kwargs.get("theta", kwargs.get("nk", 0))
-        
+
         # Handle None values coming from SystemIdentificationConfig
         if nd is None:
             nd = 1
-        
+
         # Validate parameters with appropriate error messages
         self._validate_ararx_parameters(na, nb, nd, theta)
-        
+
         # Additional validation for multi-input systems
         if nu > 1 and isinstance(nb, (int, np.integer)):
-            raise ValueError("For multi-input systems, nb must be specified as a vector")
-        
+            raise ValueError(
+                "For multi-input systems, nb must be specified as a vector"
+            )
+
         # Check if _create_mock_model has been patched (for testing)
         # If patched, use it directly instead of attempting optimization
         # However, for harold integration tests, we want to let the algorithm proceed normally
-        if hasattr(self, '_create_mock_model') and isinstance(self._create_mock_model, MagicMock):
+        if hasattr(self, "_create_mock_model") and isinstance(
+            self._create_mock_model, MagicMock
+        ):
             # Only use mock fallback if harold is not available or if test explicitly disables harold
-            if not HAROLD_AVAILABLE or hasattr(self._create_mock_model, '_force_mock'):
+            if not HAROLD_AVAILABLE or hasattr(self._create_mock_model, "_force_mock"):
                 return self._create_mock_model(nu, ny, sample_time)
 
         # Check minimum required data length
         if isinstance(na, (int, np.integer)):
             max_order_na = int(na)
         else:
-            max_order_na = max(list(na)) if hasattr(na, '__iter__') else max(na)
-        
+            max_order_na = max(list(na)) if hasattr(na, "__iter__") else max(na)
+
         if isinstance(nb, (int, np.integer)):
             max_order_nb = int(nb)
-        elif hasattr(nb, 'flatten'):  # numpy array
+        elif hasattr(nb, "flatten"):  # numpy array
             max_order_nb = max(nb.flatten())
-        elif hasattr(nb, '__iter__'):  # list or nested list
-            nb_list = list(nb) if not isinstance(nb, np.ndarray) else nb.flatten().tolist()
+        elif hasattr(nb, "__iter__"):  # list or nested list
+            nb_list = (
+                list(nb) if not isinstance(nb, np.ndarray) else nb.flatten().tolist()
+            )
+
             # Handle nested lists by flattening them
             def flatten_list(lst):
                 result = []
@@ -421,25 +478,31 @@ class ARARXAlgorithm(IdentificationAlgorithm):
                     else:
                         result.append(item)
                 return result
+
             flattened = flatten_list(nb_list)
             max_order_nb = max(flattened) if flattened else 0
         else:
             max_order_nb = int(nb)
-        
+
         if isinstance(nd, (int, np.integer)):
             max_order_nd = int(nd)
-        elif hasattr(nd, '__iter__'):  # list
+        elif hasattr(nd, "__iter__"):  # list
             nd_list = list(nd)
             max_order_nd = max(nd_list) if nd_list else 0
         else:
             max_order_nd = max(nd)
-        
+
         if isinstance(theta, (int, np.integer)):
             max_order_theta = int(theta)
-        elif hasattr(theta, 'flatten'):  # numpy array
+        elif hasattr(theta, "flatten"):  # numpy array
             max_order_theta = max(theta.flatten())
-        elif hasattr(theta, '__iter__'):  # list or nested list
-            theta_list = list(theta) if not isinstance(theta, np.ndarray) else theta.flatten().tolist()
+        elif hasattr(theta, "__iter__"):  # list or nested list
+            theta_list = (
+                list(theta)
+                if not isinstance(theta, np.ndarray)
+                else theta.flatten().tolist()
+            )
+
             # Handle nested lists by flattening them
             def flatten_list(lst):
                 result = []
@@ -449,19 +512,22 @@ class ARARXAlgorithm(IdentificationAlgorithm):
                     else:
                         result.append(item)
                 return result
+
             flattened = flatten_list(theta_list)
             max_order_theta = max(flattened) if flattened else 0
         else:
             max_order_theta = int(theta)
-        
+
         max_order = max(max_order_na, max_order_nb, max_order_nd, max_order_theta)
-        
+
         if n_samples <= max_order:
             raise ValueError("Not enough data for requested ARARX orders")
-        
+
         max_iterations = kwargs.get("max_iterations", 200)
         stability_margin = kwargs.get("stability_margin", kwargs.get("stab_marg", 1.0))
-        enforce_stability = kwargs.get("stability_constraint", kwargs.get("stab_cons", False))
+        enforce_stability = kwargs.get(
+            "stability_constraint", kwargs.get("stab_cons", False)
+        )
 
         if ny == 1:
             na_val = _normalize_orders(na, 1, allow_zero=True)[0]  # Allow zero for na
@@ -486,9 +552,11 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             except (RuntimeError, Exception) as exc:
                 # Fallback to mock model when optimization fails
                 # This supports tests that patch _create_mock_model
-                if hasattr(self, '_create_mock_model'):
+                if hasattr(self, "_create_mock_model"):
                     return self._create_mock_model(nu, ny, sample_time)
-                raise RuntimeError("CasADi is required for ARARX NLP identification") from exc
+                raise RuntimeError(
+                    "CasADi is required for ARARX NLP identification"
+                ) from exc
 
         na_vec = _normalize_orders(na, ny, allow_zero=True)  # Allow zero for na
         nd_vec = _normalize_orders(nd, ny)
@@ -514,6 +582,8 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             return _state_space_from_results(results, nu, sample_time)
         except (RuntimeError, Exception) as exc:
             # Fallback to mock model when optimization fails
-            if hasattr(self, '_create_mock_model'):
+            if hasattr(self, "_create_mock_model"):
                 return self._create_mock_model(nu, ny, sample_time)
-            raise RuntimeError("CasAdi is required for ARARX NLP identification") from exc
+            raise RuntimeError(
+                "CasAdi is required for ARARX NLP identification"
+            ) from exc

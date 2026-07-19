@@ -671,22 +671,8 @@ class TestInputOutputMethodsComparison:
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
-    @pytest.mark.xfail(
-        reason="ARMAX shows large deviations (num_error=3.46e-01) - likely different convergence paths or initialization"
-    )
     def test_armax_siso(self, arx_test_data):
-        """
-        Test ARMAX on SISO system.
-
-        EXPECTED TO FAIL: ARMAX implementation shows significant deviations from master branch.
-        This may be due to:
-        - Different iterative convergence paths
-        - Different initialization strategies
-        - Missing or incorrect parameters
-
-        Further investigation needed to determine if this is acceptable variation
-        or indicates a bug in the harold branch implementation.
-        """
+        """Test ARMAX reference parity on a SISO system."""
         from sippy_unipi import system_identification as master_sysid
 
         data = arx_test_data
@@ -696,7 +682,7 @@ class TestInputOutputMethodsComparison:
         config.na = 1
         config.nb = 1
         config.nc = 1
-        config.nk = 1
+        config.nk = 0
         identifier = SystemIdentification(config)
         model_harold = identifier.identify(y=data["y"], u=data["u"])
 
@@ -705,9 +691,7 @@ class TestInputOutputMethodsComparison:
             data["y"],
             data["u"],
             "ARMAX",
-            na_ord=[1],
-            nb_ord=[1],
-            nc_ord=[1],
+            ARMAX_orders=[1, 1, 1, 0],
             tsample=data["ts"],
         )
 
@@ -837,38 +821,30 @@ class TestConditionalMethodsComparison:
         # For ARARX, G is available as model_master.G
         try:
             import control.matlab as cnt
+
             # Convert master's transfer function to state-space
             G_master = model_master.G
             # Get state-space realization from control.matlab
             ss_master = cnt.ss(G_master)
-            A_master, B_master, C_master, D_master = ss_master.A, ss_master.B, ss_master.C, ss_master.D
+            A_master, B_master, C_master, D_master = (
+                ss_master.A,
+                ss_master.B,
+                ss_master.C,
+                ss_master.D,
+            )
         except Exception as e:
             pytest.skip(f"Could not extract state-space from master: {e}")
 
-        # Compute error metrics
-        metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, A_master, "A"),
-            "B matrix": compute_matrix_error(model_harold.B, B_master, "B"),
-            "C matrix": compute_matrix_error(model_harold.C, C_master, "C"),
-        }
-
-        # Print report with relaxed tolerance
-        passes = print_comparison_report(
-            "ARARX SISO Basic (na=1, nb=1, nd=1)", metrics, expected_tolerance=1e-4
+        validation_input = np.random.default_rng(810).standard_normal((1, 500))
+        _, output_harold = model_harold.simulate(validation_input)
+        _, output_master = simulate_ss_system(
+            A_master, B_master, C_master, D_master, validation_input
+        )
+        response_error = np.linalg.norm(output_harold - output_master) / np.linalg.norm(
+            output_master
         )
 
-        # Note algorithmic difference
-        if not passes:
-            print("\nNote: ARARX uses auxiliary variable method (harold) vs optimization (master)")
-            print("      Acceptable tolerance: 1e-4 relative error due to different convergence")
-
-        # Relaxed assertions - ARARX is known to have algorithmic differences
-        # We accept up to 1e-3 (0.1%) relative error
-        for matrix_name, error_dict in metrics.items():
-            if error_dict is not None:
-                assert error_dict["max_rel_error"] < 1e-3, (
-                    f"{matrix_name} relative error {error_dict['max_rel_error']:.2e} exceeds 1e-3"
-                )
+        assert response_error < 1e-5
 
     def test_ararx_siso_higher_order(self, arx_test_data):
         """
@@ -903,36 +879,28 @@ class TestConditionalMethodsComparison:
         # Extract state-space matrices from master transfer function
         try:
             import control.matlab as cnt
+
             G_master = model_master.G
             ss_master = cnt.ss(G_master)
-            A_master, B_master, C_master, D_master = ss_master.A, ss_master.B, ss_master.C, ss_master.D
+            A_master, B_master, C_master, D_master = (
+                ss_master.A,
+                ss_master.B,
+                ss_master.C,
+                ss_master.D,
+            )
         except Exception as e:
             pytest.skip(f"Could not extract state-space from master: {e}")
 
-        # Compute error metrics
-        metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, A_master, "A"),
-            "B matrix": compute_matrix_error(model_harold.B, B_master, "B"),
-            "C matrix": compute_matrix_error(model_harold.C, C_master, "C"),
-        }
-
-        # Print report
-        passes = print_comparison_report(
-            "ARARX SISO Higher Order (na=2, nb=2, nd=2)", metrics, expected_tolerance=1e-4
+        validation_input = np.random.default_rng(811).standard_normal((1, 500))
+        _, output_harold = model_harold.simulate(validation_input)
+        _, output_master = simulate_ss_system(
+            A_master, B_master, C_master, D_master, validation_input
+        )
+        response_error = np.linalg.norm(output_harold - output_master) / np.linalg.norm(
+            output_master
         )
 
-        if not passes:
-            print("\nNote: Higher order models may show larger differences due to:")
-            print("      1. More parameters to estimate")
-            print("      2. Different optimization paths")
-            print("      3. Numerical conditioning issues")
-
-        # Very relaxed assertions for higher-order case
-        for matrix_name, error_dict in metrics.items():
-            if error_dict is not None:
-                assert error_dict["max_rel_error"] < 0.1, (
-                    f"{matrix_name} relative error {error_dict['max_rel_error']:.2e} exceeds 0.1 (10%)"
-                )
+        assert response_error < 1e-5
 
     def test_ararx_transfer_function_comparison(self, arx_test_data):
         """
@@ -1000,8 +968,16 @@ class TestConditionalMethodsComparison:
                 min_num_len = min(len(harold_num_norm), len(master_num_norm))
                 min_den_len = min(len(harold_den_norm), len(master_den_norm))
 
-                num_error = np.max(np.abs(harold_num_norm[:min_num_len] - master_num_norm[:min_num_len]))
-                den_error = np.max(np.abs(harold_den_norm[:min_den_len] - master_den_norm[:min_den_len]))
+                num_error = np.max(
+                    np.abs(
+                        harold_num_norm[:min_num_len] - master_num_norm[:min_num_len]
+                    )
+                )
+                den_error = np.max(
+                    np.abs(
+                        harold_den_norm[:min_den_len] - master_den_norm[:min_den_len]
+                    )
+                )
 
                 print(f"\nNumerator error:   {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
@@ -1010,18 +986,26 @@ class TestConditionalMethodsComparison:
                 if num_error < 1e-4 and den_error < 1e-4:
                     print("\nARARX Transfer Function: PASS - Excellent match")
                 elif num_error < 1e-2 and den_error < 1e-2:
-                    print("\nARARX Transfer Function: CONDITIONAL PASS - Within acceptable tolerance")
+                    print(
+                        "\nARARX Transfer Function: CONDITIONAL PASS - Within acceptable tolerance"
+                    )
                     print(f"  Numerator error: {num_error:.2e} (< 1e-2)")
                     print(f"  Denominator error: {den_error:.2e} (< 1e-2)")
-                    print("  Note: ARARX uses iterative refinement, differences expected")
+                    print(
+                        "  Note: ARARX uses iterative refinement, differences expected"
+                    )
                 else:
                     print("\nARARX Transfer Function: FAIL - Large discrepancy")
                     print(f"  Numerator error: {num_error:.2e}")
                     print(f"  Denominator error: {den_error:.2e}")
 
                 # Very relaxed assertion - just ensure not completely wrong
-                assert num_error < 0.5, f"ARARX numerator error {num_error:.2e} too large"
-                assert den_error < 0.5, f"ARARX denominator error {den_error:.2e} too large"
+                assert num_error < 0.5, (
+                    f"ARARX numerator error {num_error:.2e} too large"
+                )
+                assert den_error < 0.5, (
+                    f"ARARX denominator error {den_error:.2e} too large"
+                )
 
             except Exception as e:
                 pytest.skip(f"Could not compare ARARX transfer functions: {e}")
@@ -1060,7 +1044,11 @@ class TestConditionalMethodsComparison:
         # theta: list of lists [ydim x udim] (delays - not used for ARMA)
         try:
             model_master = master_sysid(
-                data["y"], None, "ARMA", ARMA_orders=[[1], [1], [[0]]], tsample=data["ts"]
+                data["y"],
+                None,
+                "ARMA",
+                ARMA_orders=[[1], [1], [[0]]],
+                tsample=data["ts"],
             )
         except Exception as e:
             pytest.skip(f"ARMA master failed: {e}")
@@ -1069,9 +1057,15 @@ class TestConditionalMethodsComparison:
         # For ARMA, we need to extract state-space from H transfer function
         try:
             import control.matlab as cnt
+
             H_master = model_master.H
             ss_master = cnt.ss(H_master)
-            A_master, B_master, C_master, D_master = ss_master.A, ss_master.B, ss_master.C, ss_master.D
+            A_master, _B_master, C_master, _D_master = (
+                ss_master.A,
+                ss_master.B,
+                ss_master.C,
+                ss_master.D,
+            )
         except Exception as e:
             pytest.skip(f"Could not extract state-space from master: {e}")
 
@@ -1088,8 +1082,12 @@ class TestConditionalMethodsComparison:
 
         # Note algorithmic difference
         if not passes:
-            print("\nNote: ARMA uses extended LS with residuals (harold) vs optimization (master)")
-            print("      Acceptable tolerance: 1e-4 relative error due to different estimation")
+            print(
+                "\nNote: ARMA uses extended LS with residuals (harold) vs optimization (master)"
+            )
+            print(
+                "      Acceptable tolerance: 1e-4 relative error due to different estimation"
+            )
 
         # Relaxed assertions - ARMA is known to have algorithmic differences
         # Accept up to 1e-3 (0.1%) relative error
@@ -1124,7 +1122,11 @@ class TestConditionalMethodsComparison:
         # Master branch identification
         try:
             model_master = master_sysid(
-                data["y"], None, "ARMA", ARMA_orders=[[2], [2], [[0]]], tsample=data["ts"]
+                data["y"],
+                None,
+                "ARMA",
+                ARMA_orders=[[2], [2], [[0]]],
+                tsample=data["ts"],
             )
         except Exception as e:
             pytest.skip(f"ARMA master failed: {e}")
@@ -1132,9 +1134,15 @@ class TestConditionalMethodsComparison:
         # Extract state-space from master H transfer function
         try:
             import control.matlab as cnt
+
             H_master = model_master.H
             ss_master = cnt.ss(H_master)
-            A_master, B_master, C_master, D_master = ss_master.A, ss_master.B, ss_master.C, ss_master.D
+            A_master, _B_master, C_master, _D_master = (
+                ss_master.A,
+                ss_master.B,
+                ss_master.C,
+                ss_master.D,
+            )
         except Exception as e:
             pytest.skip(f"Could not extract state-space from master: {e}")
 
@@ -1150,7 +1158,9 @@ class TestConditionalMethodsComparison:
         )
 
         if not passes:
-            print("\nNote: Higher order ARMA models may show larger differences due to:")
+            print(
+                "\nNote: Higher order ARMA models may show larger differences due to:"
+            )
             print("      1. MA term estimation using residual approximation")
             print("      2. Different optimization paths")
             print("      3. Multiple local minima in parameter space")
@@ -1187,7 +1197,11 @@ class TestConditionalMethodsComparison:
         # Master branch identification
         try:
             model_master = master_sysid(
-                data["y"], None, "ARMA", ARMA_orders=[[1], [1], [[0]]], tsample=data["ts"]
+                data["y"],
+                None,
+                "ARMA",
+                ARMA_orders=[[1], [1], [[0]]],
+                tsample=data["ts"],
             )
         except Exception as e:
             pytest.skip(f"ARMA master failed: {e}")
@@ -1228,8 +1242,16 @@ class TestConditionalMethodsComparison:
                 min_num_len = min(len(harold_num_norm), len(master_num_norm))
                 min_den_len = min(len(harold_den_norm), len(master_den_norm))
 
-                num_error = np.max(np.abs(harold_num_norm[:min_num_len] - master_num_norm[:min_num_len]))
-                den_error = np.max(np.abs(harold_den_norm[:min_den_len] - master_den_norm[:min_den_len]))
+                num_error = np.max(
+                    np.abs(
+                        harold_num_norm[:min_num_len] - master_num_norm[:min_num_len]
+                    )
+                )
+                den_error = np.max(
+                    np.abs(
+                        harold_den_norm[:min_den_len] - master_den_norm[:min_den_len]
+                    )
+                )
 
                 print(f"\nC(q) numerator error:   {num_error:.2e}")
                 print(f"A(q) denominator error: {den_error:.2e}")
@@ -1238,10 +1260,14 @@ class TestConditionalMethodsComparison:
                 if num_error < 1e-4 and den_error < 1e-4:
                     print("\nARMA Noise Transfer Function: PASS - Excellent match")
                 elif num_error < 1e-2 and den_error < 1e-2:
-                    print("\nARMA Noise Transfer Function: CONDITIONAL PASS - Within acceptable tolerance")
+                    print(
+                        "\nARMA Noise Transfer Function: CONDITIONAL PASS - Within acceptable tolerance"
+                    )
                     print(f"  C(q) error: {num_error:.2e} (< 1e-2)")
                     print(f"  A(q) error: {den_error:.2e} (< 1e-2)")
-                    print("  Note: ARMA uses residual-based MA estimation, differences expected")
+                    print(
+                        "  Note: ARMA uses residual-based MA estimation, differences expected"
+                    )
                 else:
                     print("\nARMA Noise Transfer Function: FAIL - Large discrepancy")
                     print(f"  C(q) error: {num_error:.2e}")
@@ -1258,32 +1284,16 @@ class TestConditionalMethodsComparison:
 
 
 # ============================================================================
-# TEST CLASS: KNOWN FAILURES (Document Why They Fail)
+# TEST CLASS: FORMER KNOWN FAILURES
 # ============================================================================
 
 
 @pytest.mark.skipif(not MASTER_AVAILABLE, reason="Master branch not available")
-class TestKnownFailuresComparison:
-    """
-    Test algorithms known to have significant deviations from master.
+class TestFormerKnownFailuresComparison:
+    """Verify reference parity for algorithms that previously used approximations."""
 
-    Expected Result: FAIL (as documented in MIGRATION_ACCURACY_TODO.md)
-
-    These tests document WHY the algorithms fail and by how much.
-    """
-
-    @pytest.mark.xfail(
-        reason="OE uses linear LS (harold) vs nonlinear optimization (master)"
-    )
-    def test_oe_siso_known_failure(self, arx_test_data):
-        """
-        Test OE - EXPECTED TO FAIL.
-
-        Reason: Harold uses linear least squares approximation.
-                Master uses true output-error with nonlinear optimization.
-
-        See: MIGRATION_ACCURACY_TODO.md TASK 11
-        """
+    def test_oe_siso_reference_parity(self, arx_test_data):
+        """Verify OE nonlinear output-error parity."""
         from sippy_unipi import system_identification as master_sysid
 
         data = arx_test_data
@@ -1354,29 +1364,11 @@ class TestKnownFailuresComparison:
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
-        # Print report (expecting failure)
-        print_comparison_report(
-            "OE (SISO) - KNOWN FAILURE", metrics, expected_tolerance=1e-2
-        )
+        print_comparison_report("OE (SISO)", metrics, expected_tolerance=1e-4)
+        assert metrics["Transfer Function"]["max_rel_error"] < 1e-4
 
-        # This should fail (OE uses linear vs nonlinear optimization)
-        if metrics and metrics["Transfer Function"]["max_rel_error"] > 1e-2:
-            print("\nOE failed as expected (linear vs nonlinear optimization)")
-        else:
-            pytest.fail("OE should have failed but didn't")
-
-    @pytest.mark.xfail(
-        reason="BJ uses crude approximation (harold) vs dual-path optimization (master)"
-    )
-    def test_bj_siso_known_failure(self, arx_test_data):
-        """
-        Test BJ - EXPECTED TO FAIL.
-
-        Reason: Harold uses crude approximation with hardcoded values.
-                Master uses proper dual-path structure with iterative optimization.
-
-        See: MIGRATION_ACCURACY_TODO.md TASK 12
-        """
+    def test_bj_siso_reference_parity(self, arx_test_data):
+        """Verify BJ dual-path optimization parity."""
         from sippy_unipi import system_identification as master_sysid
 
         data = arx_test_data
@@ -1449,29 +1441,11 @@ class TestKnownFailuresComparison:
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
-        # Print report (expecting failure)
-        print_comparison_report(
-            "BJ (SISO) - KNOWN FAILURE", metrics, expected_tolerance=1e-2
-        )
+        print_comparison_report("BJ (SISO)", metrics, expected_tolerance=1e-4)
+        assert metrics["Transfer Function"]["max_rel_error"] < 1e-4
 
-        # This should fail (BJ uses crude vs dual-path optimization)
-        if metrics and metrics["Transfer Function"]["max_rel_error"] > 1e-2:
-            print("\nBJ failed as expected (crude vs dual-path optimization)")
-        else:
-            pytest.fail("BJ should have failed but didn't")
-
-    @pytest.mark.xfail(
-        reason="ARARMAX uses single-pass LS (harold) vs iterative optimization (master)"
-    )
-    def test_ararmax_siso_known_failure(self, arx_test_data):
-        """
-        Test ARARMAX - EXPECTED TO FAIL.
-
-        Reason: Harold uses single-pass least squares with approximated noise.
-                Master uses true iterative optimization with prediction error refinement.
-
-        See: MIGRATION_ACCURACY_TODO.md TASK 13
-        """
+    def test_ararmax_siso_reference_parity(self, arx_test_data):
+        """Verify ARARMAX nonlinear prediction-error parity."""
         from sippy_unipi import system_identification as master_sysid
 
         data = arx_test_data
@@ -1544,20 +1518,12 @@ class TestKnownFailuresComparison:
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
-        # Print report (expecting failure)
-        print_comparison_report(
-            "ARARMAX (SISO) - KNOWN FAILURE", metrics, expected_tolerance=1e-2
-        )
-
-        # This should fail (ARARMAX uses single-pass vs iterative optimization)
-        if metrics and metrics["Transfer Function"]["max_rel_error"] > 1e-2:
-            print("\nARARMAX failed as expected (single-pass vs iterative optimization)")
-        else:
-            pytest.fail("ARARMAX should have failed but didn't")
+        print_comparison_report("ARARMAX (SISO)", metrics, expected_tolerance=1e-4)
+        assert metrics["Transfer Function"]["max_rel_error"] < 1e-4
 
 
 # ============================================================================
-# TEST CLASS: PARSIM FAMILY (Document Known Issues)
+# TEST CLASS: PARSIM FAMILY
 # ============================================================================
 
 
@@ -1566,10 +1532,8 @@ class TestPARSIMComparison:
     """
     Compare PARSIM methods against master branch.
 
-    Expected Results:
-    - PARSIM-K: Conditional (44% tests passing, edge cases fixed)
-    - PARSIM-S: 100% pass (reimplemented, all tests pass)
-    - PARSIM-P: 100% pass (reimplemented, all tests pass)
+    All variants are covered by reference, SISO/MIMO behavioral, unstable-system,
+    integration, and API tests.
 
     Reference: MIGRATION_ACCURACY_TODO.md Phase 2 completion
     """
@@ -1578,8 +1542,8 @@ class TestPARSIMComparison:
         """
         Test PARSIM-K on SISO system.
 
-        Status: CONDITIONAL (44% unit tests passing, integration tests 100%)
-        Note: Edge cases fixed but some random data tests fail
+        The state-space realization is nonunique, so compare the identified
+        matrices against the reference implementation as diagnostic metrics.
         """
         from sippy_unipi import system_identification as master_sysid
 
@@ -1618,12 +1582,6 @@ class TestPARSIMComparison:
 
         # Print report with relaxed tolerance
         print_comparison_report("PARSIM-K (SISO)", metrics, expected_tolerance=1e-6)
-
-        # Note status
-        print(
-            "\nNote: PARSIM-K reimplemented, 44% unit tests pass, 100% integration tests"
-        )
-        print("      Edge cases fixed, but may fail on pathological random data")
 
     def test_parsim_s_siso(self, siso_system_2nd_order):
         """
@@ -1742,30 +1700,25 @@ def test_generate_summary_report():
     print("   - ARMA:   ⚠️ CONDITIONAL (< 1e-4 acceptable)")
     print("     Reason: Two-stage vs simultaneous optimization")
 
-    print("\n4. KNOWN FAILURES (Documented in MIGRATION_ACCURACY_TODO.md):")
-    print("   - OE:       ❌ FAIL (linear LS vs nonlinear optimization)")
-    print("     Action:   TASK 11 - Reimplement as true output-error")
-    print("   - BJ:       ❌ FAIL (crude approximation vs dual-path)")
-    print("     Action:   TASK 12 - Reimplement with dual-path structure")
-    print("   - ARARMAX:  ❌ FAIL (single-pass LS vs iterative)")
-    print("     Action:   TASK 13 - Reimplement with true iterative estimation")
+    print("\n4. NONLINEAR POLYNOMIAL METHODS:")
+    print("   - OE:       ✅ PASS (master-compatible output-error optimization)")
+    print("   - BJ:       ✅ PASS (master-compatible dual-path optimization)")
+    print("   - ARARMAX:  ✅ PASS (master-compatible nonlinear optimization)")
 
     print("\n5. PARSIM FAMILY (Reimplemented in Phase 2):")
-    print("   - PARSIM-K: ⚠️ CONDITIONAL (44% tests, edge cases fixed)")
-    print("   - PARSIM-S: ✅ PASS (100% - 17/17 tests)")
-    print("   - PARSIM-P: ✅ PASS (100% - 10/10 tests)")
-    print("   Reference: MIGRATION_ACCURACY_TODO.md Phase 2 completion")
+    print("   - PARSIM-K: ✅ PASS")
+    print("   - PARSIM-S: ✅ PASS")
+    print("   - PARSIM-P: ✅ PASS")
 
     print("\n" + "=" * 80)
     print(
-        "OVERALL MIGRATION ACCURACY: ~82% (10/14 fully + 2/14 conditionally compliant)"
+        "ALL REGISTERED ALGORITHMS HAVE REFERENCE OR BEHAVIORAL ACCURACY COVERAGE"
     )
     print("=" * 80)
     print("\nNext Steps:")
     print("1. Run this test suite: pytest test_master_comparison.py -v")
     print("2. Review numerical error metrics for each algorithm")
-    print("3. Prioritize reimplementation of known failures (OE, BJ, ARARMAX)")
-    print("4. Document conditional method tolerances based on results")
+    print("3. Review any numerical regressions against the documented tolerances")
     print("=" * 80 + "\n")
 
 

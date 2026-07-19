@@ -28,7 +28,9 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
+from .ararx import _state_space_from_results
+from .opt_support import gen_mimo_id
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -175,19 +177,58 @@ class GENAlgorithm(IdentificationAlgorithm):
         # Validate parameters
         self.validate_parameters(na=na, nb=nb, nc=nc, nd=nd, nf=nf, nk=nk)
 
+        max_lag = max(na, nb + nk, nc, nd, nf, 1)
+        parameter_count = na + nb + nc + nd + nf
+        minimum_samples = max_lag + max(10, 2 * parameter_count)
+        if y.shape[1] < minimum_samples:
+            raise ValueError(
+                f"Insufficient data: need at least {minimum_samples} samples, "
+                f"got {y.shape[1]}"
+            )
+
         # Remove duplicate parameters from kwargs
         kwargs_filtered = {
-            k: v for k, v in kwargs.items()
+            k: v
+            for k, v in kwargs.items()
             if k not in ["na", "nb", "nc", "nd", "nf", "nk", "tsample"]
         }
 
         # Route to appropriate implementation
         if CASADI_AVAILABLE:
-            # Use NLP method (matches master branch)
             try:
-                return self._identify_nlp(
-                    y, u, na, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered
+                if y.shape[0] == 1:
+                    return self._identify_nlp(
+                        y,
+                        u,
+                        na,
+                        nb,
+                        nc,
+                        nd,
+                        nf,
+                        nk,
+                        sample_time,
+                        **kwargs_filtered,
+                    )
+                results, _ = gen_mimo_id(
+                    id_method="GEN",
+                    y=y,
+                    u=u,
+                    na=[int(na)] * y.shape[0],
+                    nb=np.full((y.shape[0], u.shape[0]), nb, dtype=int),
+                    nc=[int(nc)] * y.shape[0],
+                    nd=[int(nd)] * y.shape[0],
+                    nf=[int(nf)] * y.shape[0],
+                    theta=np.full((y.shape[0], u.shape[0]), nk, dtype=int),
+                    sample_time=sample_time,
+                    max_iterations=kwargs_filtered.get("max_iterations", 200),
+                    stability_margin=kwargs_filtered.get(
+                        "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
+                    ),
+                    enforce_stability=kwargs_filtered.get(
+                        "stability_constraint", kwargs_filtered.get("stab_cons", False)
+                    ),
                 )
+                return _state_space_from_results(results, u.shape[0], sample_time)
             except Exception as e:
                 warnings.warn(
                     f"NLP identification failed: {e}. Falling back to simplified LS method."
@@ -237,7 +278,9 @@ class GENAlgorithm(IdentificationAlgorithm):
         nu, _ = u.shape
 
         # Validate sufficient data for NLP
-        max_lag = max(na, nb + nk, nc, nd, nf) if max(na, nb + nk, nc, nd, nf) > 0 else 1
+        max_lag = (
+            max(na, nb + nk, nc, nd, nf) if max(na, nb + nk, nc, nd, nf) > 0 else 1
+        )
         n_params = na + nb + nc + nd + nf
         min_required = max_lag + max(10, n_params * 2)
 
@@ -288,20 +331,55 @@ class GENAlgorithm(IdentificationAlgorithm):
 
         # Create G_tf and H_tf transfer functions
         G_tf, H_tf = self._create_transfer_functions_gen(
-            A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-            na, nb, nc, nd, nf, nk, ny, nu, sample_time
+            A_coeffs,
+            B_coeffs,
+            C_coeffs,
+            D_coeffs,
+            F_coeffs,
+            na,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            ny,
+            nu,
+            sample_time,
         )
 
         # Create state-space representation
         if HAROLD_AVAILABLE:
             model = self._create_state_space_from_gen(
-                A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-                na, nb, nc, nd, nf, ny, nu, sample_time
+                A_coeffs,
+                B_coeffs,
+                C_coeffs,
+                D_coeffs,
+                F_coeffs,
+                na,
+                nb,
+                nc,
+                nd,
+                nf,
+                nk,
+                ny,
+                nu,
+                sample_time,
             )
         else:
             model = self._create_mock_model(
-                A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-                na, nb, nc, nd, nf, ny, nu, sample_time
+                A_coeffs,
+                B_coeffs,
+                C_coeffs,
+                D_coeffs,
+                F_coeffs,
+                na,
+                nb,
+                nc,
+                nd,
+                nf,
+                ny,
+                nu,
+                sample_time,
             )
 
         # Attach results
@@ -318,7 +396,19 @@ class GENAlgorithm(IdentificationAlgorithm):
         return model
 
     def _build_gen_nlp(
-        self, u, y, na, nb, nc, nd, nf, nk, N, max_iterations, stability_constraint, stability_margin
+        self,
+        u,
+        y,
+        na,
+        nb,
+        nc,
+        nd,
+        nf,
+        nk,
+        N,
+        max_iterations,
+        stability_constraint,
+        stability_margin,
     ):
         """
         Build and solve GEN NLP problem using CasADi + IPOPT.
@@ -625,12 +715,16 @@ class GENAlgorithm(IdentificationAlgorithm):
         nu, _ = u.shape
 
         # Calculate effective data length
-        max_lag = max(na, nb + nk, nc, nd, nf) if max(na, nb + nk, nc, nd, nf) > 0 else 1
+        max_lag = (
+            max(na, nb + nk, nc, nd, nf) if max(na, nb + nk, nc, nd, nf) > 0 else 1
+        )
         N_eff = N - max_lag
 
         # Check for sufficient data (need enough for regression matrix)
         n_params = na + nb + nc + nd + nf
-        min_required = max_lag + max(10, n_params * 2)  # Need enough samples for estimation
+        min_required = max_lag + max(
+            10, n_params * 2
+        )  # Need enough samples for estimation
 
         if N_eff <= 0 or N < min_required:
             raise ValueError(
@@ -727,20 +821,55 @@ class GENAlgorithm(IdentificationAlgorithm):
 
         # Create G_tf and H_tf transfer functions
         G_tf, H_tf = self._create_transfer_functions_gen(
-            A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-            na, nb, nc, nd, nf, nk, ny, nu, sample_time
+            A_coeffs,
+            B_coeffs,
+            C_coeffs,
+            D_coeffs,
+            F_coeffs,
+            na,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            ny,
+            nu,
+            sample_time,
         )
 
         # Create state-space representation
         if HAROLD_AVAILABLE:
             model = self._create_state_space_from_gen(
-                A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-                na, nb, nc, nd, nf, ny, nu, sample_time
+                A_coeffs,
+                B_coeffs,
+                C_coeffs,
+                D_coeffs,
+                F_coeffs,
+                na,
+                nb,
+                nc,
+                nd,
+                nf,
+                nk,
+                ny,
+                nu,
+                sample_time,
             )
         else:
             model = self._create_mock_model(
-                A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-                na, nb, nc, nd, nf, ny, nu, sample_time
+                A_coeffs,
+                B_coeffs,
+                C_coeffs,
+                D_coeffs,
+                F_coeffs,
+                na,
+                nb,
+                nc,
+                nd,
+                nf,
+                ny,
+                nu,
+                sample_time,
             )
 
         # Attach transfer functions and predictions to model
@@ -751,8 +880,21 @@ class GENAlgorithm(IdentificationAlgorithm):
         return model
 
     def _create_transfer_functions_gen(
-        self, A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-        na, nb, nc, nd, nf, nk, ny, nu, Ts
+        self,
+        A_coeffs,
+        B_coeffs,
+        C_coeffs,
+        D_coeffs,
+        F_coeffs,
+        na,
+        nb,
+        nc,
+        nd,
+        nf,
+        nk,
+        ny,
+        nu,
+        Ts,
     ):
         """
         Create G_tf and H_tf transfer functions for GEN.
@@ -784,12 +926,12 @@ class GENAlgorithm(IdentificationAlgorithm):
             import harold
 
             # G_tf = B(q) / [A(q) * F(q)]
-            max_order_g = max(nb + nk, na + nf)
+            polynomial_length_g = max(nb + nk, na + nf + 1)
 
-            NUM_G = np.zeros(max_order_g)
+            NUM_G = np.zeros(polynomial_length_g)
             NUM_G[nk : nk + nb] = B_coeffs[0, :nb]
 
-            DEN_G = np.zeros(max_order_g + 1)
+            DEN_G = np.zeros(polynomial_length_g)
             DEN_G[0] = 1.0
 
             # Multiply A(q) and F(q) polynomials
@@ -835,8 +977,21 @@ class GENAlgorithm(IdentificationAlgorithm):
             return None, None
 
     def _create_state_space_from_gen(
-        self, A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-        na, nb, nc, nd, nf, ny, nu, Ts
+        self,
+        A_coeffs,
+        B_coeffs,
+        C_coeffs,
+        D_coeffs,
+        F_coeffs,
+        na,
+        nb,
+        nc,
+        nd,
+        nf,
+        nk,
+        ny,
+        nu,
+        Ts,
     ):
         """
         Create state-space model from GEN coefficients using harold.
@@ -857,6 +1012,38 @@ class GENAlgorithm(IdentificationAlgorithm):
         model : StateSpaceModel
             State-space model representation
         """
+        if ny == 1 and nu == 1:
+            G_tf, _ = self._create_transfer_functions_gen(
+                A_coeffs,
+                B_coeffs,
+                C_coeffs,
+                D_coeffs,
+                F_coeffs,
+                na,
+                nb,
+                nc,
+                nd,
+                nf,
+                nk,
+                ny,
+                nu,
+                Ts,
+            )
+            if G_tf is not None:
+                A, B, C, D = realize_transfer_function(G_tf)
+                return StateSpaceModel(
+                    A=A,
+                    B=B,
+                    C=C,
+                    D=D,
+                    K=np.zeros((A.shape[0], C.shape[0])),
+                    Q=np.eye(A.shape[0]),
+                    R=np.eye(C.shape[0]),
+                    S=np.zeros((A.shape[0], C.shape[0])),
+                    ts=Ts,
+                    Vn=0.01,
+                )
+
         # State dimension should represent system complexity
         n_states = max(na, nb, nc, nd, nf) + max(nb, nc, nd, nf)
 
@@ -906,8 +1093,20 @@ class GENAlgorithm(IdentificationAlgorithm):
         )
 
     def _create_mock_model(
-        self, A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs,
-        na, nb, nc, nd, nf, ny, nu, Ts
+        self,
+        A_coeffs,
+        B_coeffs,
+        C_coeffs,
+        D_coeffs,
+        F_coeffs,
+        na,
+        nb,
+        nc,
+        nd,
+        nf,
+        ny,
+        nu,
+        Ts,
     ):
         """
         Create a mock state-space model when harold is not available.

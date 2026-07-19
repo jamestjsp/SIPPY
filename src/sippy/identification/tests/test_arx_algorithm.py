@@ -70,7 +70,12 @@ class TestARXAlgorithm:
             mock_undiscretize.C = np.zeros((1, 2))
             mock_undiscretize.D = np.zeros((1, 1))
 
-            result = algorithm.identify(iddata=self.data, na=self.config.na, nb=self.config.nb, nk=self.config.nk)
+            result = algorithm.identify(
+                iddata=self.data,
+                na=self.config.na,
+                nb=self.config.nb,
+                nk=self.config.nk,
+            )
 
             assert isinstance(result, StateSpaceModel)
             assert result.A is not None
@@ -100,7 +105,9 @@ class TestARXAlgorithm:
                 mock_tf.NumberOfOutputs = 1
                 mock_tf.SamplingPeriod = 1.0
 
-                result = algorithm.identify(iddata=self.data, na=config.na, nb=config.nb, nk=config.nk)
+                result = algorithm.identify(
+                    iddata=self.data, na=config.na, nb=config.nb, nk=config.nk
+                )
                 assert result is not None
 
     def test_arx_mimo_system(self):
@@ -132,7 +139,9 @@ class TestARXAlgorithm:
             mock_tf.NumberOfOutputs = 2
             mock_tf.SamplingPeriod = 1.0
 
-            result = algorithm.identify(iddata=data, na=config.na, nb=config.nb, nk=config.nk)
+            result = algorithm.identify(
+                iddata=data, na=config.na, nb=config.nb, nk=config.nk
+            )
             assert result is not None
 
     def test_arx_without_harold(self):
@@ -141,7 +150,12 @@ class TestARXAlgorithm:
 
         with patch("sippy.identification.algorithms.arx.HAROLD_AVAILABLE", False):
             with pytest.warns(UserWarning, match="harold library not available"):
-                result = algorithm.identify(iddata=self.data, na=self.config.na, nb=self.config.nb, nk=self.config.nk)
+                result = algorithm.identify(
+                    iddata=self.data,
+                    na=self.config.na,
+                    nb=self.config.nb,
+                    nk=self.config.nk,
+                )
                 # Should return a mock model when harold is not available
                 assert result is not None
                 assert isinstance(result, StateSpaceModel)
@@ -155,7 +169,12 @@ class TestARXAlgorithm:
         invalid_config.na = 0  # Invalid na
 
         with pytest.raises(ValueError, match="AR order \\(na\\) must be positive"):
-            algorithm.identify(iddata=self.data, na=invalid_config.na, nb=invalid_config.nb, nk=invalid_config.nk)
+            algorithm.identify(
+                iddata=self.data,
+                na=invalid_config.na,
+                nb=invalid_config.nb,
+                nk=invalid_config.nk,
+            )
 
     def test_arx_data_validation(self):
         """Test ARX algorithm validates input data."""
@@ -189,7 +208,12 @@ class TestARXAlgorithm:
             mock_tf.NumberOfOutputs = 3
             mock_tf.SamplingPeriod = 1.0
 
-            result = algorithm.identify(iddata=invalid_data, na=self.config.na, nb=self.config.nb, nk=self.config.nk)
+            result = algorithm.identify(
+                iddata=invalid_data,
+                na=self.config.na,
+                nb=self.config.nb,
+                nk=self.config.nk,
+            )
             assert result is not None
 
 
@@ -220,15 +244,6 @@ class TestARXMasterExamples:
         NUM13 = [7.0, 5.5, 2.2]
         NUM14 = [-0.9, -0.11, 0.0, 0.0]
         DEN1 = [1.0, -0.3, -0.25, -0.021, 0.0, 0.0]
-        na1 = 3
-        nb11 = 2
-        th11 = 1
-        nb12 = 1
-        th12 = 2
-        nb13 = 3
-        th13 = 2
-        nb14 = 2
-        th14 = 1
 
         # Output 2 transfer functions
         NUM21 = [-85, -57.5, -27.7]
@@ -236,15 +251,6 @@ class TestARXMasterExamples:
         NUM23 = [-0.1, 0.0, 0.0, 0.0]
         NUM24 = [0.994, 0.0, 0.0, 0.0]
         DEN2 = [1.0, -0.4, 0.0, 0.0, 0.0]
-        na2 = 1
-        nb21 = 3
-        th21 = 1
-        nb22 = 2
-        th22 = 2
-        nb23 = 1
-        th23 = 0
-        nb24 = 1
-        th24 = 0
 
         # Output 3 transfer functions
         NUM31 = [0.2, 0.0, 0.0, 0.0]
@@ -252,15 +258,6 @@ class TestARXMasterExamples:
         NUM33 = [0.1, 0.0, 0.0, 0.0]
         NUM34 = [0.891, 0.223]
         DEN3 = [1.0, -0.1, -0.3, 0.0, 0.0]
-        na3 = 2
-        nb31 = 1
-        th31 = 0
-        nb32 = 2
-        th32 = 1
-        nb33 = 1
-        th33 = 0
-        nb34 = 2
-        th34 = 2
 
         # Generate input signals using GBN (Generalize Binary Sequence)
         Usim = np.zeros((4, npts))
@@ -333,17 +330,6 @@ class TestARXMasterExamples:
             id_data = IDData(data=data_df, inputs=inputs, outputs=outputs, tsample=1.0)
 
             # Set up ARX orders from master example
-            ordersna = [na1, na2, na3]  # [3, 1, 2]
-            ordersnb = [
-                [nb11, nb12, nb13, nb14],  # [2, 1, 3, 2]
-                [nb21, nb22, nb23, nb24],  # [3, 2, 1, 1]
-                [nb31, nb32, nb33, nb34],  # [1, 2, 1, 2]
-            ]
-            theta_list = [
-                [th11, th12, th13, th14],  # [1, 2, 2, 1]
-                [th21, th22, th23, th24],  # [1, 2, 0, 0]
-                [th31, th32, th33, th34],  # [0, 1, 0, 2]
-            ]
 
             # Test ARX identification using new API
             config = SystemIdentificationConfig(method="ARX")

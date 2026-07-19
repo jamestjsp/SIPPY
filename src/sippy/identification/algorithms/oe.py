@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
+from .ararx import _state_space_from_results, _state_space_from_single_result
+from .opt_support import gen_mimo_id, gen_miso_id
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -145,7 +147,12 @@ class OEAlgorithm(IdentificationAlgorithm):
         from ..base import SystemIdentificationConfig
         from ..iddata import IDData as IDDataClass
 
-        if y is not None and isinstance(y, IDDataClass) and u is not None and isinstance(u, SystemIdentificationConfig):
+        if (
+            y is not None
+            and isinstance(y, IDDataClass)
+            and u is not None
+            and isinstance(u, SystemIdentificationConfig)
+        ):
             # Old API: identify(data, config)
             iddata = y
             config = u
@@ -153,10 +160,10 @@ class OEAlgorithm(IdentificationAlgorithm):
             u = None
             # Extract parameters from config
             kwargs = {
-                'nb': getattr(config, 'nb', 2),
-                'nf': getattr(config, 'nf', 2),
-                'nk': getattr(config, 'nk', 1),
-                'max_iterations': getattr(config, 'max_iterations', 200),
+                "nb": getattr(config, "nb", 2),
+                "nf": getattr(config, "nf", 2),
+                "nk": getattr(config, "nk", 1),
+                "max_iterations": getattr(config, "max_iterations", 200),
             }
 
         # Validate input arguments
@@ -186,17 +193,62 @@ class OEAlgorithm(IdentificationAlgorithm):
 
         # Route to appropriate implementation
         # Remove nb, nf, nk from kwargs to avoid duplicate argument errors
-        kwargs_filtered = {k: v for k, v in kwargs.items() if k not in ['nb', 'nf', 'nk', 'tsample']}
+        kwargs_filtered = {
+            k: v for k, v in kwargs.items() if k not in ["nb", "nf", "nk", "tsample"]
+        }
 
         if CASADI_AVAILABLE:
-            # Use NLP method (matches master branch)
             try:
-                return self._identify_nlp(y, u, nb, nf, nk, sample_time, **kwargs_filtered)
+                if y.shape[0] == 1:
+                    result = gen_miso_id(
+                        id_method="OE",
+                        y=y[0],
+                        u=u,
+                        na=0,
+                        nb=np.full(u.shape[0], nb, dtype=int),
+                        nc=0,
+                        nd=0,
+                        nf=int(nf),
+                        theta=np.full(u.shape[0], nk, dtype=int),
+                        max_iterations=kwargs_filtered.get("max_iterations", 200),
+                        stability_margin=kwargs_filtered.get(
+                            "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
+                        ),
+                        enforce_stability=kwargs_filtered.get(
+                            "stability_constraint",
+                            kwargs_filtered.get("stab_cons", False),
+                        ),
+                    )
+                    return _state_space_from_single_result(
+                        result, u.shape[0], sample_time
+                    )
+                results, _ = gen_mimo_id(
+                    id_method="OE",
+                    y=y,
+                    u=u,
+                    na=[0] * y.shape[0],
+                    nb=np.full((y.shape[0], u.shape[0]), nb, dtype=int),
+                    nc=[0] * y.shape[0],
+                    nd=[0] * y.shape[0],
+                    nf=[int(nf)] * y.shape[0],
+                    theta=np.full((y.shape[0], u.shape[0]), nk, dtype=int),
+                    sample_time=sample_time,
+                    max_iterations=kwargs_filtered.get("max_iterations", 200),
+                    stability_margin=kwargs_filtered.get(
+                        "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
+                    ),
+                    enforce_stability=kwargs_filtered.get(
+                        "stability_constraint", kwargs_filtered.get("stab_cons", False)
+                    ),
+                )
+                return _state_space_from_results(results, u.shape[0], sample_time)
             except Exception as e:
                 warnings.warn(
                     f"NLP identification failed: {e}. Falling back to simplified LS method."
                 )
-                return self._identify_ills(y, u, nb, nf, nk, sample_time, **kwargs_filtered)
+                return self._identify_ills(
+                    y, u, nb, nf, nk, sample_time, **kwargs_filtered
+                )
         else:
             # Fall back to simplified iterative least squares
             warnings.warn(
@@ -329,9 +381,7 @@ class OEAlgorithm(IdentificationAlgorithm):
 
         return model
 
-    def _identify_nlp(
-        self, y, u, nb, nf, nk, sample_time, **kwargs
-    ) -> StateSpaceModel:
+    def _identify_nlp(self, y, u, nb, nf, nk, sample_time, **kwargs) -> StateSpaceModel:
         """
         OE identification using NLP (CasADi + IPOPT).
 
@@ -420,7 +470,16 @@ class OEAlgorithm(IdentificationAlgorithm):
         return model
 
     def _build_oe_nlp(
-        self, u, y, nb, nf, nk, N, max_iterations, stability_constraint, stability_margin
+        self,
+        u,
+        y,
+        nb,
+        nf,
+        nk,
+        N,
+        max_iterations,
+        stability_constraint,
+        stability_margin,
     ):
         """
         Build and solve OE NLP problem using CasADi + IPOPT.
@@ -666,12 +725,12 @@ class OEAlgorithm(IdentificationAlgorithm):
             import harold
 
             # Create G(q) = B / F - Deterministic transfer function
-            max_order = max(nf, nb + nk)
+            polynomial_length = max(nf + 1, nb + nk)
 
-            NUM_G = np.zeros(max_order)
+            NUM_G = np.zeros(polynomial_length)
             NUM_G[nk : nk + nb] = B_coeffs[0, :] if ny == 1 else B_coeffs[0, :nb]
 
-            DEN_G = np.zeros(max_order + 1)
+            DEN_G = np.zeros(polynomial_length)
             DEN_G[0] = 1.0
             DEN_G[1 : nf + 1] = F_coeffs[0, :]
 
@@ -705,6 +764,25 @@ class OEAlgorithm(IdentificationAlgorithm):
         model : StateSpaceModel
             State-space model representation
         """
+        if ny == 1 and nu == 1:
+            G_tf, _ = self._create_transfer_functions_oe(
+                B_coeffs, F_coeffs, nb, nf, nk, ny, nu, Ts
+            )
+            if G_tf is not None:
+                A, B, C, D = realize_transfer_function(G_tf)
+                return StateSpaceModel(
+                    A=A,
+                    B=B,
+                    C=C,
+                    D=D,
+                    K=np.zeros((A.shape[0], C.shape[0])),
+                    Q=np.eye(A.shape[0]),
+                    R=np.eye(C.shape[0]),
+                    S=np.zeros((A.shape[0], C.shape[0])),
+                    ts=Ts,
+                    Vn=0.01,
+                )
+
         # Build observer canonical form state-space representation for OE
         n_states = nf  # Number of states equals denominator order
 

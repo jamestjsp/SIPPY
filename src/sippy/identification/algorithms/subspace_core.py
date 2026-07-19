@@ -328,7 +328,11 @@ class SubspaceCoreAlgorithm:
 
         # Fast pinv for Ob
         try:
-            Ob_pinv = pinv_compiled_svd(Ob) if NUMBA_AVAILABLE and pinv_compiled_svd is not None else np.linalg.pinv(Ob)
+            Ob_pinv = (
+                pinv_compiled_svd(Ob)
+                if NUMBA_AVAILABLE and pinv_compiled_svd is not None
+                else np.linalg.pinv(Ob)
+            )
         except Exception:
             Ob_pinv = np.linalg.pinv(Ob)
         X_fd = np.dot(Ob_pinv, O_i)
@@ -343,19 +347,31 @@ class SubspaceCoreAlgorithm:
 
         if D_required:
             try:
-                Dxinv = pinv_compiled_svd(Dxterm) if NUMBA_AVAILABLE and pinv_compiled_svd is not None else np.linalg.pinv(Dxterm)
+                Dxinv = (
+                    pinv_compiled_svd(Dxterm)
+                    if NUMBA_AVAILABLE and pinv_compiled_svd is not None
+                    else np.linalg.pinv(Dxterm)
+                )
             except Exception:
                 Dxinv = np.linalg.pinv(Dxterm)
             M = np.dot(Sxterm, Dxinv)
         else:
             M = np.zeros((n + l, n + m))
             try:
-                Dxinv = pinv_compiled_svd(Dxterm) if NUMBA_AVAILABLE and pinv_compiled_svd is not None else np.linalg.pinv(Dxterm)
+                Dxinv = (
+                    pinv_compiled_svd(Dxterm)
+                    if NUMBA_AVAILABLE and pinv_compiled_svd is not None
+                    else np.linalg.pinv(Dxterm)
+                )
             except Exception:
                 Dxinv = np.linalg.pinv(Dxterm)
             M[0:n, :] = np.dot(Sxterm[0:n], Dxinv)
             try:
-                Dxinv_state = pinv_compiled_svd(Dxterm[0:n, :]) if NUMBA_AVAILABLE and pinv_compiled_svd is not None else np.linalg.pinv(Dxterm[0:n, :])
+                Dxinv_state = (
+                    pinv_compiled_svd(Dxterm[0:n, :])
+                    if NUMBA_AVAILABLE and pinv_compiled_svd is not None
+                    else np.linalg.pinv(Dxterm[0:n, :])
+                )
             except Exception:
                 Dxinv_state = np.linalg.pinv(Dxterm[0:n, :])
             M[n::, 0:n] = np.dot(Sxterm[n::], Dxinv_state)
@@ -401,7 +417,11 @@ class SubspaceCoreAlgorithm:
             Forced_A = True
             warnings.warn("Forcing A stability")
             try:
-                Ob_pinv = pinv_compiled_svd(Ob) if NUMBA_AVAILABLE and pinv_compiled_svd is not None else np.linalg.pinv(Ob)
+                Ob_pinv = (
+                    pinv_compiled_svd(Ob)
+                    if NUMBA_AVAILABLE and pinv_compiled_svd is not None
+                    else np.linalg.pinv(Ob)
+                )
             except Exception:
                 Ob_pinv = np.linalg.pinv(Ob)
             M[0:n, 0:n] = np.dot(Ob_pinv, impile(Ob[l::, :], np.zeros((l, n))))
@@ -412,7 +432,11 @@ class SubspaceCoreAlgorithm:
                 X_fd_next = np.ascontiguousarray(X_fd[:, 1:N])
                 X_fd_curr = np.ascontiguousarray(X_fd[:, 0 : N - 1])
                 try:
-                    Uinv = pinv_compiled_svd(u_slice_det) if NUMBA_AVAILABLE and pinv_compiled_svd is not None else np.linalg.pinv(u_slice_det)
+                    Uinv = (
+                        pinv_compiled_svd(u_slice_det)
+                        if NUMBA_AVAILABLE and pinv_compiled_svd is not None
+                        else np.linalg.pinv(u_slice_det)
+                    )
                 except Exception:
                     Uinv = np.linalg.pinv(u_slice_det)
                 B_new = np.dot(X_fd_next - np.dot(M[0:n, 0:n], X_fd_curr), Uinv)

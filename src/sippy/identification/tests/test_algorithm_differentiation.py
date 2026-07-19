@@ -228,7 +228,13 @@ class TestAlgorithmSignatureCompatibility:
             "PARSIM-P",
             "ARX",
             "ARARX",
+            "ARARMAX",
             "FIR",
+            "ARMAX",
+            "OE",
+            "ARMA",
+            "BJ",
+            "GEN",
         ],
     )
     def test_algorithm_can_be_called_through_system_identification(
@@ -246,9 +252,42 @@ class TestAlgorithmSignatureCompatibility:
             config.na = 1
             config.nb = 1
             config.nk = 1
+        elif method == "ARARMAX":
+            config.na = 1
+            config.nb = 1
+            config.nc = 1
+            config.nd = 1
+            config.nf = 0
+            config.nk = 0
         elif method == "FIR":
             config.nb = 5
             config.nk = 1
+        elif method == "ARMAX":
+            config.na = 1
+            config.nb = 1
+            config.nc = 1
+            config.nk = 0
+        elif method == "OE":
+            config.nb = 1
+            config.nf = 1
+            config.nk = 0
+        elif method == "ARMA":
+            config.na = 1
+            config.nc = 1
+        elif method == "BJ":
+            config.nb = 1
+            config.nc = 1
+            config.nd = 1
+            config.nf = 1
+            config.nk = 0
+        elif method == "GEN":
+            config.na = 1
+            config.nb = 1
+            config.nc = 0
+            config.nd = 0
+            config.nf = 0
+            config.nk = 0
+        config.max_iterations = 30
 
         # This should not raise an error
         identifier = SystemIdentification(config)
@@ -260,41 +299,6 @@ class TestAlgorithmSignatureCompatibility:
         assert hasattr(model, "B")
         assert hasattr(model, "C")
         assert hasattr(model, "D")
-
-
-@pytest.mark.xfail(
-    reason="ARMAX, OE, BJ, ARMA have signature incompatibility - known issue"
-)
-class TestSignatureIncompatibleAlgorithms:
-    """Test algorithms known to have signature issues.
-
-    These tests are marked as xfail to document the known issue.
-    Once signatures are fixed, remove xfail decorator.
-    """
-
-    @pytest.mark.parametrize(
-        "method,params",
-        [
-            ("OE", {"nb": 1, "nf": 1, "nk": 1}),
-            ("BJ", {"nb": 1, "nc": 1, "nd": 1, "nf": 1, "nk": 1}),
-        ],
-    )
-    def test_incompatible_algorithm_fails_gracefully(
-        self, method, params, test_data_siso
-    ):
-        """Document that these algorithms currently fail with signature error."""
-        u, y = test_data_siso
-
-        config = SystemIdentificationConfig(method=method)
-        for key, value in params.items():
-            setattr(config, key, value)
-
-        identifier = SystemIdentification(config)
-
-        # This will currently fail with:
-        # "ARMAXAlgorithm.identify() got an unexpected keyword argument 'method'"
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
-            identifier.identify(y=y, u=u)
 
 
 if __name__ == "__main__":

@@ -7,17 +7,17 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 
 from ..base import IdentificationAlgorithm, StateSpaceModel
-from .opt_support import (
-    gen_mimo_id,
-    gen_miso_id,
-    armax_mimo_id,
-    armax_miso_id,
-)
 from .ararx import (
     _normalize_matrix,
     _normalize_orders,
     _state_space_from_results,
     _state_space_from_single_result,
+)
+from .opt_support import (
+    armax_mimo_id,
+    armax_miso_id,
+    gen_mimo_id,
+    gen_miso_id,
 )
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -27,14 +27,16 @@ if TYPE_CHECKING:  # pragma: no cover
 class ARMAXAlgorithm(IdentificationAlgorithm):
     """ARMAX identification with master-compatible solvers."""
 
-    def __init__(self, mode: str = "NLP") -> None:
+    def __init__(self, mode: str = "ILLS") -> None:
         super().__init__()
         self.default_mode = mode.upper()
 
     def get_algorithm_name(self) -> str:
         return "ARMAX"
 
-    def validate_parameters(self, **kwargs) -> bool:  # pragma: no cover - simple validation
+    def validate_parameters(
+        self, **kwargs
+    ) -> bool:  # pragma: no cover - simple validation
         for name in ("na", "nb", "nc"):
             if name not in kwargs:
                 continue
@@ -94,7 +96,9 @@ class ARMAXAlgorithm(IdentificationAlgorithm):
         if mode == "OPT":
             mode = "NLP"
         stability_margin = kwargs.get("stability_margin", kwargs.get("stab_marg", 1.0))
-        enforce_stability = kwargs.get("stability_constraint", kwargs.get("stab_cons", False))
+        enforce_stability = kwargs.get(
+            "stability_constraint", kwargs.get("stab_cons", False)
+        )
 
         if ny == 1:
             nb_vec = _normalize_matrix(nb, 1, nu, allow_zero=False).ravel()
@@ -129,7 +133,9 @@ class ARMAXAlgorithm(IdentificationAlgorithm):
                         enforce_stability=enforce_stability,
                     )
                 except RuntimeError as exc:
-                    raise RuntimeError("CasADi is required for ARMAX NLP identification") from exc
+                    raise RuntimeError(
+                        "CasADi is required for ARMAX NLP identification"
+                    ) from exc
             return _state_space_from_single_result(result, nu, sample_time)
 
         na_vec = _normalize_orders(na, ny)
@@ -166,6 +172,8 @@ class ARMAXAlgorithm(IdentificationAlgorithm):
                     enforce_stability=enforce_stability,
                 )
             except RuntimeError as exc:
-                raise RuntimeError("CasADi is required for ARMAX NLP identification") from exc
+                raise RuntimeError(
+                    "CasADi is required for ARMAX NLP identification"
+                ) from exc
 
         return _state_space_from_results(results, nu, sample_time)

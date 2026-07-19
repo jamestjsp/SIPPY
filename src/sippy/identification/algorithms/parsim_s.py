@@ -2,12 +2,15 @@
 PARSIM-S algorithm implementation.
 """
 
-import warnings
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import (
+    IdentificationAlgorithm,
+    StateSpaceModel,
+    resolve_identification_data,
+)
 from .parsim_core import ParsimCoreAlgorithm
 
 if TYPE_CHECKING:
@@ -20,19 +23,6 @@ class PARSIMSAlgorithm(IdentificationAlgorithm):
 
     This algorithm identifies state-space models from input-output data by
     estimating the observer form with focus on stability properties.
-
-    WARNING: REIMPLEMENTATION IN PROGRESS
-    ======================================
-
-    This algorithm has been reimplemented following TDD but has edge case issues:
-    - PARSIM-S: 65% tests passing (11/17 unit tests pass)
-    - Integration tests 100% pass for realistic data
-    - Some unit tests fail with malformed random data (not real-world scenarios)
-    - Helper functions implemented: svd_weighted_k, ak_c_estimating_s_p,
-      simulations_sequence_s
-
-    See test results in test_parsim_s_reimplementation.py for details.
-    For production use, verify behavior on your specific data.
 
     Reference:
     ----------
@@ -73,14 +63,8 @@ class PARSIMSAlgorithm(IdentificationAlgorithm):
         Note:
             Either (y, u) or iddata should be provided, but not both.
         """
-        # Issue runtime warning (less severe since integration tests pass)
-        warnings.warn(
-            "PARSIM-S has been reimplemented and integration tests pass 100%, "
-            "but some edge cases may fail (65% unit tests passing). "
-            "Verify behavior on your specific data. "
-            "See test_parsim_s_reimplementation.py for details.",
-            category=UserWarning,
-            stacklevel=2,
+        y, u, tsample = resolve_identification_data(
+            y, u, iddata, tsample=kwargs.get("tsample", 1.0)
         )
 
         self.validate_parameters(**kwargs)
@@ -91,7 +75,6 @@ class PARSIMSAlgorithm(IdentificationAlgorithm):
         threshold = kwargs.get("ss_threshold", 0.1)
         fixed_order = kwargs.get("ss_fixed_order", np.nan)
         d_required = kwargs.get("ss_d_required", False)
-        tsample = kwargs.get("tsample", 1.0)
 
         # Call the core PARSIM-S implementation
         try:

@@ -2,12 +2,15 @@
 PARSIM-K algorithm implementation.
 """
 
-import warnings
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import (
+    IdentificationAlgorithm,
+    StateSpaceModel,
+    resolve_identification_data,
+)
 from .parsim_core import ParsimCoreAlgorithm
 
 if TYPE_CHECKING:
@@ -20,18 +23,6 @@ class PARSIMKAlgorithm(IdentificationAlgorithm):
 
     This algorithm identifies state-space models from input-output data by
     estimating the observer form directly with Kalman gain estimation.
-
-    WARNING: REIMPLEMENTATION IN PROGRESS
-    ======================================
-
-    This algorithm has been reimplemented following TDD but has edge case issues:
-    - PARSIM-K: 44% tests passing (4/9 unit tests pass)
-    - Core logic correct, edge cases with dimension handling fail
-    - Helper functions implemented: svd_weighted_k, simulations_sequence_k,
-      ss_lsim_predictor_form
-
-    See test results in test_parsim_k_reimplementation.py for details.
-    For production use, verify behavior on your specific data.
 
     Reference:
     ----------
@@ -73,13 +64,8 @@ class PARSIMKAlgorithm(IdentificationAlgorithm):
         Note:
             Either (y, u) or iddata should be provided, but not both.
         """
-        # Issue runtime warning
-        warnings.warn(
-            "PARSIM-K has been reimplemented but may have edge case issues "
-            "(44% tests passing). Test on your data before production use. "
-            "See test_parsim_k_reimplementation.py for details.",
-            category=UserWarning,
-            stacklevel=2,
+        y, u, tsample = resolve_identification_data(
+            y, u, iddata, tsample=kwargs.get("tsample", 1.0)
         )
 
         self.validate_parameters(**kwargs)
@@ -91,7 +77,6 @@ class PARSIMKAlgorithm(IdentificationAlgorithm):
         fixed_order = kwargs.get("ss_fixed_order", np.nan)
         d_required = kwargs.get("ss_d_required", False)
         b_recalc = kwargs.get("ss_pk_b_reval", False)
-        tsample = kwargs.get("tsample", 1.0)
 
         # Call the core PARSIM-K implementation
         try:

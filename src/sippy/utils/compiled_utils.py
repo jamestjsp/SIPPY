@@ -900,7 +900,7 @@ def create_regression_matrix_fir_compiled(u, y, nb, nk, ny, nu, N):
     for i in prange(nb):
         for j in range(nu):
             col_idx = i * nu + j
-            delay_idx = max_lag - 1 - i
+            delay_idx = max_lag - nk - i
             if delay_idx >= 0 and delay_idx + N_eff <= N:
                 Phi[:, col_idx] = u[j, delay_idx : delay_idx + N_eff]
 
@@ -2119,7 +2119,9 @@ def build_armax_regression_parallel(y, u, noise_hat, na, nb, nc, nk, max_order, 
 
 
 @jit(parallel=True)
-def build_armax_regression_miso_parallel(y, U, noise_hat, na, nb_vec, nc, theta_vec, max_order, N_eff):
+def build_armax_regression_miso_parallel(
+    y, U, noise_hat, na, nb_vec, nc, theta_vec, max_order, N_eff
+):
     """
     Compiled parallel ARMAX ILLS regression builder for multi-input (MISO) case.
 

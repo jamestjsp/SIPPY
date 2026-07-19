@@ -22,16 +22,12 @@ class TestBJAlgorithm:
         self.n_samples = 1000
 
         # Create test data for BJ (SISO system with colored noise)
-        t = np.linspace(0, 100, self.n_samples)
+        np.linspace(0, 100, self.n_samples)
         u = np.random.normal(0, 1, self.n_samples)  # Input signal
 
         # Generate BJ process: y[k] = B(q)/D(q)*u[k] + C(q)/F(q)*e[k]
         # BJ(2,3,1,2) model as example
-        na = 0  # No AR part in BJ
         nb = 2
-        nc = 1
-        nd = 3
-        nf = 2
 
         # Simulate simplified BJ process
         y = np.zeros(self.n_samples)
@@ -81,7 +77,14 @@ class TestBJAlgorithm:
         """Test BJ basic identification."""
         algorithm = BJAlgorithm()
 
-        result = algorithm.identify(iddata=self.data, nb=self.config.nb, nc=self.config.nc, nd=self.config.nd, nf=self.config.nf, nk=self.config.nk)
+        result = algorithm.identify(
+            iddata=self.data,
+            nb=self.config.nb,
+            nc=self.config.nc,
+            nd=self.config.nd,
+            nf=self.config.nf,
+            nk=self.config.nk,
+        )
 
         assert result is not None
         assert isinstance(result, StateSpaceModel)
@@ -101,7 +104,14 @@ class TestBJAlgorithm:
         config.nd = 1  # D polynomial
         config.nf = 1  # F polynomial
 
-        result = algorithm.identify(iddata=self.data, nb=config.nb, nc=config.nc, nd=config.nd, nf=config.nf, nk=config.nk)
+        result = algorithm.identify(
+            iddata=self.data,
+            nb=config.nb,
+            nc=config.nc,
+            nd=config.nd,
+            nf=config.nf,
+            nk=config.nk,
+        )
         assert result is not None
         assert isinstance(result, StateSpaceModel)
 
@@ -117,7 +127,14 @@ class TestBJAlgorithm:
         invalid_config.nf = 1
 
         with pytest.raises(ValueError, match="Input order .* must be positive"):
-            algorithm.identify(iddata=self.data, nb=invalid_config.nb, nc=invalid_config.nc, nd=invalid_config.nd, nf=invalid_config.nf, nk=invalid_config.nk)
+            algorithm.identify(
+                iddata=self.data,
+                nb=invalid_config.nb,
+                nc=invalid_config.nc,
+                nd=invalid_config.nd,
+                nf=invalid_config.nf,
+                nk=invalid_config.nk,
+            )
 
         # Test with zero noise AR order
         invalid_config = SystemIdentificationConfig(method="BJ")
@@ -127,7 +144,14 @@ class TestBJAlgorithm:
         invalid_config.nf = 1
 
         with pytest.raises(ValueError, match="Noise AR order .* must be positive"):
-            algorithm.identify(iddata=self.data, nb=invalid_config.nb, nc=invalid_config.nc, nd=invalid_config.nd, nf=invalid_config.nf, nk=invalid_config.nk)
+            algorithm.identify(
+                iddata=self.data,
+                nb=invalid_config.nb,
+                nc=invalid_config.nc,
+                nd=invalid_config.nd,
+                nf=invalid_config.nf,
+                nk=invalid_config.nk,
+            )
 
         # Test with zero noise MA orders
         invalid_config = SystemIdentificationConfig(method="BJ")
@@ -137,7 +161,14 @@ class TestBJAlgorithm:
         invalid_config.nf = 0
 
         with pytest.raises(ValueError, match="Noise MA orders must be positive"):
-            algorithm.identify(iddata=self.data, nb=invalid_config.nb, nc=invalid_config.nc, nd=invalid_config.nd, nf=invalid_config.nf, nk=invalid_config.nk)
+            algorithm.identify(
+                iddata=self.data,
+                nb=invalid_config.nb,
+                nc=invalid_config.nc,
+                nd=invalid_config.nd,
+                nf=invalid_config.nf,
+                nk=invalid_config.nk,
+            )
 
     def test_bj_mimo_system(self):
         """Test BJ with MIMO system."""
@@ -164,7 +195,7 @@ class TestBJAlgorithm:
                 + 0.05 * y2[k - 1]
             )
 
-        y = np.vstack([y1, y2])
+        np.vstack([y1, y2])
 
         time_index = pd.date_range("2023-01-01", periods=n_samples, freq="1s")
         data_df = pd.DataFrame(
@@ -182,7 +213,14 @@ class TestBJAlgorithm:
         config.nf = 1
 
         algorithm = BJAlgorithm()
-        result = algorithm.identify(iddata=data, nb=config.nb, nc=config.nc, nd=config.nd, nf=config.nf, nk=config.nk)
+        result = algorithm.identify(
+            iddata=data,
+            nb=config.nb,
+            nc=config.nc,
+            nd=config.nd,
+            nf=config.nf,
+            nk=config.nk,
+        )
 
         assert result is not None
         assert isinstance(result, StateSpaceModel)
@@ -192,7 +230,14 @@ class TestBJAlgorithm:
         algorithm = BJAlgorithm()
 
         with patch("sippy.identification.algorithms.bj.HAROLD_AVAILABLE", False):
-            result = algorithm.identify(iddata=self.data, nb=self.config.nb, nc=self.config.nc, nd=self.config.nd, nf=self.config.nf, nk=self.config.nk)
+            result = algorithm.identify(
+                iddata=self.data,
+                nb=self.config.nb,
+                nc=self.config.nc,
+                nd=self.config.nd,
+                nf=self.config.nf,
+                nk=self.config.nk,
+            )
             assert result is not None
             assert isinstance(result, StateSpaceModel)
 
@@ -219,7 +264,14 @@ class TestBJAlgorithm:
 
         # BJ algorithm works with insufficient data but uses simplified estimation
         # This test just verifies it doesn't crash
-        result = algorithm.identify(iddata=short_data, nb=config.nb, nc=config.nc, nd=config.nd, nf=config.nf, nk=config.nk)
+        result = algorithm.identify(
+            iddata=short_data,
+            nb=config.nb,
+            nc=config.nc,
+            nd=config.nd,
+            nf=config.nf,
+            nk=config.nk,
+        )
         assert result is not None
         assert isinstance(result, StateSpaceModel)
 
@@ -227,7 +279,14 @@ class TestBJAlgorithm:
         """Test BJ creates valid state-space models."""
         algorithm = BJAlgorithm()
 
-        result = algorithm.identify(iddata=self.data, nb=self.config.nb, nc=self.config.nc, nd=self.config.nd, nf=self.config.nf, nk=self.config.nk)
+        result = algorithm.identify(
+            iddata=self.data,
+            nb=self.config.nb,
+            nc=self.config.nc,
+            nd=self.config.nd,
+            nf=self.config.nf,
+            nk=self.config.nk,
+        )
 
         # Check state-space model properties
         assert hasattr(result, "A")
@@ -272,7 +331,14 @@ class TestBJAlgorithm:
         config.nd = nd
         config.nf = nf
 
-        result = algorithm.identify(iddata=self.data, nb=config.nb, nc=config.nc, nd=config.nd, nf=config.nf, nk=config.nk)
+        result = algorithm.identify(
+            iddata=self.data,
+            nb=config.nb,
+            nc=config.nc,
+            nd=config.nd,
+            nf=config.nf,
+            nk=config.nk,
+        )
         assert result is not None
         assert isinstance(result, StateSpaceModel)
 
@@ -308,7 +374,14 @@ class TestBJAlgorithm:
         config.nd = 1
         config.nf = 2
 
-        result = algorithm.identify(iddata=data, nb=config.nb, nc=config.nc, nd=config.nd, nf=config.nf, nk=config.nk)
+        result = algorithm.identify(
+            iddata=data,
+            nb=config.nb,
+            nc=config.nc,
+            nd=config.nd,
+            nf=config.nf,
+            nk=config.nk,
+        )
         assert result is not None
         assert isinstance(result, StateSpaceModel)
 
@@ -324,12 +397,23 @@ class TestBJAlgorithm:
         config.nd = 3
         config.nf = 2
 
-        result = algorithm.identify(iddata=self.data, nb=config.nb, nc=config.nc, nd=config.nd, nf=config.nf, nk=config.nk)
+        result = algorithm.identify(
+            iddata=self.data,
+            nb=config.nb,
+            nc=config.nc,
+            nd=config.nd,
+            nf=config.nf,
+            nk=config.nk,
+        )
 
         # The algorithm should create a model with appropriate state dimension
         # based on the sum of relevant polynomial orders
         A_state_dim = result.A.shape[0]
 
-        # At minimum, should have states for input dynamics and noise dynamics
-        expected_min_states = max(config.nb, config.nd, config.nc, config.nf)
-        assert A_state_dim >= expected_min_states
+        assert A_state_dim >= config.nf
+        assert result.H_tf is not None
+
+        import harold
+
+        noise_realization = harold.transfer_to_state(result.H_tf)
+        assert noise_realization.a.shape[0] >= config.nd

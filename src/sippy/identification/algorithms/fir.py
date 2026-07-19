@@ -164,12 +164,10 @@ class FIRAlgorithm(IdentificationAlgorithm):
                 col = 0
                 for lag in range(nb):
                     for j in range(nu):
-                        delay_idx = N_eff + nk - 1 - lag
+                        delay_idx = nb - 1 - lag
                         if delay_idx >= 0 and delay_idx + N_eff <= N:
-                            Phi_i[:, col] = u[
-                                j,
-                                delay_idx - N_eff + 1 : delay_idx - N_eff + N_eff + 1,
-                            ]
+                            start = delay_idx
+                            Phi_i[:, col] = u[j, start : start + N_eff]
                         col += 1
                 theta_i, _, _, _ = lstsq(
                     Phi_i, y[i, nk + nb - 1 : nk + nb - 1 + N_eff], rcond=None
@@ -195,15 +193,10 @@ class FIRAlgorithm(IdentificationAlgorithm):
                 col = 0
                 for lag in range(nb):
                     for j in range(nu):
-                        delay_idx = N_eff_yid + nk - 1 - lag
+                        delay_idx = nb - 1 - lag
                         if delay_idx >= 0 and delay_idx + N_eff_yid <= N:
-                            Phi_i[:, col] = u[
-                                j,
-                                delay_idx - N_eff_yid + 1 : delay_idx
-                                - N_eff_yid
-                                + N_eff_yid
-                                + 1,
-                            ]
+                            start = delay_idx
+                            Phi_i[:, col] = u[j, start : start + N_eff_yid]
                         col += 1
                 Yid[i, nk + nb - 1 :] = np.dot(Phi_i, fir_coeffs[i, :]).flatten()
 
@@ -318,7 +311,8 @@ class FIRAlgorithm(IdentificationAlgorithm):
             NUM_G = np.zeros(nb + nk)
             NUM_G[nk : nk + nb] = fir_coeffs[0, :nb] if ny == 1 else fir_coeffs[0, :nb]
 
-            DEN_G = np.array([1.0])  # FIR has unity denominator
+            DEN_G = np.zeros(nb + nk)
+            DEN_G[0] = 1.0
 
             G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
 
@@ -350,43 +344,28 @@ class FIRAlgorithm(IdentificationAlgorithm):
         model : StateSpaceModel
             State-space model representation
         """
-        # Create state matrices for FIR model
-        n_states = nb
-
-        # For each input-output pair, we have nb coefficients
-        # State representation of FIR using delay chain
+        input_history = max(0, nk + nb - 1)
+        n_states = max(1, input_history * nu)
         A = np.zeros((n_states, n_states))
-        if n_states > 1:
-            for i in range(n_states - 1):
-                A[i, i + 1] = 1  # Shift register
-
         B = np.zeros((n_states, nu))
-        # Input enters at the beginning of the shift register
-        B[0, :] = np.ones(nu) if nk == 0 else np.zeros(nu)
-
         C = np.zeros((ny, n_states))
         D = np.zeros((ny, nu))
 
-        # Fill C and D matrices from FIR coefficients
-        for i in range(ny):  # For each output
-            for j in range(nu):  # For each input
-                for k in range(nb):
-                    if k < fir_coeffs.shape[1]:
-                        if k == 0:
-                            # Direct term
-                            if nk == 0:
-                                D[i, j] = fir_coeffs[i, k * nu + j]
-                            else:
-                                D[i, j] = 0
-                                if k == nk - 1:
-                                    D[i, j] = fir_coeffs[i, k * nu + j]
-                        else:
-                            # Feed-through through states
-                            C[i, k - 1] = (
-                                fir_coeffs[i, k * nu + j]
-                                if k * nu + j < fir_coeffs.shape[1]
-                                else 0
-                            )
+        coefficient_blocks = fir_coeffs.reshape(ny, nb, nu)
+        for lag in range(nb):
+            delay = nk + lag
+            if delay == 0:
+                D += coefficient_blocks[:, lag, :]
+            else:
+                block_start = (delay - 1) * nu
+                C[:, block_start : block_start + nu] += coefficient_blocks[:, lag, :]
+
+        if input_history > 0:
+            B[:nu, :] = np.eye(nu)
+            for lag in range(1, input_history):
+                destination = slice(lag * nu, (lag + 1) * nu)
+                source = slice((lag - 1) * nu, lag * nu)
+                A[destination, source] = np.eye(nu)
 
         # Use local matrices for test mocking compatibility
         return StateSpaceModel(

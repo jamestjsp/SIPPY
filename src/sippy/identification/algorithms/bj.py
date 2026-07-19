@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
+from .ararx import _state_space_from_results, _state_space_from_single_result
+from .opt_support import gen_mimo_id, gen_miso_id
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -151,7 +153,12 @@ class BJAlgorithm(IdentificationAlgorithm):
         from ..base import SystemIdentificationConfig
         from ..iddata import IDData as IDDataClass
 
-        if y is not None and isinstance(y, IDDataClass) and u is not None and isinstance(u, SystemIdentificationConfig):
+        if (
+            y is not None
+            and isinstance(y, IDDataClass)
+            and u is not None
+            and isinstance(u, SystemIdentificationConfig)
+        ):
             # Old API: identify(data, config)
             iddata = y
             config = u
@@ -159,11 +166,11 @@ class BJAlgorithm(IdentificationAlgorithm):
             u = None
             # Extract parameters from config
             kwargs = {
-                'nb': getattr(config, 'nb', 1),
-                'nc': getattr(config, 'nc', 1),
-                'nd': getattr(config, 'nd', 1),
-                'nf': getattr(config, 'nf', 1),
-                'nk': getattr(config, 'nk', 0) or 0,
+                "nb": getattr(config, "nb", 1),
+                "nc": getattr(config, "nc", 1),
+                "nd": getattr(config, "nd", 1),
+                "nf": getattr(config, "nf", 1),
+                "nk": getattr(config, "nk", 0) or 0,
             }
 
         # Validate input arguments
@@ -194,24 +201,73 @@ class BJAlgorithm(IdentificationAlgorithm):
         self.validate_parameters(nb=nb, nc=nc, nd=nd, nf=nf)
 
         # Remove duplicate parameters from kwargs
-        kwargs_filtered = {k: v for k, v in kwargs.items() if k not in ['nb', 'nc', 'nd', 'nf', 'nk', 'tsample']}
+        kwargs_filtered = {
+            k: v
+            for k, v in kwargs.items()
+            if k not in ["nb", "nc", "nd", "nf", "nk", "tsample"]
+        }
 
         # Route to appropriate implementation
         if CASADI_AVAILABLE:
-            # Use NLP method (matches master branch)
             try:
-                return self._identify_nlp(y, u, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered)
+                if y.shape[0] == 1:
+                    result = gen_miso_id(
+                        id_method="BJ",
+                        y=y[0],
+                        u=u,
+                        na=0,
+                        nb=np.full(u.shape[0], nb, dtype=int),
+                        nc=int(nc),
+                        nd=int(nd),
+                        nf=int(nf),
+                        theta=np.full(u.shape[0], nk, dtype=int),
+                        max_iterations=kwargs_filtered.get("max_iterations", 200),
+                        stability_margin=kwargs_filtered.get(
+                            "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
+                        ),
+                        enforce_stability=kwargs_filtered.get(
+                            "stability_constraint",
+                            kwargs_filtered.get("stab_cons", False),
+                        ),
+                    )
+                    return _state_space_from_single_result(
+                        result, u.shape[0], sample_time
+                    )
+                results, _ = gen_mimo_id(
+                    id_method="BJ",
+                    y=y,
+                    u=u,
+                    na=[0] * y.shape[0],
+                    nb=np.full((y.shape[0], u.shape[0]), nb, dtype=int),
+                    nc=[int(nc)] * y.shape[0],
+                    nd=[int(nd)] * y.shape[0],
+                    nf=[int(nf)] * y.shape[0],
+                    theta=np.full((y.shape[0], u.shape[0]), nk, dtype=int),
+                    sample_time=sample_time,
+                    max_iterations=kwargs_filtered.get("max_iterations", 200),
+                    stability_margin=kwargs_filtered.get(
+                        "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
+                    ),
+                    enforce_stability=kwargs_filtered.get(
+                        "stability_constraint", kwargs_filtered.get("stab_cons", False)
+                    ),
+                )
+                return _state_space_from_results(results, u.shape[0], sample_time)
             except Exception as e:
                 warnings.warn(
                     f"NLP identification failed: {e}. Falling back to simplified LS method."
                 )
-                return self._identify_ills(y, u, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered)
+                return self._identify_ills(
+                    y, u, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered
+                )
         else:
             # Fall back to simplified least squares
             warnings.warn(
                 "CasADi not available. Using simplified LS method (may be less accurate than master branch)."
             )
-            return self._identify_ills(y, u, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered)
+            return self._identify_ills(
+                y, u, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered
+            )
 
     def _identify_nlp(
         self, y, u, nb, nc, nd, nf, nk, sample_time, **kwargs
@@ -311,6 +367,7 @@ class BJAlgorithm(IdentificationAlgorithm):
                 nc,
                 nd,
                 nf,
+                nk,
                 ny,
                 nu,
                 sample_time,
@@ -342,7 +399,18 @@ class BJAlgorithm(IdentificationAlgorithm):
         return model
 
     def _build_bj_nlp(
-        self, u, y, nb, nc, nd, nf, nk, N, max_iterations, stability_constraint, stability_margin
+        self,
+        u,
+        y,
+        nb,
+        nc,
+        nd,
+        nf,
+        nk,
+        N,
+        max_iterations,
+        stability_constraint,
+        stability_margin,
     ):
         """
         Build and solve BJ NLP problem using CasADi + IPOPT.
@@ -552,7 +620,14 @@ class BJAlgorithm(IdentificationAlgorithm):
         # Compute noise variance
         Vn = np.linalg.norm(y - Yid_opt, 2) ** 2 / (2 * N)
 
-        return {"b": b_opt, "f": f_opt, "c": c_opt, "d": d_opt, "Yid": Yid_opt, "Vn": Vn}
+        return {
+            "b": b_opt,
+            "f": f_opt,
+            "c": c_opt,
+            "d": d_opt,
+            "Yid": Yid_opt,
+            "Vn": Vn,
+        }
 
     def _identify_ills(
         self, y, u, nb, nc, nd, nf, nk, sample_time, **kwargs
@@ -731,6 +806,7 @@ class BJAlgorithm(IdentificationAlgorithm):
                 nc,
                 nd,
                 nf,
+                nk,
                 ny,
                 nu,
                 sample_time,
@@ -798,19 +874,21 @@ class BJAlgorithm(IdentificationAlgorithm):
         try:
             import harold
 
-            # G_tf = C(q) - Input transfer function (B(q)=1 for BJ, so just C polynomial)
-            max_order_g = nb + nk
-            NUM_G = np.zeros(max_order_g)
+            polynomial_length_g = max(nb + nk, nf + 1)
+            NUM_G = np.zeros(polynomial_length_g)
             NUM_G[nk : nk + nb] = (
                 input_coeffs[0, :nb] if ny == 1 else input_coeffs[0, :nb]
             )
 
-            DEN_G = np.array([1.0])  # B(q) = 1 for BJ
+            DEN_G = np.zeros(polynomial_length_g)
+            DEN_G[0] = 1.0
+            if nf > 0:
+                DEN_G[1 : nf + 1] = noise_ma_coeffs[0, :nf]
 
             G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
 
             # H_tf = E(q)/F(q) - Noise transfer function
-            max_order_h = max(nc, nf)
+            max_order_h = max(nc, nd)
 
             NUM_H = np.zeros(max_order_h + 1)
             NUM_H[0] = 1.0
@@ -820,9 +898,9 @@ class BJAlgorithm(IdentificationAlgorithm):
 
             DEN_H = np.zeros(max_order_h + 1)
             DEN_H[0] = 1.0
-            # Use nf for denominator (F polynomial)
-            if nf > 0 and noise_ma_coeffs.shape[1] >= nf:
-                DEN_H[1 : nf + 1] = noise_ma_coeffs[0, :nf]
+            if nd > 0:
+                d_start = nf if noise_ma_coeffs.shape[1] >= nf + nd else 0
+                DEN_H[1 : nd + 1] = noise_ma_coeffs[0, d_start : d_start + nd]
 
             H_tf = harold.Transfer(NUM_H, DEN_H, dt=Ts)
 
@@ -832,7 +910,18 @@ class BJAlgorithm(IdentificationAlgorithm):
             return None, None
 
     def _create_state_space_from_bj(
-        self, input_coeffs, noise_ar_coeffs, noise_ma_coeffs, nb, nc, nd, nf, ny, nu, Ts
+        self,
+        input_coeffs,
+        noise_ar_coeffs,
+        noise_ma_coeffs,
+        nb,
+        nc,
+        nd,
+        nf,
+        nk,
+        ny,
+        nu,
+        Ts,
     ):
         """
         Create state-space model from BJ coefficients using harold.
@@ -853,6 +942,47 @@ class BJAlgorithm(IdentificationAlgorithm):
         model : StateSpaceModel
             State-space model representation
         """
+        if ny == 1 and nu == 1:
+            G_tf, H_tf = self._create_transfer_functions_bj(
+                input_coeffs,
+                noise_ar_coeffs,
+                noise_ma_coeffs,
+                nb,
+                nc,
+                nd,
+                nf,
+                nk,
+                ny,
+                nu,
+                Ts,
+            )
+            if G_tf is not None:
+                A, B, C, D = realize_transfer_function(G_tf)
+                if H_tf is not None:
+                    A_noise, _, _, _ = realize_transfer_function(H_tf)
+                    process_states = A.shape[0]
+                    noise_states = A_noise.shape[0]
+                    A_combined = np.zeros(
+                        (process_states + noise_states, process_states + noise_states)
+                    )
+                    A_combined[:process_states, :process_states] = A
+                    A_combined[process_states:, process_states:] = A_noise
+                    B = np.vstack([B, np.zeros((noise_states, nu))])
+                    C = np.hstack([C, np.zeros((ny, noise_states))])
+                    A = A_combined
+                return StateSpaceModel(
+                    A=A,
+                    B=B,
+                    C=C,
+                    D=D,
+                    K=np.zeros((A.shape[0], C.shape[0])),
+                    Q=np.eye(A.shape[0]),
+                    R=np.eye(C.shape[0]),
+                    S=np.zeros((A.shape[0], C.shape[0])),
+                    ts=Ts,
+                    Vn=0.01,
+                )
+
         # For BJ, we need to handle both input dynamics and noise dynamics
         # Create a state-space model that captures this structure
 

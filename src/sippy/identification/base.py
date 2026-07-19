@@ -11,6 +11,39 @@ if TYPE_CHECKING:
     from .iddata import IDData
 
 
+def resolve_identification_data(
+    y: Optional[np.ndarray],
+    u: Optional[np.ndarray],
+    iddata: Optional["IDData"],
+    *,
+    tsample: float = 1.0,
+    input_required: bool = True,
+) -> tuple[np.ndarray, Optional[np.ndarray], float]:
+    if iddata is not None and (y is not None or u is not None):
+        raise ValueError("Provide either iddata or (y, u), but not both")
+
+    if iddata is not None:
+        y = iddata.get_output_array()
+        u = iddata.get_input_array()
+        tsample = iddata.sample_time
+    elif y is None or (input_required and u is None):
+        requirement = "y" if not input_required else "both y and u"
+        raise ValueError(f"Provide either iddata or {requirement}")
+
+    y_array = np.atleast_2d(np.asarray(y, dtype=float))
+    u_array = None if u is None else np.atleast_2d(np.asarray(u, dtype=float))
+    if u_array is not None and u_array.shape[1] != y_array.shape[1]:
+        raise ValueError("Input and output must share the same number of samples")
+    return y_array, u_array, float(tsample)
+
+
+def realize_transfer_function(transfer_function: object) -> tuple[np.ndarray, ...]:
+    import harold
+
+    realization = harold.transfer_to_state(transfer_function)
+    return realization.a, realization.b, realization.c, realization.d
+
+
 class IdentificationAlgorithm(ABC):
     """Abstract base class for system identification algorithms."""
 

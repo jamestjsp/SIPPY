@@ -128,7 +128,7 @@ class TestMasterExamplesIntegration:
 
         tfin = 500
         npts = int(tfin / ts) + 1
-        Time = np.linspace(0, tfin, npts)
+        np.linspace(0, tfin, npts)
 
         # Input sequence using GBN
         from sippy.utils.signal_utils import GBN_seq, white_noise_var
@@ -181,10 +181,6 @@ class TestMasterExamplesIntegration:
         npts = int(tfin / ts) + 1
 
         # System parameters
-        V = 10.0  # tank volume [m^3]
-        ro = 1100.0  # density [kg/m^3]
-        cp = 4.180  # specific heat [kJ/kg*K]
-        Lam = 2272.0  # latent heat [kJ/kg]
 
         m = 4  # 4 inputs: [F, W, Ca_in, T_in]
         p = 2  # 2 outputs: [Ca, T]

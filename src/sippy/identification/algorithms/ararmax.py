@@ -8,7 +8,9 @@ from typing import Optional
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
+from .ararx import _state_space_from_results, _state_space_from_single_result
+from .opt_support import gen_mimo_id, gen_miso_id
 
 try:
     from ..iddata import IDData
@@ -41,6 +43,7 @@ except ImportError:
 # Check for CasADi availability for NLP-based identification
 try:
     import casadi  # noqa: F401
+
     CASADI_AVAILABLE = True
 except ImportError:
     CASADI_AVAILABLE = False
@@ -238,6 +241,9 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
         Raises:
             ValueError: If parameters are invalid or data insufficient
         """
+        if iddata is not None and (y is not None or u is not None):
+            raise ValueError("Provide either iddata or (y, u), but not both")
+
         # Handle input data from various sources
         if iddata is not None:
             u = iddata.get_input_array()
@@ -268,7 +274,10 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
 
             # If individual parameters are None, try to extract from ararmax_orders
             if any(x is None for x in [na, nb, nc, nd, nf]):
-                if hasattr(config, "ararmax_orders") and config.ararmax_orders is not None:
+                if (
+                    hasattr(config, "ararmax_orders")
+                    and config.ararmax_orders is not None
+                ):
                     orders = config.ararmax_orders
                     if len(orders) >= 5:
                         if na is None:
@@ -382,14 +391,57 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
 
         # Route to appropriate implementation
         # Filter kwargs to avoid duplicate argument errors
-        kwargs_filtered = {k: v for k, v in kwargs.items() if k not in ['na', 'nb', 'nc', 'nd', 'nf', 'nk', 'tsample']}
+        kwargs_filtered = {
+            k: v
+            for k, v in kwargs.items()
+            if k not in ["na", "nb", "nc", "nd", "nf", "nk", "tsample"]
+        }
 
         if CASADI_AVAILABLE:
             try:
-                return self._identify_nlp(
-                    u, y, max_na, max_nb, max_nc, max_nd, max_nf, max_nk,
-                    sample_time, **kwargs_filtered
+                if ny == 1:
+                    result = gen_miso_id(
+                        id_method="ARARMAX",
+                        y=y[0],
+                        u=u,
+                        na=max_na,
+                        nb=np.full(nu, max_nb, dtype=int),
+                        nc=max_nc,
+                        nd=max_nd,
+                        nf=0,
+                        theta=np.full(nu, max_nk, dtype=int),
+                        max_iterations=kwargs_filtered.get("max_iterations", 200),
+                        stability_margin=kwargs_filtered.get(
+                            "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
+                        ),
+                        enforce_stability=kwargs_filtered.get(
+                            "stability_constraint",
+                            kwargs_filtered.get("stab_cons", False),
+                        ),
+                    )
+                    return _state_space_from_single_result(
+                        result, u.shape[0], sample_time
+                    )
+                results, _ = gen_mimo_id(
+                    id_method="ARARMAX",
+                    y=y,
+                    u=u,
+                    na=[max_na] * ny,
+                    nb=np.full((ny, nu), max_nb, dtype=int),
+                    nc=[max_nc] * ny,
+                    nd=[max_nd] * ny,
+                    nf=[0] * ny,
+                    theta=np.full((ny, nu), max_nk, dtype=int),
+                    sample_time=sample_time,
+                    max_iterations=kwargs_filtered.get("max_iterations", 200),
+                    stability_margin=kwargs_filtered.get(
+                        "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
+                    ),
+                    enforce_stability=kwargs_filtered.get(
+                        "stability_constraint", kwargs_filtered.get("stab_cons", False)
+                    ),
                 )
+                return _state_space_from_results(results, nu, sample_time)
             except Exception as e:
                 warnings.warn(
                     f"NLP identification failed: {e}. Falling back to simplified LS method."
@@ -589,37 +641,49 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
 
         # Build and solve NLP
         solution = self._build_ararmax_nlp(
-            u_flat, y_flat, na, nb, nc, nd, nf, nk, N,
-            max_iterations, stability_constraint, stability_margin
+            u_flat,
+            y_flat,
+            na,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            N,
+            max_iterations,
+            stability_constraint,
+            stability_margin,
         )
 
         # Create model from solution
         # Extract coefficients
-        theta = np.concatenate([
-            solution["a"],
-            solution["b"],
-            solution["c"],
-            solution["d"]
-        ])
+        theta = np.concatenate(
+            [solution["a"], solution["b"], solution["c"], solution["d"]]
+        )
 
         # Build state-space matrices (reuse existing helper methods)
         A, B, C, D, x0 = self._extract_state_space_matrices_ararmax(
-            theta, [na], [nb], [nc], [nd], [nf], [nk],
-            sample_time, nu, ny
+            theta, [na], [nb], [nc], [nd], [nf], [nk], sample_time, nu, ny
         )
 
         # Create G_tf and H_tf
         G_tf, H_tf = self._create_transfer_functions_ararmax(
             theta, [na], [nb], [nc], [nd], [nf], [nk], sample_time
         )
+        if G_tf is not None:
+            A, B, C, D = realize_transfer_function(G_tf)
 
         # Reshape Yid for output (outputs x samples)
         Yid = solution["Yid"].reshape(1, -1) if ny == 1 else solution["Yid"]
 
         # Create StateSpaceModel
         from ..base import StateSpaceModel
+
         model = StateSpaceModel(
-            A=A, B=B, C=C, D=D,
+            A=A,
+            B=B,
+            C=C,
+            D=D,
             K=np.zeros((A.shape[0], C.shape[0])),
             Q=np.eye(A.shape[0]),
             R=np.eye(C.shape[0]),
@@ -635,7 +699,21 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
 
         return model
 
-    def _build_ararmax_nlp(self, u, y, na, nb, nc, nd, nf, nk, N, max_iterations, stability_constraint, stability_margin):
+    def _build_ararmax_nlp(
+        self,
+        u,
+        y,
+        na,
+        nb,
+        nc,
+        nd,
+        nf,
+        nk,
+        N,
+        max_iterations,
+        stability_constraint,
+        stability_margin,
+    ):
         """
         Build and solve ARARMAX NLP problem using CasADi + IPOPT.
 
@@ -652,19 +730,19 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
         n_coeff = na + nb + nc + nd
 
         # Decision variables: [a (na), b (nb), c (nc), d (nd), Yidw (N), Ww (N), Vw (N)]
-        n_opt = n_coeff + 3*N  # 3*N for Yidw, Ww, Vw
+        n_opt = n_coeff + 3 * N  # 3*N for Yidw, Ww, Vw
         w_opt = ca.SX.sym("w", n_opt)
 
         # Extract coefficient variables
         a = w_opt[0:na]
-        b = w_opt[na:na+nb]
-        c = w_opt[na+nb:na+nb+nc]
-        d = w_opt[na+nb+nc:na+nb+nc+nd]
+        b = w_opt[na : na + nb]
+        c = w_opt[na + nb : na + nb + nc]
+        d = w_opt[na + nb + nc : na + nb + nc + nd]
 
         # Extract auxiliary variables (following master branch pattern)
-        Yidw = w_opt[n_coeff+2*N:n_coeff+3*N]  # Last N elements
-        Ww = w_opt[n_coeff:n_coeff+N]          # First auxiliary N
-        Vw = w_opt[n_coeff+N:n_coeff+2*N]      # Second auxiliary N
+        Yidw = w_opt[n_coeff + 2 * N : n_coeff + 3 * N]  # Last N elements
+        Ww = w_opt[n_coeff : n_coeff + N]  # First auxiliary N
+        Vw = w_opt[n_coeff + N : n_coeff + 2 * N]  # Second auxiliary N
 
         # Initialize symbolic variables
         Yid = y * ca.SX.ones(1)
@@ -816,7 +894,7 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
 
         # Initial guess
         w_0 = np.zeros(n_opt)
-        w_0[n_coeff+2*N:n_coeff+3*N] = y  # Initialize Yidw
+        w_0[n_coeff + 2 * N : n_coeff + 3 * N] = y  # Initialize Yidw
         # Ww and Vw start at zero
 
         # Solve NLP
@@ -826,10 +904,10 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
         x_opt = sol["x"].full().flatten()
 
         a_opt = x_opt[0:na]
-        b_opt = x_opt[na:na+nb]
-        c_opt = x_opt[na+nb:na+nb+nc]
-        d_opt = x_opt[na+nb+nc:na+nb+nc+nd]
-        Yid_opt = x_opt[n_coeff+2*N:n_coeff+3*N]
+        b_opt = x_opt[na : na + nb]
+        c_opt = x_opt[na + nb : na + nb + nc]
+        d_opt = x_opt[na + nb + nc : na + nb + nc + nd]
+        Yid_opt = x_opt[n_coeff + 2 * N : n_coeff + 3 * N]
 
         # Compute noise variance
         Vn = np.linalg.norm(y - Yid_opt, 2) ** 2 / (2 * N)
@@ -840,7 +918,7 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
             "c": c_opt,
             "d": d_opt,
             "Yid": Yid_opt,
-            "Vn": Vn
+            "Vn": Vn,
         }
 
     def _build_regression_matrices_ararmax(self, u, y, na, nb, nc, nd, nf, nk):
@@ -1135,31 +1213,19 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
             nb_val = max(nb) if isinstance(nb, (list, tuple)) else nb
             nc_val = max(nc) if isinstance(nc, (list, tuple)) else nc
             nd_val = max(nd) if isinstance(nd, (list, tuple)) else nd
-            nf_val = max(nf) if isinstance(nf, (list, tuple)) else nf
             nk_val = max(nk) if isinstance(nk, (list, tuple)) else nk
 
-            # G_tf = B(q)/F(q) - Input transfer function
-            max_order_g = max(nb_val + nk_val, nf_val)
+            polynomial_length_g = max(nb_val + nk_val, na_val + 1)
 
-            NUM_G = np.zeros(max_order_g + 1)
+            NUM_G = np.zeros(polynomial_length_g)
             # Extract B coefficients from theta
             if len(theta) >= na_val + nb_val:
                 NUM_G[nk_val : nk_val + nb_val] = theta[na_val : na_val + nb_val]
 
-            # F(q) denominator - simplified as unity if nf not explicitly stored
-            DEN_G = np.zeros(max_order_g + 1)
+            DEN_G = np.zeros(polynomial_length_g)
             DEN_G[0] = 1.0
-            # In ARARMAX, F coefficients would follow after na+nb
-            # For simplicity, use unity denominator if F not available
-            if nf_val > 0 and len(theta) >= na_val + nb_val + nc_val + nd_val + nf_val:
-                F_coeffs = theta[
-                    na_val + nb_val + nc_val + nd_val : na_val
-                    + nb_val
-                    + nc_val
-                    + nd_val
-                    + nf_val
-                ]
-                DEN_G[1 : nf_val + 1] = F_coeffs
+            if na_val > 0:
+                DEN_G[1 : na_val + 1] = theta[:na_val]
 
             # Create G transfer function using harold
             G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)

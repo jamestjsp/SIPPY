@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import (
+    IdentificationAlgorithm,
+    StateSpaceModel,
+    resolve_identification_data,
+)
 from .subspace_core import SubspaceCoreAlgorithm
 
 if TYPE_CHECKING:
@@ -42,6 +46,9 @@ class CVAAlgorithm(IdentificationAlgorithm):
         Note:
             Either (y, u) or iddata should be provided, but not both.
         """
+        y, u, tsample = resolve_identification_data(
+            y, u, iddata, tsample=kwargs.get("tsample", 1.0)
+        )
         self.validate_parameters(**kwargs)
 
         # Extract parameters with defaults
@@ -50,7 +57,6 @@ class CVAAlgorithm(IdentificationAlgorithm):
         fixed_order = kwargs.get("ss_fixed_order", np.nan)
         d_required = kwargs.get("ss_d_required", False)
         a_stability = kwargs.get("ss_a_stability", False)
-        tsample = kwargs.get("tsample", 1.0)
 
         # Call the core CVA implementation
         try:

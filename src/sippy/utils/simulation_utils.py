@@ -402,7 +402,9 @@ def ss_lsim_predictor_form(A_K, B_K, C, D, K, y, u, x0=None):
             x[:, 0] = x0[:, 0]
 
         for i in range(0, L):
-            x[:, i + 1] = np.dot(A_K, x[:, i]) + np.dot(B_K, u[:, i]) + np.dot(K, y[:, i])
+            x[:, i + 1] = (
+                np.dot(A_K, x[:, i]) + np.dot(B_K, u[:, i]) + np.dot(K, y[:, i])
+            )
             y_hat[:, i] = np.dot(C, x[:, i]) + np.dot(D, u[:, i])
 
         return x, y_hat

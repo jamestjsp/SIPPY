@@ -13,7 +13,7 @@ scaling factors) required by the refactored object-oriented API.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -33,10 +33,10 @@ except ImportError:  # pragma: no cover
 
 # Performance utilities (Numba-backed with safe fallbacks)
 from ...utils.compiled_utils import (
-    rescale_compiled,
-    rescale_multi_channel_compiled,
     Vn_mat_adaptive,
     build_armax_regression_miso_parallel,
+    rescale_compiled,
+    rescale_multi_channel_compiled,
 )
 
 
@@ -65,9 +65,21 @@ class MISOResult:
             return None, None
 
         # Build denominator polynomials A(q), D(q), F(q)
-        a_poly = np.concatenate(([1.0], self.a_coeffs)) if self.a_coeffs.size else np.array([1.0])
-        d_poly = np.concatenate(([1.0], self.d_coeffs)) if self.d_coeffs.size else np.array([1.0])
-        f_poly = np.concatenate(([1.0], self.f_coeffs)) if self.f_coeffs.size else np.array([1.0])
+        a_poly = (
+            np.concatenate(([1.0], self.a_coeffs))
+            if self.a_coeffs.size
+            else np.array([1.0])
+        )
+        d_poly = (
+            np.concatenate(([1.0], self.d_coeffs))
+            if self.d_coeffs.size
+            else np.array([1.0])
+        )
+        f_poly = (
+            np.concatenate(([1.0], self.f_coeffs))
+            if self.f_coeffs.size
+            else np.array([1.0])
+        )
 
         # Multiply polynomials with harold when available (safer, often faster)
         try:
@@ -88,9 +100,20 @@ class MISOResult:
                     continue
                 leading_zeros = np.zeros(int(delay), dtype=float)
                 num_g.append(np.concatenate((leading_zeros, b_vector)).tolist())
-            g_tf = harold.Transfer(num_g, den_g, dt=sample_time)
+            required_den_length = max(len(numerator) + 1 for numerator in num_g)
+            if len(den_g) < required_den_length:
+                den_g.extend([0.0] * (required_den_length - len(den_g)))
+            if len(num_g) == 1:
+                g_tf = harold.Transfer(num_g[0], den_g, dt=sample_time)
+            else:
+                den_matrix = [[den_g for _ in num_g]]
+                g_tf = harold.Transfer([num_g], den_matrix, dt=sample_time)
 
-        num_h = (np.concatenate(([1.0], self.c_coeffs)).tolist() if self.c_coeffs.size else [1.0])
+        num_h = (
+            np.concatenate(([1.0], self.c_coeffs)).tolist()
+            if self.c_coeffs.size
+            else [1.0]
+        )
         h_tf = harold.Transfer(num_h, den_h, dt=sample_time)
 
         return g_tf, h_tf
@@ -197,7 +220,9 @@ def opt_id(
             if Nb != 0:
                 vecU = DM()
                 for nb_i in range(m):
-                    vecu = U[nb_i, :][k - nb[nb_i] - theta[nb_i] : k - theta[nb_i]][::-1]
+                    vecu = U[nb_i, :][k - nb[nb_i] - theta[nb_i] : k - theta[nb_i]][
+                        ::-1
+                    ]
                     vecU = vertcat(vecU, vecu)
 
             if Na != 0:
@@ -528,7 +553,15 @@ def armax_miso_id(
 
         # Build regression in parallel (Numba) per iteration (eps updates MA block)
         Phi = build_armax_regression_miso_parallel(
-            y_scaled, u_scaled, eps, int(na), nb.astype(np.int64), int(nc), theta.astype(np.int64), val, N
+            y_scaled,
+            u_scaled,
+            eps,
+            int(na),
+            nb.astype(np.int64),
+            int(nc),
+            theta.astype(np.int64),
+            val,
+            N,
         )
 
         theta_vec = np.linalg.pinv(Phi) @ y_scaled[val:]

@@ -179,10 +179,13 @@ class TestARARXAlgorithm:
 
         time_index = pd.date_range("2023-01-01", periods=n_samples, freq="1s")
         data_df = pd.DataFrame(
-            {"u1": u[0, :], "u2": u[1, :], "y1": y[0, :], "y2": y[1, :]}, index=time_index
+            {"u1": u[0, :], "u2": u[1, :], "y1": y[0, :], "y2": y[1, :]},
+            index=time_index,
         )
 
-        data = IDData(data=data_df, inputs=["u1", "u2"], outputs=["y1", "y2"], tsample=1.0)
+        data = IDData(
+            data=data_df, inputs=["u1", "u2"], outputs=["y1", "y2"], tsample=1.0
+        )
 
         config = SystemIdentificationConfig(method="ARARX")
         config.na = na
@@ -448,7 +451,6 @@ class TestARARXAlgorithm:
             patch("sippy.identification.algorithms.ararx.harold") as mock_harold,
         ):
             # Mock harold.Transfer and harold.transfer_to_state
-            mock_tf = mock_harold.Transfer.return_value
             mock_ss = mock_harold.transfer_to_state.return_value
 
             # Mock haroldpolymul to return a simple array

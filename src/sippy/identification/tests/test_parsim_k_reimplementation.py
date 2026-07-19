@@ -39,7 +39,7 @@ class TestParsimKReimplementation:
 
         y, u = simple_siso_system
         l_, L = y.shape
-        m = u.shape[0]
+        u.shape[0]
         f = 10
 
         # Build input matrices like master does
@@ -70,15 +70,14 @@ class TestParsimKReimplementation:
         l_, L = y.shape
         m = u.shape[0]
         n = 2  # model order
-        f = 10
 
         # Create dummy matrices
         A_K = np.random.randn(n, n) * 0.1
         C = np.random.randn(l_, n)
-        B_K = np.random.randn(n, m)
+        np.random.randn(n, m)
         D = np.zeros((l_, m))
         K = np.random.randn(n, l_) * 0.01
-        x0 = np.zeros((n, 1))
+        np.zeros((n, 1))
 
         # This should call simulations_sequence_k
         y_sim = ParsimCoreAlgorithm.simulations_sequence_k(

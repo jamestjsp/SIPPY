@@ -191,7 +191,9 @@ class TestOEAlgorithm:
 
         # OE algorithm works with insufficient data but uses simplified estimation
         # This test just verifies it doesn't crash
-        result = algorithm.identify(iddata=small_data, nb=config.nb, nf=config.nf, nk=config.nk)
+        result = algorithm.identify(
+            iddata=small_data, nb=config.nb, nf=config.nf, nk=config.nk
+        )
         assert result is not None
         assert isinstance(result, StateSpaceModel)
 
