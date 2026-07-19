@@ -70,6 +70,55 @@ def test_mimo_transfer_to_state_preserves_channel_responses():
     )
 
 
+def test_mimo_transfer_to_state_compacts_shared_dynamics():
+    denominator = np.poly(np.linspace(0.2, 0.8, 6)).real
+    transfer = tf(
+        [
+            [[0.01 * (1 + output + input_), 0.02 * (1 + output)] for input_ in range(4)]
+            for output in range(4)
+        ],
+        [[denominator for _ in range(4)] for _ in range(4)],
+        dt=0.1,
+    )
+
+    realized = tf2ss(transfer)
+    frequencies = np.geomspace(0.01, 20.0, 257)
+
+    assert realized.nstates == 12
+    np.testing.assert_allclose(
+        frequency_response(realized, frequencies).frdata,
+        frequency_response(transfer, frequencies).frdata,
+        rtol=2e-11,
+        atol=2e-11,
+    )
+
+
+@pytest.mark.parametrize("sample_time", [None, 0.2])
+def test_mimo_transfer_to_state_handles_distinct_channel_denominators(sample_time):
+    transfer = tf(
+        [
+            [[0.2, 0.1], [0.1]],
+            [[0.3], [0.4, 0.2]],
+        ],
+        [
+            [[1.0, -0.5, 0.1], [1.0, -0.4]],
+            [[1.0, -0.3], [1.0, -0.2, 0.05]],
+        ],
+        dt=sample_time,
+    )
+
+    realized = tf2ss(transfer)
+    frequencies = np.geomspace(0.01, 10.0, 129)
+
+    assert realized.nstates == 6
+    np.testing.assert_allclose(
+        frequency_response(realized, frequencies).frdata,
+        frequency_response(transfer, frequencies).frdata,
+        rtol=1e-11,
+        atol=1e-11,
+    )
+
+
 def test_state_to_transfer_round_trip_preserves_mimo_response():
     system = ss(
         np.diag([0.8, 0.6]),

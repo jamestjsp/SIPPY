@@ -50,9 +50,101 @@ def _siso_transfer_to_state(
     return A, B, C, D
 
 
+def _row_polynomial_fraction(
+    numerators: list[np.ndarray], denominators: list[np.ndarray]
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    unique_denominators: dict[tuple[float, ...], np.ndarray] = {}
+    for denominator in denominators:
+        unique_denominators.setdefault(tuple(denominator), denominator)
+
+    common_denominator = np.array([1.0])
+    for denominator in unique_denominators.values():
+        common_denominator = np.polymul(common_denominator, denominator)
+
+    quotient_by_denominator = {}
+    for denominator_key in unique_denominators:
+        quotient = np.array([1.0])
+        for other_key, other_denominator in unique_denominators.items():
+            if other_key != denominator_key:
+                quotient = np.polymul(quotient, other_denominator)
+        quotient_by_denominator[denominator_key] = quotient
+
+    adjusted_numerators = [
+        np.polymul(numerator, quotient_by_denominator[tuple(denominator)])
+        for numerator, denominator in zip(numerators, denominators)
+    ]
+    return common_denominator, adjusted_numerators
+
+
+def _mimo_transfer_to_state(
+    system: "TransferFunction",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    row_fractions = [
+        _row_polynomial_fraction(system.num[output], system.den[output])
+        for output in range(system.noutputs)
+    ]
+    index = np.array(
+        [len(denominator) - 1 for denominator, _ in row_fractions],
+        dtype=np.int32,
+    )
+    coefficient_count = int(np.max(index)) + 1
+    pcoeff = np.zeros(
+        (system.noutputs, system.noutputs, coefficient_count),
+        dtype=float,
+        order="F",
+    )
+    qcoeff = np.zeros(
+        (system.noutputs, system.ninputs, coefficient_count),
+        dtype=float,
+        order="F",
+    )
+    for output, (denominator, numerators) in enumerate(row_fractions):
+        pcoeff[output, output, : len(denominator)] = denominator
+        row_coefficient_count = int(index[output]) + 1
+        for input_, numerator in enumerate(numerators):
+            start = row_coefficient_count - len(numerator)
+            if start < 0:
+                raise ValueError("Improper transfer functions cannot be realized")
+            qcoeff[output, input_, start:row_coefficient_count] = numerator
+
+    state_count, _, A, B, C, D, info = ctrlsys.tc04ad(
+        "L", system.ninputs, system.noutputs, index, pcoeff, qcoeff
+    )
+    _check_info("tc04ad", info)
+    if state_count == 0:
+        return A, B, C, D
+
+    A, B, C, reduced_state_count, _, info = ctrlsys.tb01pd("M", "N", A, B, C, 0.0)
+    _check_info("tb01pd", info)
+    return (
+        A[:reduced_state_count, :reduced_state_count],
+        B[:reduced_state_count, :],
+        C[:, :reduced_state_count],
+        D,
+    )
+
+
+def _has_shared_denominator(system: "TransferFunction") -> bool:
+    seen: set[tuple[float, ...]] = set()
+    for output in range(system.noutputs):
+        for input_ in range(system.ninputs):
+            numerator = system.num[output][input_]
+            denominator = system.den[output][input_]
+            if not np.any(numerator) or len(denominator) == 1:
+                continue
+            key = tuple(denominator)
+            if key in seen:
+                return True
+            seen.add(key)
+    return False
+
+
 def transfer_to_state(
     system: "TransferFunction",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if (system.noutputs > 1 or system.ninputs > 1) and _has_shared_denominator(system):
+        return _mimo_transfer_to_state(system)
+
     blocks: list[tuple[int, int, np.ndarray, np.ndarray, np.ndarray]] = []
     D = np.zeros((system.noutputs, system.ninputs), dtype=float, order="F")
     state_count = 0
