@@ -20,7 +20,6 @@ try:
         # Enhanced Phase 1-3 functions
         impile_advanced_compiled,
         impile_compiled,
-        kalc_riccati_compiled,
         ordinate_sequence_compiled,
         pinv_compiled_svd,
         reducingOrder_compiled,
@@ -38,7 +37,6 @@ except ImportError:
     Vn_mat_compiled = None
     impile_advanced_compiled = None
     reducingOrder_fast_compiled = None
-    kalc_riccati_compiled = None
     vn_mat_parallel_compiled = None
     covariance_symmetric_compiled = None
     extract_matrices_batch_compiled = None
@@ -442,9 +440,6 @@ def K_calc(A, C, Q, R, S):
     """
     Calculate Kalman filter gain.
 
-    This function automatically uses the enhanced Numba-compiled version when available
-    for improved performance with custom Riccati solver.
-
     Parameters:
     -----------
     A, C, Q, R, S : ndarray
@@ -457,22 +452,17 @@ def K_calc(A, C, Q, R, S):
     Calculated : bool
         Whether calculation was successful
     """
-    if NUMBA_AVAILABLE and kalc_riccati_compiled is not None:
-        K, Calculated, P = kalc_riccati_compiled(A, C, Q, R, S)
-        return K, Calculated
-    else:
-        # Fallback to original scipy-based implementation
-        try:
-            X = solve_discrete_are(A.T, C.T, Q, R)
-            P = ssmatrix(X)
-            K = np.dot(np.dot(A, P), C.T) + S
-            K = np.dot(K, np.linalg.inv(np.dot(np.dot(C, P), C.T) + R))
-            Calculated = True
-        except (ValueError, np.linalg.LinAlgError, IndexError):
-            K = []
-            warnings.warn("Kalman filter cannot be calculated")
-            Calculated = False
-        return K, Calculated
+    try:
+        P = ssmatrix(solve_discrete_are(A.T, C.T, Q, R, s=S))
+        numerator = A @ P @ C.T + S
+        innovation_covariance = C @ P @ C.T + R
+        K = np.linalg.solve(innovation_covariance.T, numerator.T).T
+        Calculated = True
+    except (ValueError, np.linalg.LinAlgError, IndexError):
+        K = []
+        warnings.warn("Kalman filter cannot be calculated")
+        Calculated = False
+    return K, Calculated
 
 
 def get_frequency_response_uncertainty(

@@ -133,7 +133,7 @@ def _evaluate_single_order(args):
                 )
 
                 u_slice_det = np.ascontiguousarray(u[:, f : f + N - 1])
-                if np.linalg.det(u_slice_det) != 0:
+                if np.linalg.matrix_rank(u_slice_det) == u_slice_det.shape[0]:
                     X_fd_next = np.ascontiguousarray(X_fd[:, 1:N])
                     X_fd_curr = np.ascontiguousarray(X_fd[:, 0 : N - 1])
                     B_new = np.dot(
@@ -428,7 +428,7 @@ class SubspaceCoreAlgorithm:
 
             # Ensure contiguous memory for sliced arrays
             u_slice_det = np.ascontiguousarray(u[:, f : f + N - 1])
-            if np.linalg.det(u_slice_det) != 0:
+            if np.linalg.matrix_rank(u_slice_det) == u_slice_det.shape[0]:
                 X_fd_next = np.ascontiguousarray(X_fd[:, 1:N])
                 X_fd_curr = np.ascontiguousarray(X_fd[:, 0 : N - 1])
                 try:

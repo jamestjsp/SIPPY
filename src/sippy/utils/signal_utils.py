@@ -267,6 +267,8 @@ def rescale(y):
         y rescaled by its standard deviation
     """
     ystd = np.std(y)
+    if ystd < np.finfo(np.float64).eps:
+        ystd = 1.0
     y_scaled = y / ystd
     return ystd, y_scaled
 

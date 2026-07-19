@@ -1856,45 +1856,6 @@ def reducingOrder_fast_compiled(U_n, S_n, V_n, threshold=0.1, max_order=10):
     return U_n[:, :index], S_n[:index], V_n[:index, :]
 
 
-# ==== PHASE 2: ADVANCED LINEAR ALGEBRA ====
-
-
-@jit(fastmath=True)
-def kalc_riccati_compiled(A, C, Q, R, S, dtol=1e-12, max_iter=100):
-    """
-    Simplified compiled version of Kalman gain calculation.
-
-    Parameters:
-    -----------
-    A, C, Q, R, S : ndarray
-        State-space and noise covariance matrices
-    dtol : float
-        Convergence tolerance for Riccati equation
-    max_iter : int
-        Maximum iterations for convergence
-
-    Returns:
-    --------
-    K : ndarray
-        Kalman gain matrix
-    Calculated : bool
-        Whether calculation was successful
-    P : ndarray
-        Steady-state covariance matrix
-    """
-    n = A.shape[0]
-    l = C.shape[0]
-
-    # Initialize with simple solution - always return P=Q, K=zeros as fallback
-    P = Q.copy()
-    K = np.zeros((n, l))
-    Calculated = False
-
-    # For now, return a deterministic result to avoid compilation issues
-    # More complex Riccati implementation can be added later
-    return K, Calculated, P
-
-
 @jit(fastmath=True)
 def vn_mat_parallel_compiled(y_flat, yest_flat):
     """
@@ -2222,7 +2183,6 @@ __all__ = [
     # New Phase 1-3 functions
     "impile_advanced_compiled",
     "reducingOrder_fast_compiled",
-    "kalc_riccati_compiled",
     "vn_mat_parallel_compiled",
     "covariance_symmetric_compiled",
     "extract_matrices_batch_compiled",
