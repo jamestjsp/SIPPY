@@ -17,9 +17,11 @@ distributed under the LGPL license.
 - Generalized polynomial model: GEN
 - Nonparametric frequency response: FD
 
-All 16 algorithms share the same `identify(y=None, u=None, iddata=None,
-**kwargs)` interface. They accept raw arrays or `IDData` and return an
-`IdentificationResult` (`StateSpaceModel` remains its compatibility name).
+All 16 algorithms share the same parameterless factory and
+`identify(y=None, u=None, iddata=None, **options)` algorithm interface. The
+primary `sippy.identify(...)` function accepts raw arrays or `IDData` and
+returns an `IdentificationResult` (`StateSpaceModel` remains its compatibility
+name).
 Every result exposes the same analysis methods and reports support through
 `model.supports(operation)`. Unsupported operations raise `NotImplementedError`
 instead of returning fabricated state or covariance values.
@@ -49,18 +51,19 @@ NumPy, SciPy, Pandas, and Numba provide the numerical runtime.
 ```python
 import numpy as np
 
-from sippy.identification import SystemIdentification, SystemIdentificationConfig
+import sippy
 
 rng = np.random.default_rng(42)
 u = rng.standard_normal((2, 1000))
 y = rng.standard_normal((1, 1000))
 
-config = SystemIdentificationConfig(
-    method="N4SID",
+model = sippy.identify(
+    y,
+    u,
+    method="n4sid",
     ss_f=20,
     ss_fixed_order=2,
 )
-model = SystemIdentification(config).identify(y, u)
 
 print(model.n)
 print(model.is_stable())
@@ -94,14 +97,20 @@ model = create_algorithm("ARX").identify(
 )
 ```
 
+Each method declares the options it accepts. Unknown options warn and are
+discarded instead of being silently ignored. Deprecated spellings such as
+`dt`, `stab_marg`, `stab_cons`, `theta`, and ARMAX's `algorithm` are translated
+to the canonical vocabulary with `DeprecationWarning`.
+
 ## Architecture
 
 ```text
 src/sippy/
 ├── identification/
-│   ├── __main__.py        # SystemIdentification facade
+│   ├── __main__.py        # Functional API and compatibility facades
 │   ├── base.py            # Algorithm and model abstractions
 │   ├── factory.py         # Algorithm registry
+│   ├── parameters.py      # Shared method and option vocabulary
 │   ├── iddata.py          # Input/output data container
 │   ├── algorithms/        # Identification implementations
 │   └── tests/             # Unit, parity, and simulation tests

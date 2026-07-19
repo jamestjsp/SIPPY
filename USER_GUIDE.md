@@ -94,7 +94,7 @@ source .venv/bin/activate
 
 ```python
 import numpy as np
-from sippy.identification import SystemIdentification, SystemIdentificationConfig
+import sippy
 
 # Generate sample data (2 inputs, 1 output)
 np.random.seed(42)
@@ -106,18 +106,15 @@ y = np.zeros((1, n_samples))
 for i in range(1, n_samples):
     y[0, i] = 0.7 * y[0, i-1] + 0.3 * u[0, i-1] + 0.2 * u[1, i-1] + 0.05 * np.random.randn()
 
-# Create identification system with custom configuration
-config = SystemIdentificationConfig(
-    method='N4SID',
+# Identify with one method-specific option vocabulary
+model = sippy.identify(
+    y,
+    u,
+    method='n4sid',
     ss_f=15,
     ss_fixed_order=1,
     ss_threshold=0.1
 )
-
-identifier = SystemIdentification(config)
-
-# Perform identification
-model = identifier.identify(y, u)
 
 print(f"✓ Identified model with {model.n} states")
 print(f"✓ System stable: {model.is_stable()}")
@@ -146,18 +143,18 @@ iddata = IDData(
     tsample=1.0
 )
 
-# Use IDData directly
-model = identifier.identify(iddata=iddata)
+# Use IDData through the same entry point
+model = sippy.identify(data=iddata, method='n4sid', ss_fixed_order=1)
 ```
 
-### Legacy API (Still Supported!)
+### Legacy API (Deprecated but Supported)
 
-All existing code continues to work without changes:
+The compatibility function still translates the original names, but emits a
+`DeprecationWarning` so new code can converge on `sippy.identify`:
 
 ```python
 from sippy.identification import system_identification  # Legacy function
 
-# Old API still works exactly as before
 model = system_identification(
     y=y, 
     u=u, 
@@ -172,47 +169,42 @@ model = system_identification(
 
 ## Core Architecture
 
-### SystemIdentification Class
+### Primary identify Function
 
-The main entry point for system identification:
+The main entry point selects a method and accepts only that method's declared
+options:
 
 ```python
-from sippy.identification import SystemIdentification, SystemIdentificationConfig
+import sippy
 
-# Create configuration
-config = SystemIdentificationConfig(
-    method='N4SID',
+model = sippy.identify(
+    y,
+    u,
+    method='n4sid',
     ss_f=20,
     ss_fixed_order=2,
     centering='MeanVal'
 )
-
-# Create identifier
-identifier = SystemIdentification(config)
-
-# Perform identification (accepts both arrays and IDData)
-model = identifier.identify(y, u)
-# OR
-model = identifier.identify(iddata=iddata)
 ```
 
 ### SystemIdentificationConfig
 
-Configuration object that manages all identification parameters:
+`SystemIdentification` and its flat configuration object remain compatibility
+facades. Prefer `sippy.identify` so unrelated algorithm settings are not mixed
+into one configuration object. Existing code can migrate incrementally:
 
 ```python
+from sippy.identification import SystemIdentificationConfig
+
 config = SystemIdentificationConfig(
-    method='N4SID',           # Algorithm selection
-    centering='None',        # Data centering: 'None', 'InitVal', 'MeanVal'
-    ic='None',              # Information criteria: 'AIC', 'AICc', 'BIC'
-    tsample=1.0,            # Sample time
-    ss_f=20,                # Future horizon for subspace methods
-    ss_threshold=0.1,       # Threshold for order selection
-    ss_max_order=None,      # Maximum model order
-    ss_fixed_order=1,       # Fixed model order
-    ss_orders=[1, 10],      # Order range for information criteria
-    ss_d_required=False,    # Require D matrix in state-space
-    ss_a_stability=False    # Enforce A matrix stability
+    method='N4SID',
+    centering='None',
+    tsample=1.0,
+    ss_f=20,
+    ss_threshold=0.1,
+    ss_fixed_order=1,
+    ss_d_required=False,
+    ss_a_stability=False,
 )
 ```
 
