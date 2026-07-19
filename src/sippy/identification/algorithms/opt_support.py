@@ -12,8 +12,10 @@ scaling factors) required by the refactored object-oriented API.
 
 from __future__ import annotations
 
+import sys
+import warnings
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -114,6 +116,12 @@ class MISOResult:
             if self.c_coeffs.size
             else [1.0]
         )
+        # Both polynomials are monic in q^-1; pad the shorter with trailing
+        # zeros so the z-domain transfer stays proper (e.g. C/D with nc > nd).
+        if len(num_h) < len(den_h):
+            num_h = num_h + [0.0] * (len(den_h) - len(num_h))
+        elif len(den_h) < len(num_h):
+            den_h = den_h + [0.0] * (len(num_h) - len(den_h))
         h_tf = harold.Transfer(num_h, den_h, dt=sample_time)
 
         return g_tf, h_tf
@@ -123,6 +131,41 @@ def _ensure_column_major(array: np.ndarray) -> np.ndarray:
     """Return a contiguous float64 array (column-major friendly view)."""
 
     return np.ascontiguousarray(array, dtype=np.float64)
+
+
+def apply_platform_ipopt_options(opts: dict) -> dict:
+    """Add platform-specific IPOPT settings required for robust solves.
+
+    The METIS ordering bundled with CasADi's MUMPS segfaults on macOS
+    (invalid free in libcoinmetis) once the KKT system grows past a few
+    thousand rows, which happens for N >~ 1100 samples when the NLP carries
+    3N auxiliary variables. Force the always-available AMD ordering instead.
+    """
+
+    if sys.platform == "darwin":
+        opts["ipopt.mumps_pivot_order"] = 0
+    return opts
+
+
+def nk_to_theta(nk: Union[int, Sequence, np.ndarray]) -> Union[int, np.ndarray]:
+    """Convert input delay ``nk`` to the solver's extra-delay parameter ``theta``.
+
+    Public API convention (matching ARX/FIR and MATLAB): ``nk`` is the delay of
+    the first B coefficient, so ``nk=1`` places it at ``u[k-1]``. The NLP/ILLS
+    solvers instead take ``theta``, the extra delay beyond the structural
+    ``q^-1`` (``theta=0`` places the first B coefficient at ``u[k-1]``), hence
+    ``theta = nk - 1``. These model structures have no direct feedthrough, so
+    ``nk=0`` cannot be represented and is treated as ``nk=1`` with a warning.
+    """
+
+    arr = np.asarray(nk, dtype=int)
+    if np.any(arr < 1):
+        warnings.warn(
+            "nk=0 requests direct feedthrough, which this model structure "
+            "cannot represent; using nk=1 (first B coefficient at u[k-1])."
+        )
+    theta = np.maximum(arr - 1, 0)
+    return theta if theta.ndim else int(theta)
 
 
 def _rescale_signal(signal: np.ndarray) -> Tuple[float, np.ndarray]:
@@ -328,6 +371,7 @@ def opt_id(
         "ipopt.sb": "yes",
         "print_time": 0,
     }
+    apply_platform_ipopt_options(sol_opts)
 
     solver = nlpsol("solver", "ipopt", nlp, sol_opts)
 

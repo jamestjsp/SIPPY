@@ -903,6 +903,16 @@ For SISO structures, orders follow the same conventions as the original document
 
 For MIMO, `nb` and `theta` accept matrices/lists per output-input pair consistent with the original master branch conventions.
 
+#### Input delay conventions: `nk` vs `theta`
+
+All algorithms accept `nk`, the delay of the first B coefficient (`nk=1` places
+it at `u[k-1]`, matching ARX/FIR and MATLAB). Algorithms that also accept the
+legacy `theta` parameter (ARMAX, ARARX) keep the master-branch meaning: the
+extra delay beyond the structural `q^-1`, i.e. `theta = nk - 1`. Structures
+whose B polynomial starts at `q^-1` (ARMAX, OE, BJ, ARARX, ARARMAX and MIMO
+GEN) cannot represent `nk=0` direct feedthrough; passing `nk=0` there emits a
+warning and behaves as `nk=1`.
+
 ### Migration Checklist
 
 - [ ] Update imports: `sippy_unipi` → `sippy.identification`

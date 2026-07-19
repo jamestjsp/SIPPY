@@ -9,7 +9,13 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from ..base import IdentificationAlgorithm, StateSpaceModel, SystemIdentificationConfig
-from .opt_support import HAROLD_AVAILABLE, MISOResult, gen_mimo_id, gen_miso_id
+from .opt_support import (
+    HAROLD_AVAILABLE,
+    MISOResult,
+    gen_mimo_id,
+    gen_miso_id,
+    nk_to_theta,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing support
     from ..iddata import IDData
@@ -41,32 +47,50 @@ def _block_diag(mats: Sequence[np.ndarray]) -> np.ndarray:
 def _companion_from_polynomials(
     result: MISOResult, nu: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Create a simple companion-form realisation when harold is unavailable."""
+    """Realise G = q^-(delay+1) B / (A F) in observable canonical form.
 
-    # State order should reflect the highest order across all coefficients
-    max_b_order = (
-        max(len(coeffs) for coeffs in result.b_coeffs) if result.b_coeffs else 0
+    All inputs share the denominator A(q) F(q), so a single companion block
+    carries the dynamics and each input contributes its numerator (shifted by
+    its delay) as a column of B.
+    """
+
+    a_poly = (
+        np.concatenate(([1.0], result.a_coeffs))
+        if result.a_coeffs.size
+        else np.array([1.0])
     )
-    order = max(len(result.a_coeffs), max_b_order, 1)
+    f_poly = (
+        np.concatenate(([1.0], result.f_coeffs))
+        if result.f_coeffs.size
+        else np.array([1.0])
+    )
+    den = np.convolve(a_poly, f_poly)
+
+    delays = np.asarray(result.delay, dtype=int) if len(result.delay) else np.zeros(0)
+    numerator_lengths = [
+        int(delays[j]) + 1 + len(coeffs) if len(coeffs) else 0
+        for j, coeffs in enumerate(result.b_coeffs)
+    ]
+    order = max(len(den) - 1, max(numerator_lengths, default=0), 1)
+
     A = np.zeros((order, order))
     if order > 1:
         A[:-1, 1:] = np.eye(order - 1)
-    if result.a_coeffs.size:
-        A[-1, : result.a_coeffs.size] = -result.a_coeffs
+    A[:, 0][: len(den) - 1] = -den[1:]
 
     B = np.zeros((order, nu))
     for j, coeffs in enumerate(result.b_coeffs):
-        for idx, coeff in enumerate(coeffs[:order]):
-            B[idx, j] = coeff
+        if len(coeffs) == 0:
+            continue
+        start = int(delays[j])
+        B[start : start + len(coeffs), j] = coeffs
 
     C = np.zeros((1, order))
-    C[0, -1] = 1.0
+    C[0, 0] = 1.0
 
     D = np.zeros((1, nu))
-    # Ensure dimensions match the number of inputs
-    # For time-series models like ARMA (nu=0), B and D should have zero input columns
     if nu == 0:
-        B = np.zeros((order, 0))  # No input columns for time-series
+        B = np.zeros((order, 0))
         D = np.zeros((1, 0))
     return A, B, C, D
 
@@ -429,7 +453,11 @@ class ARARXAlgorithm(IdentificationAlgorithm):
         na = kwargs.get("na", 1)
         nb = kwargs.get("nb", 1)
         nd = kwargs.get("nd", 1)
-        theta = kwargs.get("theta", kwargs.get("nk", 0))
+        # theta keeps the solver convention (extra delay beyond q^-1); nk is
+        # the delay of the first B coefficient (nk=1 -> u[k-1]), like ARX.
+        theta = kwargs.get("theta")
+        if theta is None:
+            theta = nk_to_theta(kwargs.get("nk", 1))
 
         # Handle None values coming from SystemIdentificationConfig
         if nd is None:

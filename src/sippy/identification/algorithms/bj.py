@@ -10,7 +10,12 @@ from numpy.linalg import lstsq
 
 from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
 from .ararx import _state_space_from_results, _state_space_from_single_result
-from .opt_support import gen_mimo_id, gen_miso_id
+from .opt_support import (
+    apply_platform_ipopt_options,
+    gen_mimo_id,
+    gen_miso_id,
+    nk_to_theta,
+)
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -170,7 +175,7 @@ class BJAlgorithm(IdentificationAlgorithm):
                 "nc": getattr(config, "nc", 1),
                 "nd": getattr(config, "nd", 1),
                 "nf": getattr(config, "nf", 1),
-                "nk": getattr(config, "nk", 0) or 0,
+                "nk": getattr(config, "nk", 1) or 1,
             }
 
         # Validate input arguments
@@ -195,7 +200,7 @@ class BJAlgorithm(IdentificationAlgorithm):
         nc = kwargs.get("nc", 1)
         nd = kwargs.get("nd", 1)
         nf = kwargs.get("nf", 1)
-        nk = kwargs.get("nk", 0) or 0  # Input delay (handle None case)
+        nk = kwargs.get("nk", 1) or 1  # Input delay (handle None case)
 
         # Validate parameters
         self.validate_parameters(nb=nb, nc=nc, nd=nd, nf=nf)
@@ -220,7 +225,7 @@ class BJAlgorithm(IdentificationAlgorithm):
                         nc=int(nc),
                         nd=int(nd),
                         nf=int(nf),
-                        theta=np.full(u.shape[0], nk, dtype=int),
+                        theta=np.full(u.shape[0], nk_to_theta(nk), dtype=int),
                         max_iterations=kwargs_filtered.get("max_iterations", 200),
                         stability_margin=kwargs_filtered.get(
                             "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
@@ -242,7 +247,7 @@ class BJAlgorithm(IdentificationAlgorithm):
                     nc=[int(nc)] * y.shape[0],
                     nd=[int(nd)] * y.shape[0],
                     nf=[int(nf)] * y.shape[0],
-                    theta=np.full((y.shape[0], u.shape[0]), nk, dtype=int),
+                    theta=np.full((y.shape[0], u.shape[0]), nk_to_theta(nk), dtype=int),
                     sample_time=sample_time,
                     max_iterations=kwargs_filtered.get("max_iterations", 200),
                     stability_margin=kwargs_filtered.get(
@@ -595,6 +600,7 @@ class BJAlgorithm(IdentificationAlgorithm):
             "ipopt.sb": "yes",
             "print_time": 0,
         }
+        apply_platform_ipopt_options(opts)
 
         # Create solver
         solver = ca.nlpsol("solver", "ipopt", nlp, opts)

@@ -10,7 +10,12 @@ from numpy.linalg import lstsq
 
 from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
 from .ararx import _state_space_from_results, _state_space_from_single_result
-from .opt_support import gen_mimo_id, gen_miso_id
+from .opt_support import (
+    apply_platform_ipopt_options,
+    gen_mimo_id,
+    gen_miso_id,
+    nk_to_theta,
+)
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -209,7 +214,7 @@ class OEAlgorithm(IdentificationAlgorithm):
                         nc=0,
                         nd=0,
                         nf=int(nf),
-                        theta=np.full(u.shape[0], nk, dtype=int),
+                        theta=np.full(u.shape[0], nk_to_theta(nk), dtype=int),
                         max_iterations=kwargs_filtered.get("max_iterations", 200),
                         stability_margin=kwargs_filtered.get(
                             "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
@@ -231,7 +236,7 @@ class OEAlgorithm(IdentificationAlgorithm):
                     nc=[0] * y.shape[0],
                     nd=[0] * y.shape[0],
                     nf=[int(nf)] * y.shape[0],
-                    theta=np.full((y.shape[0], u.shape[0]), nk, dtype=int),
+                    theta=np.full((y.shape[0], u.shape[0]), nk_to_theta(nk), dtype=int),
                     sample_time=sample_time,
                     max_iterations=kwargs_filtered.get("max_iterations", 200),
                     stability_margin=kwargs_filtered.get(
@@ -611,6 +616,7 @@ class OEAlgorithm(IdentificationAlgorithm):
             "ipopt.sb": "yes",
             "print_time": 0,
         }
+        apply_platform_ipopt_options(opts)
 
         # Create solver
         solver = ca.nlpsol("solver", "ipopt", nlp, opts)
