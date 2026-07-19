@@ -75,24 +75,41 @@ def fit_rational_frf(
     """
     omega = np.asarray(omega, dtype=float)
     G = np.asarray(G, dtype=complex)
+    if omega.ndim != 1 or G.ndim != 1:
+        raise ValueError("omega and G must be one-dimensional")
+    if not all(isinstance(order, (int, np.integer)) for order in (na, nb, nk)):
+        raise ValueError("na, nb, and nk must be integers")
     if na < 0 or nb < 1 or nk < 0:
         raise ValueError("Orders must satisfy na >= 0, nb >= 1, nk >= 0")
     if len(omega) != len(G):
         raise ValueError("omega and G must have the same length")
+    if not np.all(np.isfinite(omega)) or not np.all(np.isfinite(G)):
+        raise ValueError("omega and G must contain only finite values")
     if len(omega) < na + nb:
         raise ValueError(
             f"Need at least na + nb = {na + nb} frequency bins to fit, got {len(omega)}"
         )
+    if not isinstance(n_iter, (int, np.integer)) or n_iter < 1:
+        raise ValueError("n_iter must be a positive integer")
+    if not np.isfinite(tol) or tol <= 0:
+        raise ValueError("tol must be positive and finite")
 
     w0 = np.ones(len(omega)) if weights is None else np.asarray(weights, float)
+    if w0.ndim != 1 or w0.shape != omega.shape:
+        raise ValueError(
+            "weights must be one-dimensional with the same length as omega"
+        )
+    if not np.all(np.isfinite(w0)) or np.any(w0 < 0):
+        raise ValueError("weights must contain only finite, non-negative values")
+    if np.count_nonzero(w0) < na + nb:
+        raise ValueError(f"Need at least na + nb = {na + nb} positive weights to fit")
+    w0 = w0 / np.max(w0)
 
     E = np.exp(-1j * omega)  # z^-1 on the unit circle
     # Design matrix: G_k = sum_i b_i E^(nk+i) - sum_i a_i E^i G_k
-    M = np.empty((len(omega), nb + na), dtype=complex)
-    for i in range(nb):
-        M[:, i] = E ** (nk + i)
-    for i in range(1, na + 1):
-        M[:, nb + i - 1] = -(E**i) * G
+    numerator_terms = E[:, None] ** np.arange(nk, nk + nb)
+    denominator_terms = -(E[:, None] ** np.arange(1, na + 1)) * G[:, None]
+    M = np.concatenate([numerator_terms, denominator_terms], axis=1)
 
     x_prev = np.zeros(nb + na)
     sk_weight = np.ones(len(omega))
@@ -124,11 +141,15 @@ def fit_rational_frf(
     G_fit = B_fit / A_fit
     residual = G_fit - G
     scale = np.maximum(np.abs(G), 1e-12)
+    squared_weights = w0**2
     info = {
         "n_iter": iteration,
         "converged": converged,
         "weighted_rms_error": float(
-            np.sqrt(np.sum(w0 * np.abs(residual) ** 2) / np.sum(w0))
+            np.sqrt(
+                np.sum(squared_weights * np.abs(residual) ** 2)
+                / np.sum(squared_weights)
+            )
         ),
         "relative_error": np.abs(residual) / scale,
     }
@@ -188,6 +209,9 @@ def fit_frf_model(
         fitted harold transfer function, and per-channel fit diagnostics in
         ``identification_info["frf_fit"]``.
     """
+    if not np.isfinite(min_coherence) or not 0 <= min_coherence <= 1:
+        raise ValueError("min_coherence must be in [0, 1]")
+
     info = getattr(model, "identification_info", None) or {}
     if info.get("method") != "FD" or "frequency_response" not in info:
         raise ValueError(

@@ -340,6 +340,34 @@ class TestMIMOSpectra:
         diag = np.real(np.diagonal(S_uu, axis1=1, axis2=2))
         assert np.all(diag >= 0)
 
+    @pytest.mark.parametrize("nperseg", [255, 256])
+    def test_csd_matrices_match_scipy_welch(self, rng, nperseg):
+        u = rng.standard_normal((3, 2048))
+        y = rng.standard_normal((2, 2048))
+        kwargs = {
+            "fs": 5.0,
+            "nperseg": nperseg,
+            "window": "hamming",
+            "noverlap": 77,
+        }
+
+        freqs, S_uu, S_uy, S_yy = compute_csd_matrices(
+            u,
+            y,
+            dt=0.2,
+            nperseg=nperseg,
+            window="hamming",
+            noverlap=77,
+        )
+        ref_freqs, ref_S_uu = signal.csd(u[:, None, :], u[None, :, :], **kwargs)
+        _, ref_S_uy = signal.csd(u[:, None, :], y[None, :, :], **kwargs)
+        _, ref_S_yy = signal.welch(y, **kwargs)
+
+        np.testing.assert_allclose(freqs, ref_freqs)
+        np.testing.assert_allclose(S_uu, np.moveaxis(ref_S_uu, -1, 0))
+        np.testing.assert_allclose(S_uy, np.moveaxis(ref_S_uy, -1, 0))
+        np.testing.assert_allclose(S_yy, ref_S_yy.T)
+
     def test_mimo_frf_accuracy_with_correlated_inputs(self, mimo_data):
         """The H1 matrix solve must recover both channel FRFs even though
         the inputs are cross-correlated (a naive per-channel Phi_uy/Phi_u

@@ -17,7 +17,7 @@ import warnings
 
 import numpy as np
 from scipy import signal as scipy_signal
-from scipy.fft import fft, fftfreq, irfft, rfft
+from scipy.fft import fft, fftfreq, irfft, rfft, rfftfreq
 
 
 def compute_power_spectrum_welch(
@@ -507,8 +507,9 @@ def compute_csd_matrices(
     Estimate the full set of Welch cross-spectral density matrices for
     multi-input multi-output data.
 
-    All channel pairs are computed in a single broadcasted call to
-    scipy.signal.csd (no Python loops over channels).
+    The windowed FFT is computed once per input and output channel, then all
+    channel-pair spectra are formed with batched contractions. This avoids the
+    repeated FFT work incurred by separate Welch/CSD calls.
 
     Parameters
     ----------
@@ -538,32 +539,55 @@ def compute_csd_matrices(
     """
     u = np.atleast_2d(np.asarray(u, dtype=float))
     y = np.atleast_2d(np.asarray(y, dtype=float))
+    if u.shape[1] != y.shape[1]:
+        raise ValueError("Input and output must share the same number of samples")
+    if not np.isfinite(dt) or dt <= 0:
+        raise ValueError(f"Sampling interval must be positive and finite, got {dt}")
+
+    n_samples = u.shape[1]
+    nperseg = int(nperseg)
+    if nperseg < 1:
+        raise ValueError("nperseg must be a positive integer")
+    if nperseg > n_samples:
+        warnings.warn(
+            f"nperseg = {nperseg} is greater than input length = {n_samples}, "
+            f"using nperseg = {n_samples}",
+            UserWarning,
+        )
+        nperseg = n_samples
+    if noverlap is None:
+        noverlap = nperseg // 2
+    noverlap = int(noverlap)
+    if noverlap >= nperseg:
+        raise ValueError("noverlap must be less than nperseg")
+
+    taper = scipy_signal.get_window(window, nperseg)
+    step = nperseg - noverlap
+
+    def segment_ffts(x: np.ndarray) -> np.ndarray:
+        segments = np.lib.stride_tricks.sliding_window_view(x, nperseg, axis=-1)[
+            :, ::step, :
+        ]
+        segments = segments - np.mean(segments, axis=-1, keepdims=True)
+        return rfft(segments * taper, axis=-1)
+
+    U = segment_ffts(u)
+    Y = segment_ffts(y)
+    n_segments = U.shape[1]
+
+    S_uu = np.einsum("msf,nsf->fmn", np.conj(U), U, optimize=True) / n_segments
+    S_uy = np.einsum("msf,lsf->fml", np.conj(U), Y, optimize=True) / n_segments
+    S_yy = np.mean(np.abs(Y) ** 2, axis=1).T
+
     fs = 1.0 / dt
-
-    freqs, S_uu = scipy_signal.csd(
-        u[:, None, :],
-        u[None, :, :],
-        fs=fs,
-        nperseg=nperseg,
-        window=window,
-        noverlap=noverlap,
-    )
-    _, S_uy = scipy_signal.csd(
-        u[:, None, :],
-        y[None, :, :],
-        fs=fs,
-        nperseg=nperseg,
-        window=window,
-        noverlap=noverlap,
-    )
-    _, S_yy = scipy_signal.welch(
-        y, fs=fs, nperseg=nperseg, window=window, noverlap=noverlap
-    )
-
-    # Move the frequency axis to the front
-    S_uu = np.moveaxis(S_uu, -1, 0)
-    S_uy = np.moveaxis(S_uy, -1, 0)
-    S_yy = np.real(S_yy).T
+    spectral_scale = np.full(U.shape[-1], 2.0 / (fs * np.sum(taper**2)))
+    spectral_scale[0] *= 0.5
+    if nperseg % 2 == 0:
+        spectral_scale[-1] *= 0.5
+    S_uu *= spectral_scale[:, None, None]
+    S_uy *= spectral_scale[:, None, None]
+    S_yy *= spectral_scale[:, None]
+    freqs = rfftfreq(nperseg, dt)
 
     return freqs, S_uu, S_uy, S_yy
 

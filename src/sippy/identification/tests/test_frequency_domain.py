@@ -258,6 +258,12 @@ class TestMIMOIdentification:
         assert info["estimator"] == "welch"
         assert info["n_inputs"] == 2
         assert info["n_outputs"] == 2
+        assert result.B.shape == (1, 2)
+        assert result.C.shape == (2, 1)
+        assert result.D.shape == (2, 2)
+        assert result.K.shape == (1, 2)
+        assert result.R.shape == (2, 2)
+        assert result.S.shape == (1, 2)
 
     def test_correlation_method_rejects_mimo(self, mimo_data):
         u, y, _ = mimo_data
@@ -387,10 +393,11 @@ class TestEdgeCases:
         with pytest.raises(ValueError, match="[Ii]nf"):
             algo.identify(y=y, u=u_inf)
 
-    def test_invalid_dt_raises(self):
+    @pytest.mark.parametrize("dt", [0.0, -1.0, np.nan, np.inf])
+    def test_invalid_dt_raises(self, dt):
         u, y = make_siso_data(N=500)
-        with pytest.raises(ValueError, match="positive"):
-            FrequencyDomainAlgorithm().identify(y=y, u=u, dt=-1.0)
+        with pytest.raises(ValueError, match="positive and finite"):
+            FrequencyDomainAlgorithm().identify(y=y, u=u, dt=dt)
 
     def test_constant_signal_warns(self):
         u, _ = make_siso_data(N=500)

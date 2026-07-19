@@ -51,8 +51,9 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
     Non-parametric frequency-domain identification (correlation / Welch H1).
 
     Because the result is a frequency response rather than a parametric
-    model, the returned StateSpaceModel carries placeholder 1x1 matrices;
-    the estimate lives in ``model.identification_info``:
+    model, the returned StateSpaceModel carries a one-state zero placeholder
+    with matching input/output dimensions; the estimate lives in
+    ``model.identification_info``:
 
         info["frequency_response"]  frequency grid, complex FRF, magnitude,
                                     phase, coherence, and the raw spectra
@@ -132,12 +133,14 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
         """
         self.validate_parameters(**kwargs)
 
-        dt = float(kwargs.pop("dt", None) or kwargs.pop("tsample", None) or 1.0)
-        kwargs.pop("dt", None)
-        kwargs.pop("tsample", None)
+        dt_value = kwargs.pop("dt", None)
+        tsample_value = kwargs.pop("tsample", None)
+        if dt_value is None:
+            dt_value = tsample_value
+        dt = float(1.0 if dt_value is None else dt_value)
         y_arr, u_arr, dt = resolve_identification_data(y, u, iddata, tsample=dt)
-        if dt <= 0:
-            raise ValueError(f"Sampling interval must be positive, got {dt}")
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError(f"Sampling interval must be positive and finite, got {dt}")
 
         n_outputs, N = y_arr.shape
         n_inputs = u_arr.shape[0]
@@ -173,13 +176,13 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
         # placeholders keep the factory return contract.
         return StateSpaceModel(
             A=np.eye(1),
-            B=np.zeros((1, 1)),
-            C=np.zeros((1, 1)),
-            D=np.zeros((1, 1)),
-            K=np.zeros((1, 1)),
+            B=np.zeros((1, n_inputs)),
+            C=np.zeros((n_outputs, 1)),
+            D=np.zeros((n_outputs, n_inputs)),
+            K=np.zeros((1, n_outputs)),
             Q=np.eye(1),
-            R=np.eye(1),
-            S=np.zeros((1, 1)),
+            R=np.eye(n_outputs),
+            S=np.zeros((1, n_outputs)),
             ts=dt,
             Vn=0.0,
             identification_info=results,

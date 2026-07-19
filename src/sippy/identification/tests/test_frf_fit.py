@@ -73,6 +73,38 @@ class TestFitRationalFRF:
         with pytest.raises(ValueError, match="at least"):
             fit_rational_frf(omega, G, na=2, nb=2)
 
+    @pytest.mark.parametrize("n_iter", [0, -1, 1.5])
+    def test_invalid_iteration_count_raises(self, n_iter):
+        omega = np.linspace(0.1, 3.0, 20)
+        with pytest.raises(ValueError, match="n_iter"):
+            fit_rational_frf(omega, np.ones(20), na=1, nb=1, n_iter=n_iter)
+
+    @pytest.mark.parametrize(
+        "weights",
+        [
+            np.ones(19),
+            -np.ones(20),
+            np.full(20, np.nan),
+            np.zeros(20),
+        ],
+    )
+    def test_invalid_weights_raise(self, weights):
+        omega = np.linspace(0.1, 3.0, 20)
+        with pytest.raises(ValueError, match="weights"):
+            fit_rational_frf(omega, np.ones(20), na=1, nb=1, weights=weights)
+
+    def test_weight_scaling_does_not_change_fit(self):
+        omega = np.linspace(0.05, 3.0, 200)
+        _, G = signal.freqz(B_TRUE, A_TRUE, worN=omega)
+        weights = np.linspace(0.1, 2.0, len(omega))
+        fit = fit_rational_frf(omega, G, na=2, nb=2, weights=weights)
+        scaled_fit = fit_rational_frf(omega, G, na=2, nb=2, weights=1e150 * weights)
+        np.testing.assert_allclose(fit[0], scaled_fit[0])
+        np.testing.assert_allclose(fit[1], scaled_fit[1])
+        assert fit[2]["weighted_rms_error"] == pytest.approx(
+            scaled_fit[2]["weighted_rms_error"]
+        )
+
 
 class TestFitFRFModel:
     @pytest.fixture
@@ -187,6 +219,12 @@ class TestFitFRFModel:
         fd = FrequencyDomainAlgorithm().identify(y=y, u=u)
         with pytest.raises(ValueError, match="coherence"):
             fit_frf_model(fd, na=2, nb=2, min_coherence=0.95)
+
+    @pytest.mark.parametrize("min_coherence", [-0.1, 1.1, np.nan])
+    def test_invalid_min_coherence_raises(self, siso_fd_result, min_coherence):
+        fd, _ = siso_fd_result
+        with pytest.raises(ValueError, match="min_coherence"):
+            fit_frf_model(fd, na=2, nb=2, min_coherence=min_coherence)
 
     def test_unstable_fit_warns(self):
         rng = np.random.default_rng(11)
