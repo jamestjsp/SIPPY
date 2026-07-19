@@ -65,16 +65,9 @@ class ARMAXAlgorithm(IdentificationAlgorithm):
         iddata: Optional["IDData"] = None,
         **kwargs,
     ) -> StateSpaceModel:
-        if iddata is not None:
-            if y is not None or u is not None:
-                raise ValueError("Provide either iddata or (y, u), not both")
-            y = iddata.get_output_array()
-            u = iddata.get_input_array()
-            sample_time = getattr(iddata, "sample_time", kwargs.get("tsample", 1.0))
-        else:
-            if y is None or u is None:
-                raise ValueError("ARMAX requires both input and output data")
-            sample_time = kwargs.get("tsample", 1.0)
+        if y is None or u is None:
+            raise ValueError("ARMAX requires both input and output data")
+        sample_time = kwargs.get("tsample", 1.0)
 
         y = np.atleast_2d(np.asarray(y, dtype=float))
         u = np.atleast_2d(np.asarray(u, dtype=float))
@@ -87,22 +80,12 @@ class ARMAXAlgorithm(IdentificationAlgorithm):
         na = kwargs.get("na", 1)
         nb = kwargs.get("nb", 1)
         nc = kwargs.get("nc", 1)
-        # theta keeps the solver convention (extra delay beyond q^-1); nk is
-        # the delay of the first B coefficient (nk=1 -> u[k-1]), like ARX.
-        theta = kwargs.get("theta")
-        if theta is None:
-            theta = nk_to_theta(kwargs.get("nk", 1))
+        theta = nk_to_theta(kwargs.get("nk", 1))
 
         max_iterations = kwargs.get("max_iterations", 200)
-        mode = kwargs.get("mode", kwargs.get("algorithm", "ILLS")).upper()
-        if mode == "RLLS":
-            mode = "ILLS"
-        if mode == "OPT":
-            mode = "NLP"
-        stability_margin = kwargs.get("stability_margin", kwargs.get("stab_marg", 1.0))
-        enforce_stability = kwargs.get(
-            "stability_constraint", kwargs.get("stab_cons", False)
-        )
+        mode = kwargs.get("mode", "ILLS").upper()
+        stability_margin = kwargs.get("stability_margin", 1.0)
+        enforce_stability = kwargs.get("stability_constraint", False)
 
         if ny == 1:
             nb_vec = _normalize_matrix(nb, 1, nu, allow_zero=False).ravel()

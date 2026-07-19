@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import sippy
 from sippy import systems as control
+from sippy.identification import SystemIdentification
 from sippy.identification.algorithms.ararmax import ARARMAXAlgorithm
 from sippy.identification.base import StateSpaceModel, SystemIdentificationConfig
 from sippy.identification.iddata import IDData
@@ -117,6 +119,81 @@ class TestARARMAXAlgorithm:
         assert model.D is not None
         assert model.ts == 1.0
 
+    def test_master_order_bundle_matches_explicit_canonical_orders(self):
+        explicit = sippy.identify(
+            data=self.iddata_siso,
+            method="ARARMAX",
+            na=2,
+            nb=2,
+            nc=1,
+            nd=1,
+            nf=0,
+            nk=1,
+            max_iterations=20,
+        )
+
+        with pytest.warns(DeprecationWarning, match="ararmax_orders"):
+            bundled = sippy.identify(
+                data=self.iddata_siso,
+                method="ARARMAX",
+                ararmax_orders=[2, 2, 1, 1, 0],
+                max_iterations=20,
+            )
+
+        np.testing.assert_allclose(bundled.Yid, explicit.Yid, rtol=0, atol=0)
+        np.testing.assert_allclose(bundled.A, explicit.A, rtol=0, atol=0)
+        np.testing.assert_allclose(bundled.B, explicit.B, rtol=0, atol=0)
+        options = bundled.identification_info["options"]
+        assert {name: options[name] for name in ("na", "nb", "nc", "nd", "nk")} == {
+            "na": 2,
+            "nb": 2,
+            "nc": 1,
+            "nd": 1,
+            "nk": 1,
+        }
+        assert "ararmax_orders" not in options
+
+    def test_master_order_bundle_works_for_direct_y_u_api(self):
+        y = self.iddata_siso.get_output_array()
+        u = self.iddata_siso.get_input_array()
+
+        with pytest.warns(DeprecationWarning, match="ararmax_orders"):
+            model = sippy.identify(
+                y,
+                u,
+                method="ARARMAX",
+                ararmax_orders=[2, 2, 1, 1, 0],
+                max_iterations=20,
+            )
+
+        options = model.identification_info["options"]
+        assert (
+            options["na"],
+            options["nb"],
+            options["nc"],
+            options["nd"],
+            options["nk"],
+        ) == (
+            2,
+            2,
+            1,
+            1,
+            1,
+        )
+
+    def test_config_master_order_bundle_is_still_translated(self):
+        config = SystemIdentificationConfig(
+            method="ARARMAX",
+            ararmax_orders=[2, 2, 1, 1, 0],
+            max_iterations=20,
+        )
+
+        model = SystemIdentification(config).identify(iddata=self.iddata_siso)
+
+        assert model.identification_info["options"]["na"] == 2
+        assert model.identification_info["options"]["nb"] == 2
+        assert model.identification_info["options"]["nk"] == 1
+
     def test_ararmax_algorithm_basic_mimo(self):
         """Test ARARMAX algorithm with MIMO system."""
         from sippy.identification.algorithms.ararmax import ARARMAXAlgorithm
@@ -163,6 +240,18 @@ class TestARARMAXAlgorithm:
             algorithm.identify(
                 iddata=self.iddata_siso, na=0, nb=1, nc=1, nd=1, nf=1, nk=1
             )
+
+        assert algorithm.validate_parameters(
+            na=[[1, 0], [1, 0]],
+            nb=[[1, 1], [1, 1]],
+            nc=[[1, 0], [1, 0]],
+            nd=[[1, 0], [1, 0]],
+            nf=0,
+            nk=[[1, 1], [1, 1]],
+        )
+
+        with pytest.raises(ValueError, match="AR order \\(na\\) must contain integers"):
+            algorithm.validate_parameters(na="2")
 
     def test_ararmax_insufficient_data(self):
         """Test ARARMAX algorithm with insufficient data."""

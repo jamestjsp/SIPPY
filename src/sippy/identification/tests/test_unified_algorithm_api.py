@@ -1,4 +1,5 @@
 import inspect
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -71,6 +72,68 @@ def test_conflicting_parameter_alias_is_rejected():
     with pytest.warns(DeprecationWarning, match="theta.*nk"):
         with pytest.raises(ValueError, match="Conflicting values"):
             normalize_identification_options("ARMAX", {"theta": 1, "nk": 1})
+
+
+@pytest.mark.parametrize(
+    "method,bundle_name,bundle,expected",
+    [
+        ("ARX", "arx_orders", [2, 3, 0], {"na": 2, "nb": 3, "nk": 1}),
+        (
+            "ARMAX",
+            "armax_orders",
+            [2, 3, 1, 1],
+            {"na": 2, "nb": 3, "nc": 1, "nk": 2},
+        ),
+        (
+            "ARARX",
+            "ararx_orders",
+            [[2], [[3]], [1], [[1]]],
+            {"na": [2], "nb": [[3]], "nd": [1], "nk": [[2]]},
+        ),
+        (
+            "ARARMAX",
+            "ararmax_orders",
+            [2, 3, 1, 1, 0],
+            {"na": 2, "nb": 3, "nc": 1, "nd": 1, "nk": 1},
+        ),
+        (
+            "BJ",
+            "bj_orders",
+            [3, 1, 2, 4, 2],
+            {"nb": 3, "nc": 1, "nd": 2, "nf": 4, "nk": 3},
+        ),
+    ],
+)
+def test_master_order_bundles_translate_to_canonical_options(
+    method, bundle_name, bundle, expected
+):
+    with pytest.warns(DeprecationWarning, match=bundle_name):
+        options = normalize_identification_options(method, {bundle_name: bundle})
+
+    assert options == expected
+
+
+def test_invalid_master_order_bundle_is_rejected_instead_of_using_defaults():
+    with pytest.raises(ValueError, match="ararmax_orders.*five"):
+        normalize_identification_options("ARARMAX", {"ararmax_orders": [2, 2, 1]})
+
+
+def test_master_order_bundle_conflict_is_rejected():
+    with pytest.warns(DeprecationWarning, match="arx_orders"):
+        with pytest.raises(ValueError, match="Conflicting values.*na"):
+            normalize_identification_options("ARX", {"arx_orders": [2, 2, 0], "na": 3})
+
+
+def test_master_order_bundle_warning_can_be_suppressed():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        options = normalize_identification_options(
+            "ARARMAX",
+            {"ararmax_orders": [2, 2, 1, 1, 0]},
+            warn_deprecated=False,
+        )
+
+    assert options["nk"] == 1
 
 
 @pytest.fixture(scope="module")

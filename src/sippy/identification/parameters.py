@@ -127,6 +127,27 @@ OPTION_ALIASES = {
     "theta": "nk",
 }
 
+ORDER_BUNDLES = {
+    "ARX": ("arx_orders", ("na", "nb", "theta")),
+    "ARMAX": ("armax_orders", ("na", "nb", "nc", "theta")),
+    "ARARX": ("ararx_orders", ("na", "nb", "nd", "theta")),
+    "ARARMAX": (
+        "ararmax_orders",
+        ("na", "nb", "nc", "nd", "theta"),
+    ),
+    "BJ": ("bj_orders", ("nb", "nc", "nd", "nf", "theta")),
+}
+
+ORDER_BUNDLE_ALIASES = {
+    "ARX_orders": "arx_orders",
+    "ARMAX_orders": "armax_orders",
+    "ARARX_orders": "ararx_orders",
+    "ARARMAX_orders": "ararmax_orders",
+    "BJ_orders": "bj_orders",
+}
+
+_NUMBER_WORDS = {3: "three", 4: "four", 5: "five"}
+
 
 def normalize_method(method: str) -> str:
     if not isinstance(method, str) or not method.strip():
@@ -154,6 +175,55 @@ def _values_equal(first: Any, second: Any) -> bool:
         return first == second
 
 
+def _set_option(
+    normalized: dict[str, Any], canonical: str, value: Any, *, source: str
+) -> None:
+    if canonical in normalized and not _values_equal(normalized[canonical], value):
+        raise ValueError(
+            f"Conflicting values were provided for identification option "
+            f"'{canonical}' through {source}"
+        )
+    normalized[canonical] = value
+
+
+def _expand_order_bundle(
+    method: str,
+    name: str,
+    value: Any,
+    *,
+    warn_deprecated: bool,
+) -> dict[str, Any] | None:
+    specification = ORDER_BUNDLES.get(method)
+    canonical_name = ORDER_BUNDLE_ALIASES.get(name, name)
+    if specification is None or canonical_name != specification[0]:
+        return None
+    fields = specification[1]
+    if isinstance(value, (str, bytes, Mapping)) or not hasattr(value, "__len__"):
+        length = None
+    else:
+        length = len(value)
+    if length != len(fields):
+        count = _NUMBER_WORDS.get(len(fields), str(len(fields)))
+        replacements = ", ".join(
+            "nk" if field == "theta" else field for field in fields
+        )
+        raise ValueError(
+            f"{canonical_name} must contain {count} values "
+            f"[{', '.join(fields)}]; pass {replacements} as named options instead"
+        )
+    if warn_deprecated:
+        warnings.warn(
+            f"'{name}' is deprecated; pass named identification options instead",
+            DeprecationWarning,
+            stacklevel=4,
+        )
+    expanded = {}
+    for field, field_value in zip(fields, value):
+        canonical = "nk" if field == "theta" else field
+        expanded[canonical] = _alias_value(field, field_value)
+    return expanded
+
+
 def normalize_identification_options(
     method: str,
     options: Mapping[str, Any],
@@ -170,6 +240,23 @@ def normalize_identification_options(
     normalized: dict[str, Any] = {}
     unknown: list[str] = []
     for name, value in options.items():
+        if value is None:
+            continue
+        bundle = _expand_order_bundle(
+            normalized_method,
+            name,
+            value,
+            warn_deprecated=warn_deprecated,
+        )
+        if bundle is not None:
+            for canonical, bundle_value in bundle.items():
+                _set_option(
+                    normalized,
+                    canonical,
+                    bundle_value,
+                    source=name,
+                )
+            continue
         canonical = OPTION_ALIASES.get(name, name)
         if name in OPTION_ALIASES:
             if warn_deprecated:
@@ -182,13 +269,7 @@ def normalize_identification_options(
         if canonical not in accepted:
             unknown.append(name)
             continue
-        if value is None:
-            continue
-        if canonical in normalized and not _values_equal(normalized[canonical], value):
-            raise ValueError(
-                f"Conflicting values were provided for identification option '{canonical}'"
-            )
-        normalized[canonical] = value
+        _set_option(normalized, canonical, value, source=name)
 
     if warn_unknown and unknown:
         names = ", ".join(sorted(unknown))

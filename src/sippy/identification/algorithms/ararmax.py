@@ -3,7 +3,7 @@ ARARMAX (Auto-Regressive ARMAX) identification algorithm.
 """
 
 import warnings
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from numpy.linalg import lstsq
@@ -11,6 +11,7 @@ from numpy.linalg import lstsq
 from sippy import systems as control
 
 from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
+from ..parameters import normalize_identification_options
 from .ararx import _state_space_from_results, _state_space_from_single_result
 from .opt_support import (
     apply_platform_ipopt_options,
@@ -19,10 +20,8 @@ from .opt_support import (
     nk_to_theta,
 )
 
-try:
+if TYPE_CHECKING:
     from ..iddata import IDData
-except ImportError:
-    IDData = None
 
 # Import compiled utilities for performance
 try:
@@ -87,131 +86,50 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
         return "ARARMAX"
 
     def validate_parameters(self, **kwargs) -> bool:
-        """
-        Validate algorithm-specific parameters.
-
-        Args:
-            **kwargs: Parameters to validate
-
-        Returns:
-            bool: True if parameters are valid
-
-        Raises:
-            ValueError: If required parameters are missing or invalid
-        """
-        config = kwargs.get("config")
-        if config is None:
-            return False
-        try:
-            self.validate_config(config)
-            return True
-        except ValueError:
-            return False
+        """Validate ARARMAX orders."""
+        values = {
+            "na": kwargs.get("na", 1),
+            "nb": kwargs.get("nb", 1),
+            "nc": kwargs.get("nc", 1),
+            "nd": kwargs.get("nd", 1),
+            "nf": kwargs.get("nf", 0),
+            "nk": kwargs.get("nk", 1),
+        }
+        labels = {
+            "na": "AR order (na)",
+            "nb": "Input order (nb)",
+            "nc": "Noise AR order (nc)",
+            "nd": "Noise MA order (nd)",
+            "nf": "Input TF order (nf)",
+            "nk": "Input delay (nk)",
+        }
+        for name, value in values.items():
+            if isinstance(value, (str, bytes)):
+                raise ValueError(f"{labels[name]} must contain integers")
+            try:
+                entries = np.asarray(value)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"{labels[name]} must contain integers") from error
+            if entries.size == 0:
+                raise ValueError(f"{labels[name]} must not be empty")
+            if not np.issubdtype(entries.dtype, np.integer):
+                raise ValueError(f"{labels[name]} must contain integers")
+            if name in {"na", "nb"}:
+                if np.any(entries < 0) or not np.any(entries > 0):
+                    raise ValueError(f"{labels[name]} must be positive")
+            elif np.any(entries < 0):
+                raise ValueError(f"{labels[name]} must be non-negative")
+        return True
 
     def validate_config(self, config):
-        """
-        Validate configuration parameters for ARARMAX algorithm.
-
-        Args:
-            config: SystemIdentificationConfig instance
-
-        Raises:
-            ValueError: If required parameters are missing or invalid
-        """
-        # Extract parameters from master branch style ararmax_orders if needed
-        if (
-            hasattr(config, "ararmax_orders")
-            and config.ararmax_orders is not None
-            and len(config.ararmax_orders) >= 5
-        ):
-            # Master branch format: [na, nb, nc, nd, nf] where nk is auto-calculated
-            orders = config.ararmax_orders
-            if not hasattr(config, "na") or config.na is None:
-                config.na = orders[0]
-            if not hasattr(config, "nb") or config.nb is None:
-                config.nb = orders[1]
-            if not hasattr(config, "nc") or config.nc is None:
-                config.nc = orders[2]
-            if not hasattr(config, "nd") or config.nd is None:
-                config.nd = orders[3]
-            if not hasattr(config, "nf") or config.nf is None:
-                config.nf = orders[4]
-            # Auto-calculate nk as 1 if not provided (master branch behavior)
-            if not hasattr(config, "nk") or config.nk is None:
-                if len(orders) > 5:
-                    config.nk = orders[5]  # theta/delay matrix from master branch
-                else:
-                    config.nk = 1  # Default delay
-
-        # Check required ARARMAX parameters
-        if not hasattr(config, "na") or config.na is None:
-            raise ValueError(
-                "ARARMAX algorithm requires 'na' parameter (AR order for y)"
-            )
-        if not hasattr(config, "nb") or config.nb is None:
-            raise ValueError(
-                "ARARMAX algorithm requires 'nb' parameter (input polynomial order)"
-            )
-        if not hasattr(config, "nc") or config.nc is None:
-            raise ValueError(
-                "ARARMAX algorithm requires 'nc' parameter (noise AR order)"
-            )
-        if not hasattr(config, "nd") or config.nd is None:
-            raise ValueError(
-                "ARARMAX algorithm requires 'nd' parameter (noise MA order)"
-            )
-        if not hasattr(config, "nf") or config.nf is None:
-            raise ValueError(
-                "ARARMAX algorithm requires 'nf' parameter (input TF order)"
-            )
-        if not hasattr(config, "nk") or config.nk is None:
-            raise ValueError("ARARMAX algorithm requires 'nk' parameter (input delay)")
-
-        # Validate parameter types (they can be numbers, not just lists)
-        if not isinstance(config.na, (int, list)):
-            raise ValueError("'na' must be an integer or list")
-        if not isinstance(config.nb, (int, list)):
-            raise ValueError("'nb' must be an integer or list")
-        if not isinstance(config.nc, (int, list)):
-            raise ValueError("'nc' must be an integer or list")
-        if not isinstance(config.nd, (int, list)):
-            raise ValueError("'nd' must be an integer or list")
-        if not isinstance(config.nf, (int, list)):
-            raise ValueError("'nf' must be an integer or list")
-        if not isinstance(config.nk, (int, list)):
-            raise ValueError("'nk' must be an integer or list")
-
-        # Helper function to flatten nested lists and validate
-        def flatten_and_validate(param, param_name):
-            if isinstance(param, int):
-                if param < 1:
-                    raise ValueError(f"{param_name} must be positive")
-                return param
-            elif isinstance(param, list):
-                # Flatten nested list structure (MIMO case)
-                flat_param = []
-                for item in param:
-                    if isinstance(item, (list, tuple)):
-                        flat_param.extend(item)
-                    else:
-                        flat_param.append(item)
-                # Validate all values
-                for x in flat_param:
-                    if not isinstance(x, (int, float)) or x < 0:
-                        raise ValueError(
-                            f"All {param_name} values must be non-negative numbers"
-                        )
-                return max(flat_param) if flat_param else 0
-            else:
-                raise ValueError(f"{param_name} must be an integer or list")
-
-        # Validate constraints using helper function
-        flatten_and_validate(config.na, "AR order (na)")
-        flatten_and_validate(config.nb, "Input order (nb)")
-        flatten_and_validate(config.nc, "Noise AR order (nc)")
-        flatten_and_validate(config.nd, "Noise MA order (nd)")
-        flatten_and_validate(config.nf, "Input TF order (nf)")
-        flatten_and_validate(config.nk, "Input delay (nk)")
+        """Validate a configuration through the shared option normalizer."""
+        options = normalize_identification_options(
+            "ARARMAX",
+            vars(config),
+            warn_unknown=False,
+            warn_deprecated=False,
+        )
+        return self.validate_parameters(**options)
 
     def identify(
         self,
@@ -235,65 +153,22 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
         Raises:
             ValueError: If parameters are invalid or data insufficient
         """
-        if iddata is not None and (y is not None or u is not None):
-            raise ValueError("Provide either iddata or (y, u), but not both")
-
-        # Handle input data from various sources
-        if iddata is not None:
-            u = iddata.get_input_array()
-            y = iddata.get_output_array()
-            sample_time = iddata.sample_time
-        elif y is not None and u is not None:
-            # Ensure arrays are 2D (follow OE pattern)
-            y = np.atleast_2d(y)
-            u = np.atleast_2d(u)
-            sample_time = kwargs.get("tsample", 1.0)
-        else:
-            raise ValueError("Either iddata or both y and u must be provided")
+        if y is None or u is None:
+            raise ValueError("ARARMAX requires both input and output data")
+        y = np.atleast_2d(y)
+        u = np.atleast_2d(u)
+        sample_time = kwargs.get("tsample", 1.0)
 
         # Check data sufficiency
         if y.shape[1] < 2 or u.shape[1] < 2:
             raise ValueError("Insufficient data: need at least 2 samples")
 
-        # Extract configuration parameters from kwargs and handle config object
-        config = kwargs.get("config")
-        if config is not None:
-            # Extract from config object, handling ararmax_orders format
-            na = getattr(config, "na", None)
-            nb = getattr(config, "nb", None)
-            nc = getattr(config, "nc", None)
-            nd = getattr(config, "nd", None)
-            nf = getattr(config, "nf", None)
-            nk = getattr(config, "nk", None)
-
-            # If individual parameters are None, try to extract from ararmax_orders
-            if any(x is None for x in [na, nb, nc, nd, nf]):
-                if (
-                    hasattr(config, "ararmax_orders")
-                    and config.ararmax_orders is not None
-                ):
-                    orders = config.ararmax_orders
-                    if len(orders) >= 5:
-                        if na is None:
-                            na = orders[0]  # na (AR orders)
-                        if nb is None:
-                            nb = orders[1]  # nb (input orders)
-                        if nc is None:
-                            nc = orders[2]  # nc (noise AR orders)
-                        if nd is None:
-                            nd = orders[3]  # nd (noise MA orders)
-                        if nf is None:
-                            nf = orders[4]  # nf (input TF orders)
-                        if nk is None and len(orders) > 5:
-                            nk = orders[5]  # theta/delay matrix
-        else:
-            # Extract directly from kwargs
-            na = kwargs.get("na", 1)
-            nb = kwargs.get("nb", 1)
-            nc = kwargs.get("nc", 1)
-            nd = kwargs.get("nd", 1)
-            nf = kwargs.get("nf", 0)
-            nk = kwargs.get("nk", 1)
+        na = kwargs.get("na", 1)
+        nb = kwargs.get("nb", 1)
+        nc = kwargs.get("nc", 1)
+        nd = kwargs.get("nd", 1)
+        nf = kwargs.get("nf", 0)
+        nk = kwargs.get("nk", 1)
 
         # Handle None values with defaults
         if na is None:
@@ -309,60 +184,12 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
         if nk is None:
             nk = 1
 
-        # Helper function to validate and handle list/int parameters
-        def validate_param(param, param_name, allow_zero=False):
-            if isinstance(param, (list, tuple)):
-                # For list parameters, check if any value is valid
-                flat_param = []
-                for item in param:
-                    if isinstance(item, (list, tuple)):
-                        flat_param.extend(item)
-                    else:
-                        flat_param.append(item)
-                # Check if any value is positive (or non-negative if allow_zero)
-                for x in flat_param:
-                    if isinstance(x, (int, float)):
-                        if allow_zero and x >= 0:
-                            return True
-                        elif not allow_zero and x > 0:
-                            return True
-                return False
-            elif isinstance(param, (int, float)):
-                if allow_zero:
-                    return param >= 0
-                else:
-                    return param > 0
-            return False
-
-        # Validate parameters
-        if not validate_param(na, "na"):
-            raise ValueError("AR order (na) must be positive")
-        if not validate_param(nb, "nb"):
-            raise ValueError("Input order (nb) must be positive")
-        if not validate_param(nc, "nc", allow_zero=True):
-            raise ValueError("Noise AR order (nc) must be non-negative")
-        if not validate_param(nd, "nd", allow_zero=True):
-            raise ValueError("Noise MA order (nd) must be non-negative")
-        if not validate_param(nf, "nf", allow_zero=True):
-            raise ValueError("Input TF order (nf) must be non-negative")
-        if not validate_param(nk, "nk", allow_zero=True):
-            raise ValueError("Input delay (nk) must be non-negative")
+        self.validate_parameters(na=na, nb=nb, nc=nc, nd=nd, nf=nf, nk=nk)
 
         # Flatten nested lists and extract max values for MIMO compatibility
         def flatten_and_max(param):
-            if isinstance(param, int):
-                return param, [param]
-            elif isinstance(param, (list, tuple)):
-                # Flatten nested list/tuple structure
-                flat_param = []
-                for item in param:
-                    if isinstance(item, (list, tuple)):
-                        flat_param.extend(item)
-                    else:
-                        flat_param.append(item)
-                return max(flat_param) if flat_param else 0, flat_param
-            else:
-                return 0, []
+            flat_param = np.asarray(param, dtype=int).ravel().tolist()
+            return max(flat_param) if flat_param else 0, flat_param
 
         max_na, na = flatten_and_max(na)
         max_nb, nb = flatten_and_max(nb)
@@ -405,12 +232,9 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
                         nf=0,
                         theta=np.full(nu, nk_to_theta(max_nk), dtype=int),
                         max_iterations=kwargs_filtered.get("max_iterations", 200),
-                        stability_margin=kwargs_filtered.get(
-                            "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
-                        ),
+                        stability_margin=kwargs_filtered.get("stability_margin", 1.0),
                         enforce_stability=kwargs_filtered.get(
-                            "stability_constraint",
-                            kwargs_filtered.get("stab_cons", False),
+                            "stability_constraint", False
                         ),
                     )
                     return _state_space_from_single_result(
@@ -428,11 +252,9 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
                     theta=np.full((ny, nu), nk_to_theta(max_nk), dtype=int),
                     sample_time=sample_time,
                     max_iterations=kwargs_filtered.get("max_iterations", 200),
-                    stability_margin=kwargs_filtered.get(
-                        "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
-                    ),
+                    stability_margin=kwargs_filtered.get("stability_margin", 1.0),
                     enforce_stability=kwargs_filtered.get(
-                        "stability_constraint", kwargs_filtered.get("stab_cons", False)
+                        "stability_constraint", False
                     ),
                 )
                 return _state_space_from_results(results, nu, sample_time)

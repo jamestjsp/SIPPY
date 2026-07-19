@@ -11,7 +11,6 @@ from sippy import systems as control
 from ..base import (
     IdentificationAlgorithm,
     StateSpaceModel,
-    SystemIdentificationConfig,
     realize_transfer_function,
 )
 from .opt_support import (
@@ -23,11 +22,6 @@ from .opt_support import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing support
     from ..iddata import IDData
-else:
-    try:
-        from ..iddata import IDData
-    except ImportError:
-        IDData = None  # type: ignore
 
 
 def _block_diag(mats: Sequence[np.ndarray]) -> np.ndarray:
@@ -350,66 +344,12 @@ class ARARXAlgorithm(IdentificationAlgorithm):
         iddata: Optional["IDData"] = None,
         **kwargs,
     ) -> StateSpaceModel:
-        """Run ARARX identification using shared optimisation helpers.
-
-        Supports both legacy (iddata, config) and modern ( kwargs-based) interfaces.
-        """
-
-        # Handle legacy interface: identify(iddata, config) or identify(IDData, SystemIdentificationConfig)
-        iddata_obj = None
-        config_obj = None
-
-        # Check if the first positional argument (y) is actually IDData (legacy interface)
-        if y is not None and IDData is not None and isinstance(y, IDData):
-            iddata_obj = y
-            y = None  # Clear y since we're treating it as iddata
-            # For this legacy interface, the second argument (u) should be SystemIdentificationConfig
-            if u is not None and isinstance(u, SystemIdentificationConfig):
-                config_obj = u
-                u = None
-            # If not, might be modern interface with iddata parameter
-        elif iddata is not None:
-            iddata_obj = iddata
-
-        # Check for config in kwargs (modern interface)
-        if "config" in kwargs and isinstance(
-            kwargs["config"], SystemIdentificationConfig
-        ):
-            config_obj = kwargs.pop("config")
-
-        # Convert config to kwargs if available
-        if config_obj is not None:
-            for attr in [
-                "na",
-                "nb",
-                "nd",
-                "theta",
-                "tsample",
-                "max_iterations",
-                "stab_marg",
-                "stab_cons",
-            ]:
-                if hasattr(config_obj, attr) and attr not in kwargs:
-                    kwargs[attr] = getattr(config_obj, attr)
-
-        # Extract data from iddata or direct arrays
-        if iddata_obj is not None:
-            if y is not None or (
-                u is not None and not isinstance(u, SystemIdentificationConfig)
-            ):
-                raise ValueError("Provide either iddata or (y, u), not both")
-            u_data = iddata_obj.get_input_array()
-            y_data = iddata_obj.get_output_array()
-            sample_time = getattr(iddata_obj, "sample_time", kwargs.get("tsample", 1.0))
-        else:
-            if y is None or u is None:
-                raise ValueError("Must provide either iddata or both y and u")
-            u_data = u
-            y_data = y
-            sample_time = kwargs.get("tsample", 1.0)
-
-        y = np.atleast_2d(np.asarray(y_data, dtype=float))
-        u = np.atleast_2d(np.asarray(u_data, dtype=float))
+        """Run ARARX identification using shared optimisation helpers."""
+        if y is None or u is None:
+            raise ValueError("ARARX requires both input and output data")
+        sample_time = kwargs.get("tsample", 1.0)
+        y = np.atleast_2d(np.asarray(y, dtype=float))
+        u = np.atleast_2d(np.asarray(u, dtype=float))
 
         ny, n_samples = y.shape
         nu, _ = u.shape
@@ -419,11 +359,7 @@ class ARARXAlgorithm(IdentificationAlgorithm):
         na = kwargs.get("na", 1)
         nb = kwargs.get("nb", 1)
         nd = kwargs.get("nd", 1)
-        # theta keeps the solver convention (extra delay beyond q^-1); nk is
-        # the delay of the first B coefficient (nk=1 -> u[k-1]), like ARX.
-        theta = kwargs.get("theta")
-        if theta is None:
-            theta = nk_to_theta(kwargs.get("nk", 1))
+        theta = nk_to_theta(kwargs.get("nk", 1))
 
         # Handle None values coming from SystemIdentificationConfig
         if nd is None:
@@ -508,10 +444,8 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             raise ValueError("Not enough data for requested ARARX orders")
 
         max_iterations = kwargs.get("max_iterations", 200)
-        stability_margin = kwargs.get("stability_margin", kwargs.get("stab_marg", 1.0))
-        enforce_stability = kwargs.get(
-            "stability_constraint", kwargs.get("stab_cons", False)
-        )
+        stability_margin = kwargs.get("stability_margin", 1.0)
+        enforce_stability = kwargs.get("stability_constraint", False)
 
         if ny == 1:
             na_val = _normalize_orders(na, 1, allow_zero=True)[0]  # Allow zero for na
