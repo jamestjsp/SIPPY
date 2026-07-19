@@ -2,12 +2,14 @@
 Test suite for ARARMAX (Auto-Regressive ARMAX) algorithm implementation.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
+import control
 import numpy as np
 import pandas as pd
 import pytest
 
+from sippy.identification.algorithms.ararmax import ARARMAXAlgorithm
 from sippy.identification.base import StateSpaceModel, SystemIdentificationConfig
 from sippy.identification.iddata import IDData
 
@@ -284,38 +286,30 @@ class TestARARMAXAlgorithm:
         assert model.C is not None
         assert model.D is not None
 
-    @patch("sippy.identification.algorithms.ararmax.harold")
-    def test_ararmax_with_harold_available(self, mock_harold):
-        """Test ARARMAX algorithm when Harold library is available."""
-        # Mock harold StateSpace
-        mock_state_space = MagicMock()
-        mock_state_space.A = np.eye(2) * 0.9
-        mock_state_space.B = np.ones((2, 1)) * 0.5
-        mock_state_space.C = np.ones((1, 2)) * 0.3
-        mock_state_space.D = np.zeros((1, 1))
-        mock_harold.StateSpace.return_value = mock_state_space
-        mock_harold.__contains__ = lambda self, item: item in ["StateSpace"]
-
-        # Import after patching
-        from sippy.identification.algorithms.ararmax import ARARMAXAlgorithm
-
+    def test_ararmax_builds_control_models(self):
         algorithm = ARARMAXAlgorithm()
         config = SystemIdentificationConfig(
             method="ARARMAX", na=[1, 1], nb=[1], nc=[1, 1], nd=[1], nf=[1], nk=[1]
         )
 
-        model = algorithm.identify(
-            iddata=self.iddata_siso,
-            na=config.na,
-            nb=config.nb,
-            nc=config.nc,
-            nd=config.nd,
-            nf=config.nf,
-            nk=config.nk,
-        )
+        with patch("sippy.identification.algorithms.ararmax.CASADI_AVAILABLE", False):
+            model = algorithm.identify(
+                iddata=self.iddata_siso,
+                na=config.na,
+                nb=config.nb,
+                nc=config.nc,
+                nd=config.nd,
+                nf=config.nf,
+                nk=config.nk,
+            )
 
-        assert model is not None
         assert isinstance(model, StateSpaceModel)
+        assert isinstance(model.G, control.StateSpace)
+        assert isinstance(model.G_tf, control.TransferFunction)
+        assert isinstance(model.H_tf, control.TransferFunction)
+        assert model.G.dt == pytest.approx(self.iddata_siso.sample_time)
+        assert model.G_tf.dt == pytest.approx(self.iddata_siso.sample_time)
+        assert model.H_tf.dt == pytest.approx(self.iddata_siso.sample_time)
 
     def test_ararmax_vs_arax_performance(self):
         """Test ARARMAX performs better than ARX on colored noise."""

@@ -6,6 +6,7 @@ import warnings
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
+import control
 import numpy as np
 from scipy.optimize import minimize
 
@@ -21,13 +22,33 @@ except ImportError:
     NUMBA_AVAILABLE = False
     build_armax_regression_parallel = None
 
-# Import Harold if available
-try:
-    import harold
 
-    HAROLD_AVAILABLE = True
-except ImportError:
-    HAROLD_AVAILABLE = False
+def _create_armax_transfer_functions(
+    a_coeffs: np.ndarray,
+    b_coeffs: np.ndarray,
+    c_coeffs: np.ndarray,
+    nk: int,
+    sample_time: float,
+) -> tuple[control.TransferFunction, control.TransferFunction]:
+    na = len(a_coeffs)
+    nb = len(b_coeffs)
+    nc = len(c_coeffs)
+    polynomial_length = max(na, nb + nk, nc) + 1
+
+    numerator_g = np.zeros(polynomial_length)
+    numerator_g[nk : nk + nb] = b_coeffs
+    denominator = np.zeros(polynomial_length)
+    denominator[0] = 1.0
+    denominator[1 : na + 1] = a_coeffs
+
+    numerator_h = np.zeros(polynomial_length)
+    numerator_h[0] = 1.0
+    numerator_h[1 : nc + 1] = c_coeffs
+
+    return (
+        control.tf(numerator_g, denominator, dt=sample_time),
+        control.tf(numerator_h, denominator, dt=sample_time),
+    )
 
 
 class ARMAXModeHandler(ABC):
@@ -245,43 +266,9 @@ class ILLSHandler(ARMAXModeHandler):
             B_coeffs = beta_hat[na : na + nb]
             C_coeffs = beta_hat[na + nb : na + nb + nc]
 
-            # Create transfer functions using harold
-            G_tf, H_tf = None, None
-            if HAROLD_AVAILABLE:
-                try:
-                    # Determine maximum order for transfer function arrays
-                    max_order = max(na, nb + nk, nc)
-
-                    # G(q) = B / A - Deterministic transfer function
-                    NUM_G_full = np.zeros(max_order + 1)
-                    NUM_G_full[nk : nk + nb] = B_coeffs  # B coefficients with delay
-
-                    DEN_G = np.zeros(max_order + 1)
-                    DEN_G[0] = 1.0
-                    DEN_G[1 : na + 1] = A_coeffs  # A coefficients
-
-                    # Strip leading zeros from numerator for harold compatibility
-                    NUM_G = np.trim_zeros(NUM_G_full, "f")
-                    if len(NUM_G) == 0:
-                        NUM_G = np.array([0.0])
-
-                    G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
-
-                    # H(q) = C / A - Noise transfer function
-                    NUM_H = np.zeros(max_order + 1)
-                    NUM_H[0] = 1.0
-                    NUM_H[1 : nc + 1] = C_coeffs  # C coefficients
-
-                    DEN_H = np.zeros(max_order + 1)
-                    DEN_H[0] = 1.0
-                    DEN_H[1 : na + 1] = A_coeffs  # A coefficients (same as G)
-
-                    H_tf = harold.Transfer(NUM_H, DEN_H, dt=Ts)
-                except Exception as e:
-                    warnings.warn(
-                        f"Failed to create ARMAX transfer functions with harold: {e}"
-                    )
-                    G_tf, H_tf = None, None
+            G_tf, H_tf = _create_armax_transfer_functions(
+                A_coeffs, B_coeffs, C_coeffs, nk, Ts
+            )
 
             # Create state-space representation
             n_states = na + nc
@@ -314,29 +301,6 @@ class ILLSHandler(ARMAXModeHandler):
             # D matrix
             D_mat = np.zeros((ny, nu))
 
-            # Return state-space model with transfer functions
-            if HAROLD_AVAILABLE:
-                # Use Harold for consistent state-space creation
-                try:
-                    ss_model = harold.State(A_mat, B_mat, C_mat, D_mat, dt=Ts)
-                    return StateSpaceModel(
-                        A=ss_model.a,
-                        B=ss_model.b,
-                        C=ss_model.c,
-                        D=ss_model.d,
-                        K=np.zeros((ss_model.a.shape[0], ss_model.c.shape[0])),
-                        Q=np.eye(ss_model.a.shape[0]) * 0.01,
-                        R=np.eye(ss_model.c.shape[0]) * 0.01,
-                        S=np.zeros((ss_model.a.shape[0], ss_model.c.shape[0])),
-                        ts=Ts,
-                        Vn=0.01,
-                        G_tf=G_tf,
-                        H_tf=H_tf,
-                    )
-                except Exception:
-                    pass  # Fall back to manual creation
-
-            # Manual state-space creation
             return StateSpaceModel(
                 A=A_mat,
                 B=B_mat,
@@ -510,43 +474,9 @@ class RLLSHandler(ARMAXModeHandler):
             pos += nb
             C_coeffs = theta[pos : pos + nc]
 
-            # Create transfer functions using harold
-            G_tf, H_tf = None, None
-            if HAROLD_AVAILABLE:
-                try:
-                    # Determine maximum order for transfer function arrays
-                    max_order = max(na, nb + nk, nc)
-
-                    # G(q) = B / A - Deterministic transfer function
-                    NUM_G_full = np.zeros(max_order + 1)
-                    NUM_G_full[nk : nk + nb] = B_coeffs  # B coefficients with delay
-
-                    DEN_G = np.zeros(max_order + 1)
-                    DEN_G[0] = 1.0
-                    DEN_G[1 : na + 1] = A_coeffs  # A coefficients
-
-                    # Strip leading zeros from numerator for harold compatibility
-                    NUM_G = np.trim_zeros(NUM_G_full, "f")
-                    if len(NUM_G) == 0:
-                        NUM_G = np.array([0.0])
-
-                    G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
-
-                    # H(q) = C / A - Noise transfer function
-                    NUM_H = np.zeros(max_order + 1)
-                    NUM_H[0] = 1.0
-                    NUM_H[1 : nc + 1] = C_coeffs  # C coefficients
-
-                    DEN_H = np.zeros(max_order + 1)
-                    DEN_H[0] = 1.0
-                    DEN_H[1 : na + 1] = A_coeffs  # A coefficients (same as G)
-
-                    H_tf = harold.Transfer(NUM_H, DEN_H, dt=Ts)
-                except Exception as e:
-                    warnings.warn(
-                        f"Failed to create RLLS ARMAX transfer functions with harold: {e}"
-                    )
-                    G_tf, H_tf = None, None
+            G_tf, H_tf = _create_armax_transfer_functions(
+                A_coeffs, B_coeffs, C_coeffs, nk, Ts
+            )
 
             # Use same state-space creation as ILLS
             n_states = na + nc
@@ -579,28 +509,6 @@ class RLLSHandler(ARMAXModeHandler):
             # D matrix
             D_mat = np.zeros((ny, nu))
 
-            # Return state-space model with transfer functions
-            if HAROLD_AVAILABLE:
-                try:
-                    ss_model = harold.State(A_mat, B_mat, C_mat, D_mat, dt=Ts)
-                    return StateSpaceModel(
-                        A=ss_model.a,
-                        B=ss_model.b,
-                        C=ss_model.c,
-                        D=ss_model.d,
-                        K=np.zeros((ss_model.a.shape[0], ss_model.c.shape[0])),
-                        Q=np.eye(ss_model.a.shape[0]) * 0.01,
-                        R=np.eye(ss_model.c.shape[0]) * 0.01,
-                        S=np.zeros((ss_model.a.shape[0], ss_model.c.shape[0])),
-                        ts=Ts,
-                        Vn=0.01,
-                        G_tf=G_tf,
-                        H_tf=H_tf,
-                    )
-                except Exception:
-                    pass
-
-            # Manual state-space creation
             return StateSpaceModel(
                 A=A_mat,
                 B=B_mat,
@@ -856,36 +764,9 @@ class OPTHandler(ARMAXModeHandler):
             B_coeffs = params[na : na + nb]
             C_coeffs = params[na + nb : na + nb + nc]
 
-            # Create transfer functions using harold
-            G_tf, H_tf = None, None
-            if HAROLD_AVAILABLE:
-                try:
-                    max_order = max(na, nb + nk, nc)
-                    NUM_G_full = np.zeros(max_order + 1)
-                    NUM_G_full[nk : nk + nb] = B_coeffs
-                    DEN_G = np.zeros(max_order + 1)
-                    DEN_G[0] = 1.0
-                    DEN_G[1 : na + 1] = A_coeffs
-
-                    # Strip leading zeros from numerator for harold compatibility
-                    NUM_G = np.trim_zeros(NUM_G_full, "f")
-                    if len(NUM_G) == 0:
-                        NUM_G = np.array([0.0])
-
-                    G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
-
-                    NUM_H = np.zeros(max_order + 1)
-                    NUM_H[0] = 1.0
-                    NUM_H[1 : nc + 1] = C_coeffs
-                    DEN_H = np.zeros(max_order + 1)
-                    DEN_H[0] = 1.0
-                    DEN_H[1 : na + 1] = A_coeffs
-                    H_tf = harold.Transfer(NUM_H, DEN_H, dt=Ts)
-                except Exception as e:
-                    warnings.warn(
-                        f"Failed to create OPT ARMAX transfer functions with harold: {e}"
-                    )
-                    G_tf, H_tf = None, None
+            G_tf, H_tf = _create_armax_transfer_functions(
+                A_coeffs, B_coeffs, C_coeffs, nk, Ts
+            )
 
             # Use same state-space creation as ILLS
             n_states = na + nc
@@ -918,28 +799,6 @@ class OPTHandler(ARMAXModeHandler):
             # D matrix
             D_mat = np.zeros((ny, nu))
 
-            # Return state-space model with transfer functions
-            if HAROLD_AVAILABLE:
-                try:
-                    ss_model = harold.State(A_mat, B_mat, C_mat, D_mat, dt=Ts)
-                    return StateSpaceModel(
-                        A=ss_model.a,
-                        B=ss_model.b,
-                        C=ss_model.c,
-                        D=ss_model.d,
-                        K=np.zeros((ss_model.a.shape[0], ss_model.c.shape[0])),
-                        Q=np.eye(ss_model.a.shape[0]) * 0.01,
-                        R=np.eye(ss_model.c.shape[0]) * 0.01,
-                        S=np.zeros((ss_model.a.shape[0], ss_model.c.shape[0])),
-                        ts=Ts,
-                        Vn=0.01,
-                        G_tf=G_tf,
-                        H_tf=H_tf,
-                    )
-                except Exception:
-                    pass
-
-            # Manual state-space creation
             return StateSpaceModel(
                 A=A_mat,
                 B=B_mat,

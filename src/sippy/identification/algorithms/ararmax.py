@@ -5,6 +5,7 @@ ARARMAX (Auto-Regressive ARMAX) identification algorithm.
 import warnings
 from typing import Optional
 
+import control
 import numpy as np
 from numpy.linalg import lstsq
 
@@ -31,19 +32,6 @@ try:
 except ImportError:
     create_regression_matrix_ararmax_compiled = None
     NUMBA_AVAILABLE = False
-
-try:
-    import harold
-
-    # Check if harold has the required components
-    if hasattr(harold, "State"):
-        HAROLD_AVAILABLE = True
-    else:
-        HAROLD_AVAILABLE = False
-        warnings.warn("harold library incomplete. ARARMAX algorithm will be limited.")
-except ImportError:
-    HAROLD_AVAILABLE = False
-    warnings.warn("harold library not available. ARARMAX algorithm will be limited.")
 
 # Check for CasADi availability for NLP-based identification
 try:
@@ -490,134 +478,21 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
             u_values, y_values, theta, na, nb, nc, nd, nf, nk
         )
 
-        if HAROLD_AVAILABLE:
-            # Use Harold's more sophisticated state space realization
-            try:
-                from ..base import StateSpaceModel
-
-                # Use local matrices for test mocking compatibility
-                model = StateSpaceModel(
-                    A=A,
-                    B=B,
-                    C=C,
-                    D=D,
-                    K=np.zeros((A.shape[0], C.shape[0])),
-                    Q=np.eye(A.shape[0]),
-                    R=np.eye(C.shape[0]),
-                    S=np.zeros((A.shape[0], C.shape[0])),
-                    ts=sample_time,
-                    Vn=1.0,
-                )
-
-                # Attach transfer functions and predictions to model
-                model.G_tf = G_tf
-                model.H_tf = H_tf
-                model.Yid = Yid
-
-                return model
-            except Exception as e:
-                warnings.warn(
-                    f"Harold state space realization failed: {e}. Using fallback."
-                )
-
-        # Fallback implementation - create state space model manually
-        try:
-            # For ARARMAX, we need a more complex state representation
-            # that accounts for both AR and MA noise components
-
-            # augmented state vector: [x_main; x_noise_ar; x_noise_ma]
-            n_main = max(max(na), max(nb) + max(nk), max(nf))
-            n_noise_ar = max(nc)
-            n_noise_ma = max(nd)
-            n_states = n_main + n_noise_ar + n_noise_ma
-
-            # Build augmented state matrices
-            A_aug = np.eye(n_states)
-            B_aug = np.zeros((n_states, nu))
-            C_aug = np.zeros((ny, n_states))
-            D_aug = np.zeros((ny, nu))
-
-            # Main system part
-            if n_main > 0:
-                A_aug[:n_main, :n_main] = self._companion_matrix_main(theta, na, nb, nk)
-                B_aug[:n_main, :] = self._build_B_matrix(theta, na, nb, nk, nu)
-                C_aug[0, :n_main] = 1.0  # First output from first state
-
-            # Noise AR part
-            if n_noise_ar > 0:
-                ar_start = n_main
-                ar_end = n_main + n_noise_ar
-                for i in range(n_noise_ar - 1):
-                    A_aug[ar_start + i, ar_start + i + 1] = 1.0
-                # AR coefficients from theta
-                if n_noise_ar > 0:
-                    for i in range(n_noise_ar):
-                        if i < len(theta):
-                            A_aug[ar_end - 1, ar_start + i] = (
-                                -theta[max(na) + max(nb) + i]
-                                if (max(na) + max(nb) + i) < len(theta)
-                                else 0
-                            )
-
-            # Noise MA part
-            if n_noise_ma > 0:
-                ma_start = n_main + n_noise_ar
-                for i in range(n_noise_ma - 1):
-                    A_aug[ma_start + i, ma_start + i + 1] = 1.0
-
-            from ..base import StateSpaceModel
-
-            model = StateSpaceModel(
-                A=A_aug,
-                B=B_aug,
-                C=C_aug,
-                D=D_aug,
-                K=np.zeros((A_aug.shape[0], C_aug.shape[0])),  # Observer gain
-                Q=np.eye(A_aug.shape[0]),  # State covariance
-                R=np.eye(C_aug.shape[0]),  # Measurement covariance
-                S=np.zeros((A_aug.shape[0], C_aug.shape[0])),  # Cross covariance
-                ts=sample_time,  # Sample time
-                Vn=1.0,  # Noise variance
-            )
-
-            # Attach transfer functions and predictions to model
-            model.G_tf = G_tf
-            model.H_tf = H_tf
-            model.Yid = Yid
-
-            return model
-
-        except Exception as e:
-            # Final fallback - use ARX implementation as base
-            warnings.warn(f"ARARMAX realization failed: {e}. Using ARX-based fallback.")
-            # Create simple fallback model with mock coefficients
-            n_states = min(6, n_samples // 10)  # Simple state dimension
-            A_fallback = np.eye(n_states) * 0.9  # Stable dynamics
-            B_fallback = np.random.randn(n_states, nu) * 0.1
-            C_fallback = np.random.randn(ny, n_states) * 0.1
-            D_fallback = np.zeros((ny, nu))
-
-            from ..base import StateSpaceModel
-
-            model = StateSpaceModel(
-                A=A_fallback,
-                B=B_fallback,
-                C=C_fallback,
-                D=D_fallback,
-                K=np.zeros((n_states, ny)),
-                Q=np.eye(n_states),
-                R=np.eye(ny),
-                S=np.zeros((n_states, ny)),
-                ts=sample_time,
-                Vn=1.0,
-            )
-
-            # Attach transfer functions and predictions to model
-            model.G_tf = G_tf
-            model.H_tf = H_tf
-            model.Yid = Yid
-
-            return model
+        return StateSpaceModel(
+            A=A,
+            B=B,
+            C=C,
+            D=D,
+            K=np.zeros((A.shape[0], C.shape[0])),
+            Q=np.eye(A.shape[0]),
+            R=np.eye(C.shape[0]),
+            S=np.zeros((A.shape[0], C.shape[0])),
+            ts=sample_time,
+            Vn=1.0,
+            G_tf=G_tf,
+            H_tf=H_tf,
+            Yid=Yid,
+        )
 
     def _identify_nlp(self, u, y, na, nb, nc, nd, nf, nk, sample_time, **kwargs):
         """
@@ -1207,61 +1082,45 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
 
         Returns:
         --------
-        G_tf, H_tf : harold.Transfer objects or None
-            Transfer functions (None if harold not available)
+        G_tf, H_tf : control.TransferFunction
+            Deterministic and noise transfer functions.
         """
-        if not HAROLD_AVAILABLE:
-            return None, None
+        na_val = max(na) if isinstance(na, (list, tuple)) else na
+        nb_val = max(nb) if isinstance(nb, (list, tuple)) else nb
+        nc_val = max(nc) if isinstance(nc, (list, tuple)) else nc
+        nd_val = max(nd) if isinstance(nd, (list, tuple)) else nd
+        nk_val = max(nk) if isinstance(nk, (list, tuple)) else nk
 
-        try:
-            # Extract scalar orders
-            na_val = max(na) if isinstance(na, (list, tuple)) else na
-            nb_val = max(nb) if isinstance(nb, (list, tuple)) else nb
-            nc_val = max(nc) if isinstance(nc, (list, tuple)) else nc
-            nd_val = max(nd) if isinstance(nd, (list, tuple)) else nd
-            nk_val = max(nk) if isinstance(nk, (list, tuple)) else nk
+        polynomial_length_g = max(nb_val + nk_val, na_val + 1)
 
-            polynomial_length_g = max(nb_val + nk_val, na_val + 1)
+        numerator_g = np.zeros(polynomial_length_g)
+        if len(theta) >= na_val + nb_val:
+            numerator_g[nk_val : nk_val + nb_val] = theta[na_val : na_val + nb_val]
 
-            NUM_G = np.zeros(polynomial_length_g)
-            # Extract B coefficients from theta
-            if len(theta) >= na_val + nb_val:
-                NUM_G[nk_val : nk_val + nb_val] = theta[na_val : na_val + nb_val]
+        denominator_g = np.zeros(polynomial_length_g)
+        denominator_g[0] = 1.0
+        if na_val > 0:
+            denominator_g[1 : na_val + 1] = theta[:na_val]
 
-            DEN_G = np.zeros(polynomial_length_g)
-            DEN_G[0] = 1.0
-            if na_val > 0:
-                DEN_G[1 : na_val + 1] = theta[:na_val]
+        max_order_h = max(nc_val, nd_val)
+        numerator_h = np.zeros(max_order_h + 1)
+        numerator_h[0] = 1.0
+        if len(theta) >= na_val + nb_val + nc_val:
+            numerator_h[1 : nc_val + 1] = theta[
+                na_val + nb_val : na_val + nb_val + nc_val
+            ]
 
-            # Create G transfer function using harold
-            G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
+        denominator_h = np.zeros(max_order_h + 1)
+        denominator_h[0] = 1.0
+        if len(theta) >= na_val + nb_val + nc_val + nd_val:
+            denominator_h[1 : nd_val + 1] = theta[
+                na_val + nb_val + nc_val : na_val + nb_val + nc_val + nd_val
+            ]
 
-            # H_tf = C(q)/D(q) - Noise transfer function
-            max_order_h = max(nc_val, nd_val)
-
-            NUM_H = np.zeros(max_order_h + 1)
-            NUM_H[0] = 1.0
-            # Extract C coefficients (noise AR)
-            if len(theta) >= na_val + nb_val + nc_val:
-                NUM_H[1 : nc_val + 1] = theta[
-                    na_val + nb_val : na_val + nb_val + nc_val
-                ]
-
-            DEN_H = np.zeros(max_order_h + 1)
-            DEN_H[0] = 1.0
-            # Extract D coefficients (noise MA)
-            if len(theta) >= na_val + nb_val + nc_val + nd_val:
-                DEN_H[1 : nd_val + 1] = theta[
-                    na_val + nb_val + nc_val : na_val + nb_val + nc_val + nd_val
-                ]
-
-            # Create H transfer function using harold
-            H_tf = harold.Transfer(NUM_H, DEN_H, dt=Ts)
-
-            return G_tf, H_tf
-        except Exception as e:
-            warnings.warn(f"Failed to create transfer functions with harold: {e}")
-            return None, None
+        return (
+            control.tf(numerator_g, denominator_g, dt=Ts),
+            control.tf(numerator_h, denominator_h, dt=Ts),
+        )
 
     def _compute_yid_ararmax(self, u, y, theta, na, nb, nc, nd, nf, nk):
         """

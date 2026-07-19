@@ -1,7 +1,13 @@
+import control
 import numpy as np
 import pytest
 
 from sippy.identification.algorithms.armax import ARMAXAlgorithm
+from sippy.identification.algorithms.armax_modes import (
+    ILLSHandler,
+    OPTHandler,
+    RLLSHandler,
+)
 from sippy.identification.base import StateSpaceModel
 
 
@@ -59,6 +65,10 @@ def test_armax_default_nlp_runs():
     )
 
     assert isinstance(model, StateSpaceModel)
+    assert isinstance(model.G, control.StateSpace)
+    assert isinstance(model.G_tf, control.TransferFunction)
+    assert isinstance(model.H_tf, control.TransferFunction)
+    assert model.G.dt == pytest.approx(1.0)
     assert model.B.shape[1] == u.shape[0]
     assert model.Yid.shape == y.shape
 
@@ -84,6 +94,11 @@ def test_armax_ills_mode():
     )
 
     assert isinstance(model, StateSpaceModel)
+    assert isinstance(model.G, control.StateSpace)
+    assert isinstance(model.G_tf, control.TransferFunction)
+    assert isinstance(model.H_tf, control.TransferFunction)
+    assert model.G_tf.dt == pytest.approx(1.0)
+    assert model.H_tf.dt == pytest.approx(1.0)
     assert model.A.shape[0] == model.A.shape[1]
     assert model.C.shape[0] == 1
 
@@ -112,3 +127,34 @@ def test_armax_mimo_support(nu):
     assert isinstance(model, StateSpaceModel)
     assert model.C.shape[0] == y.shape[0]
     assert model.B.shape[1] == u.shape[0]
+
+
+@pytest.mark.parametrize(
+    ("handler", "creator_name"),
+    [
+        (ILLSHandler(), "_create_state_space_model"),
+        (RLLSHandler(), "_create_state_space_model_rlls"),
+        (OPTHandler(), "_create_state_space_model_opt"),
+    ],
+)
+def test_legacy_armax_mode_handlers_build_control_models(handler, creator_name):
+    creator = getattr(handler, creator_name)
+    model = creator(
+        np.array([0.2, 0.5, 0.1]),
+        na=1,
+        nb=1,
+        nc=1,
+        nk=1,
+        ny=1,
+        nu=1,
+        Ts=0.25,
+    )
+
+    assert isinstance(model, StateSpaceModel)
+    assert isinstance(model.G, control.StateSpace)
+    assert isinstance(model.G_tf, control.TransferFunction)
+    assert isinstance(model.H_tf, control.TransferFunction)
+    assert model.G_tf.dt == pytest.approx(0.25)
+    assert model.H_tf.dt == pytest.approx(0.25)
+    np.testing.assert_allclose(model.G_tf.num[0][0], [0.5, 0.0])
+    np.testing.assert_allclose(model.G_tf.den[0][0], [1.0, 0.2, 0.0])

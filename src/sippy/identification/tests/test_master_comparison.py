@@ -564,8 +564,8 @@ class TestInputOutputMethodsComparison:
 
             # Extract transfer function from harold (if available)
             if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0]  # Strip leading zeros
-                harold_den = model_harold.G_tf.den[0]  # Strip leading zeros
+                harold_num = model_harold.G_tf.num[0][0]
+                harold_den = model_harold.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
@@ -628,13 +628,13 @@ class TestInputOutputMethodsComparison:
 
         assert model_harold.G_tf is not None
         np.testing.assert_allclose(
-            np.trim_zeros(model_harold.G_tf.num[0], "fb"),
+            np.trim_zeros(model_harold.G_tf.num[0][0], "fb"),
             np.trim_zeros(model_master.G.num[0][0], "fb"),
             rtol=1e-10,
             atol=1e-12,
         )
         np.testing.assert_allclose(
-            np.trim_zeros(model_harold.G_tf.den[0], "fb"),
+            np.trim_zeros(model_harold.G_tf.den[0][0], "fb"),
             np.trim_zeros(model_master.G.den[0][0], "fb"),
             rtol=1e-10,
             atol=1e-12,
@@ -673,8 +673,8 @@ class TestInputOutputMethodsComparison:
 
             # Extract transfer function from harold (if available)
             if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0]
-                harold_den = model_harold.G_tf.den[0]
+                harold_num = model_harold.G_tf.num[0][0]
+                harold_den = model_harold.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
@@ -912,8 +912,8 @@ class TestConditionalMethodsComparison:
                 master_num = master_G.num[0][0]  # SISO numerator
                 master_den = master_G.den[0][0]  # SISO denominator
 
-                harold_num = model_harold.G_tf.num[0]
-                harold_den = model_harold.G_tf.den[0]
+                harold_num = model_harold.G_tf.num[0][0]
+                harold_den = model_harold.G_tf.den[0][0]
 
                 # Normalize and compare
                 master_num_stripped = np.trim_zeros(master_num, "fb")
@@ -1014,10 +1014,16 @@ class TestConditionalMethodsComparison:
         )
 
         np.testing.assert_allclose(
-            model_harold.H_tf.num[0], model_master.H.num[0][0], rtol=1e-7, atol=1e-9
+            model_harold.H_tf.num[0][0],
+            model_master.H.num[0][0],
+            rtol=1e-7,
+            atol=1e-9,
         )
         np.testing.assert_allclose(
-            model_harold.H_tf.den[0], model_master.H.den[0][0], rtol=1e-7, atol=1e-9
+            model_harold.H_tf.den[0][0],
+            model_master.H.den[0][0],
+            rtol=1e-7,
+            atol=1e-9,
         )
 
     def test_arma_siso_higher_order(self, arx_test_data):
@@ -1049,10 +1055,16 @@ class TestConditionalMethodsComparison:
         )
 
         np.testing.assert_allclose(
-            model_harold.H_tf.num[0], model_master.H.num[0][0], rtol=1e-7, atol=1e-8
+            model_harold.H_tf.num[0][0],
+            model_master.H.num[0][0],
+            rtol=1e-7,
+            atol=1e-8,
         )
         np.testing.assert_allclose(
-            model_harold.H_tf.den[0], model_master.H.den[0][0], rtol=1e-7, atol=1e-8
+            model_harold.H_tf.den[0][0],
+            model_master.H.den[0][0],
+            rtol=1e-7,
+            atol=1e-8,
         )
 
     def test_arma_predictions_match_master(self, arx_test_data):
@@ -1124,8 +1136,8 @@ class TestFormerKnownFailuresComparison:
 
             # Extract transfer function from harold (if available)
             if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0]  # Strip leading zeros
-                harold_den = model_harold.G_tf.den[0]  # Strip leading zeros
+                harold_num = model_harold.G_tf.num[0][0]
+                harold_den = model_harold.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
@@ -1202,8 +1214,8 @@ class TestFormerKnownFailuresComparison:
 
             # Extract transfer function from harold (if available)
             if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0]  # Strip leading zeros
-                harold_den = model_harold.G_tf.den[0]  # Strip leading zeros
+                harold_num = model_harold.G_tf.num[0][0]
+                harold_den = model_harold.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
@@ -1280,8 +1292,8 @@ class TestFormerKnownFailuresComparison:
 
             # Extract transfer function from harold (if available)
             if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0]  # Strip leading zeros
-                harold_den = model_harold.G_tf.den[0]  # Strip leading zeros
+                harold_num = model_harold.G_tf.num[0][0]
+                harold_den = model_harold.G_tf.den[0][0]
 
                 # Remove leading and trailing zeros for fair comparison
                 master_num_stripped = np.trim_zeros(master_num, "fb")
