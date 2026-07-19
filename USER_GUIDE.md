@@ -1,4 +1,4 @@
-# SIPPY User Guide - Harold Branch (Modern OOP Architecture)
+# SIPPY User Guide - Main Branch (Modern OOP Architecture)
 
 ## Systems Identification Package for Python (SIPPY)
 
@@ -8,7 +8,7 @@
 
 **Contributors:** Riccardo Bacci di Capaci, Marco Vaccari, Federico Pelagagge
 
-**Updated for Harold Branch:** Modern Object-Oriented Architecture with Factory Pattern
+**Updated for Main Branch:** Modern Object-Oriented Architecture with Factory Pattern
 
 ---
 
@@ -29,9 +29,9 @@
 
 ## Introduction
 
-### What's New in the Harold Branch?
+### What's New in the Main Branch?
 
-The Harold branch introduces a complete architectural overhaul and is now the canonical implementation. The original master branch has been **100% migrated** to this modern OOP architecture with the factory pattern. The system is **production ready** and maintains parity with the reference implementation while preserving legacy compatibility. Key improvements include:
+The main branch introduces a complete architectural overhaul and is now the canonical implementation. The original master branch has been **100% migrated** to this modern OOP architecture with the factory pattern. The system is **production ready** and maintains parity with the reference implementation while preserving legacy compatibility. Key improvements include:
 
 - **Object-Oriented Design**: Clean separation of concerns with modular classes
 - **Factory Pattern**: Extensible algorithm registration and selection
@@ -66,7 +66,7 @@ SIPPY supports both input-output and state-space structures:
 All algorithms are available in both SISO and MIMO configurations.
 
 Note on migration status:
-- All algorithms and features from the original master branch are available in this Harold OOP implementation.
+- All algorithms and features from the original master branch are available in this main implementation.
 - Legacy API behavior, model structures, and order conventions match the reference implementation (see Migration section for quick order-spec examples).
 
 ---
@@ -80,8 +80,8 @@ Note on migration status:
 git clone https://github.com/CPCLAB-UNIPI/SIPPY.git
 cd SIPPY
 
-# Checkout the harold branch
-git checkout harold
+# Checkout the main branch
+git checkout main
 
 # Install dependencies with UV
 uv sync
@@ -789,7 +789,7 @@ print(f"✓ Best fit: {results[best_method]['fit']:.1f}%")
 
 ## Migration from Legacy API
 
-Migration status: The legacy master branch functionality is fully available in the Harold OOP architecture. Legacy APIs continue to work unchanged, while the modern API offers a typed, extensible interface. Order conventions for model structures are identical to the original guide.
+Migration status: The legacy master branch functionality is fully available in the main OOP architecture. Legacy APIs continue to work unchanged, while the modern API offers a typed, extensible interface. Order conventions for model structures are identical to the original guide.
 
 ### Step-by-Step Migration
 
@@ -809,7 +809,7 @@ model = system_identification(
 )
 ```
 
-**After (Harold Branch - Option 1: Direct Replacement):**
+**After (Main Branch - Option 1: Direct Replacement):**
 ```python
 from sippy.identification import system_identification  # Same import!
 
@@ -823,7 +823,7 @@ model = system_identification(
 )
 ```
 
-**After (Harold Branch - Option 2: Modern API):**
+**After (Main Branch - Option 2: Modern API):**
 ```python
 from sippy.identification import SystemIdentification, SystemIdentificationConfig
 
@@ -1297,7 +1297,7 @@ Extensive benchmarking shows:
 ### Getting Help
 
 - **Issues**: Report bugs and request features via GitHub issues
-- **Documentation**: Check `CLAUDE.md` or `agents.md` for development conventions
+- **Documentation**: Check `AGENTS.md` for development conventions
 - **Examples**: See `Examples/` directory for comprehensive usage patterns
 
 ### Contributing
@@ -1305,7 +1305,7 @@ Extensive benchmarking shows:
 - **Development**: Use UV for dependency management
 - **Testing**: Run `uv run pytest` before committing
 - **Linting**: Use `uv run ruff check src/` and `uv run ruff format src/`
-- **Branch**: Development occurs on `harold` branch, PRs target `master`
+- **Branch**: Development branches from and targets `main`
 
 ### License
 
@@ -1315,4 +1315,4 @@ SIPPY is distributed under the LGPL license, allowing royalty-free use in commer
 
 **Happy System Identification!** 🚀
 
-*This guide covers the modern Harold branch architecture. For legacy documentation, see the original user_guide.pdf in the master branch.*
+*This guide covers the modern main branch architecture. For legacy documentation, see the original user_guide.pdf in the master branch.*

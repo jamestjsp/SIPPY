@@ -1,7 +1,7 @@
 """High-performance helpers ported from the master branch optimization stack.
 
 This module centralises the NLP-based input-output identification utilities
-(`opt_id`, ARMAX/ARARX MISO/MIMO solvers, etc.) so that the harold branch can
+(`opt_id`, ARMAX/ARARX MISO/MIMO solvers, etc.) so that the main branch can
 reuse the exact reference algorithms while benefiting from performance
 optimisations (Numba-powered preprocessing, memory-friendly data handling).
 

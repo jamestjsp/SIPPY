@@ -1,7 +1,7 @@
 """
-Cross-Branch Validation Framework: Harold Branch vs Master Branch Reference
+Cross-Branch Validation Framework: Main Branch vs Master Branch Reference
 
-This test suite compares harold branch implementations against the master branch
+This test suite compares main branch implementations against the master branch
 reference implementation for all identification algorithms.
 
 **Critical**: This validates TASK 4 of MIGRATION_ACCURACY_TODO.md
@@ -31,7 +31,7 @@ if MASTER_PATH.exists():
 else:
     MASTER_AVAILABLE = False
 
-# Harold branch imports (current branch)
+# main branch imports (current branch)
 from sippy.identification import (  # noqa: E402
     SystemIdentification,
     SystemIdentificationConfig,
@@ -357,7 +357,7 @@ class TestSubspaceMethodsComparison:
 
         data = siso_system_2nd_order
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="N4SID")
         config.ss_fixed_order = 2
         config.ss_f = 10
@@ -410,7 +410,7 @@ class TestSubspaceMethodsComparison:
 
         data = mimo_system_2x2
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="N4SID")
         config.ss_fixed_order = 2
         config.ss_f = 15
@@ -447,7 +447,7 @@ class TestSubspaceMethodsComparison:
 
         data = siso_system_2nd_order
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="MOESP")
         config.ss_fixed_order = 2
         config.ss_f = 10
@@ -484,7 +484,7 @@ class TestSubspaceMethodsComparison:
 
         data = siso_system_2nd_order
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="CVA")
         config.ss_fixed_order = 2
         config.ss_f = 10
@@ -537,7 +537,7 @@ class TestInputOutputMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARX")
         config.na = 1
         config.nb = 1
@@ -608,7 +608,7 @@ class TestInputOutputMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification (FIR is ARX with na=0)
+        # main branch identification (FIR is ARX with na=0)
         config = SystemIdentificationConfig(method="FIR")
         config.nb = 5
         config.nk = 1
@@ -677,7 +677,7 @@ class TestInputOutputMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARMAX")
         config.na = 1
         config.nb = 1
@@ -792,7 +792,7 @@ class TestConditionalMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARARX")
         config.na = 1
         config.nb = 1
@@ -857,7 +857,7 @@ class TestConditionalMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARARX")
         config.na = 2
         config.nb = 2
@@ -913,7 +913,7 @@ class TestConditionalMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARARX")
         config.na = 1
         config.nb = 1
@@ -1026,7 +1026,7 @@ class TestConditionalMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARMA")
         config.na = 1
         config.nc = 1
@@ -1108,7 +1108,7 @@ class TestConditionalMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARMA")
         config.na = 2
         config.nc = 2
@@ -1183,7 +1183,7 @@ class TestConditionalMethodsComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARMA")
         config.na = 1
         config.nc = 1
@@ -1298,7 +1298,7 @@ class TestFormerKnownFailuresComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="OE")
         config.nb = 2
         config.nf = 2
@@ -1373,7 +1373,7 @@ class TestFormerKnownFailuresComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="BJ")
         config.nb = 1
         config.nc = 1
@@ -1450,7 +1450,7 @@ class TestFormerKnownFailuresComparison:
 
         data = arx_test_data
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="ARARMAX")
         config.na = 1
         config.nb = 1
@@ -1549,7 +1549,7 @@ class TestPARSIMComparison:
 
         data = siso_system_2nd_order
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="PARSIM-K")
         config.ss_fixed_order = 2
         config.ss_f = 10
@@ -1593,7 +1593,7 @@ class TestPARSIMComparison:
 
         data = siso_system_2nd_order
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="PARSIM-S")
         config.ss_fixed_order = 2
         config.ss_f = 10
@@ -1633,7 +1633,7 @@ class TestPARSIMComparison:
 
         data = siso_system_2nd_order
 
-        # Harold branch identification
+        # main branch identification
         config = SystemIdentificationConfig(method="PARSIM-P")
         config.ss_fixed_order = 2
         config.ss_f = 10
