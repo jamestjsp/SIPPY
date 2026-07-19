@@ -7,6 +7,10 @@ import pytest
 from sippy.identification.base import StateSpaceModel
 from sippy.identification.factory import AlgorithmFactory, create_algorithm
 from sippy.identification.iddata import IDData
+from sippy.identification.parameters import (
+    ALGORITHM_OPTIONS,
+    normalize_identification_options,
+)
 
 from .simulation_scenarios import (
     simulate_scenario,
@@ -56,6 +60,19 @@ CANONICAL_NAMES = [
 ]
 STOCHASTIC_SUBSPACE_NAMES = ["N4SID", "MOESP", "CVA"]
 PARSIM_NAMES = ["PARSIM-K", "PARSIM-S", "PARSIM-P"]
+
+
+def test_parameter_aliases_normalize_to_one_vocabulary():
+    with pytest.warns(DeprecationWarning, match="theta.*nk"):
+        options = normalize_identification_options("ARMAX", {"theta": 2})
+
+    assert options == {"nk": 3}
+
+
+def test_conflicting_parameter_alias_is_rejected():
+    with pytest.warns(DeprecationWarning, match="theta.*nk"):
+        with pytest.raises(ValueError, match="Conflicting values"):
+            normalize_identification_options("ARMAX", {"theta": 1, "nk": 1})
 
 
 @pytest.fixture(scope="module")
@@ -127,11 +144,12 @@ def test_every_algorithm_rejects_mixed_data_sources(method, siso_data):
 @pytest.mark.parametrize("method", SUBSPACE_NAMES)
 def test_subspace_algorithms_accept_iddata_and_preserve_sample_time(method, siso_data):
     _, iddata = siso_data
+    options = {"ss_f": 8, "ss_fixed_order": 2}
+    if method in PARSIM_NAMES:
+        options["ss_p"] = 8
     model = create_algorithm(method).identify(
         iddata=iddata,
-        ss_f=8,
-        ss_p=8,
-        ss_fixed_order=2,
+        **options,
     )
 
     assert isinstance(model, StateSpaceModel)
@@ -156,6 +174,11 @@ def test_every_identification_result_obeys_the_common_result_contract(
         "nk": 1,
         "max_iterations": 40,
         "tsample": 0.25,
+    }
+    options = {
+        name: value
+        for name, value in options.items()
+        if name == "tsample" or name in ALGORITHM_OPTIONS[method]
     }
     if method == "ARMA":
         model = algorithm.identify(y=scenario.y_train, **options)
@@ -233,15 +256,23 @@ def test_input_output_algorithms_preserve_the_common_contract_for_mimo(
         "nf": 1,
         "nk": 1,
     }
+    options = {
+        "ss_f": 8,
+        "ss_p": 8,
+        "ss_fixed_order": 3,
+        "max_iterations": 20,
+        "tsample": mimo_data.sample_time,
+        **orders,
+    }
+    options = {
+        name: value
+        for name, value in options.items()
+        if name == "tsample" or name in ALGORITHM_OPTIONS[method]
+    }
     model = create_algorithm(method).identify(
         y=mimo_data.y_train,
         u=mimo_data.u_train,
-        ss_f=8,
-        ss_p=8,
-        ss_fixed_order=3,
-        max_iterations=20,
-        tsample=mimo_data.sample_time,
-        **orders,
+        **options,
     )
 
     assert model.ninputs == 2

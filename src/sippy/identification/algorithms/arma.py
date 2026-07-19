@@ -17,6 +17,8 @@ if TYPE_CHECKING:  # pragma: no cover
 class ARMAAlgorithm(IdentificationAlgorithm):
     """Time-series ARMA identification wrapped around shared helpers."""
 
+    input_required = False
+
     def get_algorithm_name(self) -> str:
         return "ARMA"
 

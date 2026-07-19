@@ -2,6 +2,7 @@
 Base classes for system identification algorithms.
 """
 
+import warnings
 from abc import ABC, abstractmethod
 from functools import wraps
 from typing import TYPE_CHECKING, Any, List, Optional, Union
@@ -9,6 +10,8 @@ from typing import TYPE_CHECKING, Any, List, Optional, Union
 import numpy as np
 
 from sippy import systems as control
+
+from .parameters import ALGORITHM_OPTIONS, normalize_identification_options
 
 if TYPE_CHECKING:
     from .iddata import IDData
@@ -61,6 +64,7 @@ class IdentificationAlgorithm(ABC):
 
     covariance_source: Optional[str] = None
     kalman_gain_source: Optional[str] = None
+    input_required = True
 
     def __init_subclass__(cls, **kwargs):
         """Wrap concrete estimators so result normalization cannot be skipped."""
@@ -71,17 +75,66 @@ class IdentificationAlgorithm(ABC):
 
         @wraps(identify)
         def finalized_identify(self, y=None, u=None, iddata=None, **options):
-            model = identify(self, y=y, u=u, iddata=iddata, **options)
-            result_y = y
-            result_u = u
-            result_data = iddata
-            if result_data is None and hasattr(y, "get_output_array"):
-                result_data = y
-            if result_data is not None:
-                result_y = result_data.get_output_array()
-                result_u = result_data.get_input_array()
-            if result_y is None:
-                return model
+            if iddata is not None and (y is not None or u is not None):
+                raise ValueError("Provide either iddata or (y, u), but not both")
+            method_getter = getattr(self, "get_algorithm_name", None)
+            method = (
+                method_getter()
+                if method_getter is not None
+                else self.__class__.__name__
+            )
+            config = options.pop("config", None)
+            legacy_config = config is not None
+            if hasattr(y, "get_output_array"):
+                if iddata is not None:
+                    raise ValueError("Provide either iddata or (y, u), but not both")
+                if u is not None:
+                    if config is not None:
+                        raise ValueError("Provide only one legacy configuration object")
+                    config = u
+                    legacy_config = True
+                    u = None
+                warnings.warn(
+                    "Passing IDData positionally is deprecated; use iddata=...",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                iddata = y
+                y = None
+            if config is not None:
+                warnings.warn(
+                    "Passing a configuration object to an algorithm is deprecated; "
+                    "pass named identification options instead",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                config_values = vars(config).copy()
+                for name in ALGORITHM_OPTIONS.get(method, set()):
+                    if name not in config_values and hasattr(config, name):
+                        config_values[name] = getattr(config, name)
+                config_values.update(options)
+                options = config_values
+            options = normalize_identification_options(
+                method,
+                options,
+                warn_unknown=not legacy_config,
+                warn_deprecated=not legacy_config,
+            )
+            result_y, result_u, sample_time = resolve_identification_data(
+                y,
+                u,
+                iddata,
+                tsample=options.get("tsample", 1.0),
+                input_required=self.input_required,
+            )
+            options["tsample"] = sample_time
+            model = identify(
+                self,
+                y=result_y,
+                u=result_u,
+                iddata=None,
+                **options,
+            )
             if model.B.shape[1] == 0 and model.G_tf is None:
                 result_u = None
             return self.finalize_result(

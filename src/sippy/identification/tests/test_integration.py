@@ -90,6 +90,29 @@ class TestSystemIdentification:
             model = identifier.identify(y, u)
             assert model is not None
 
+    def test_unknown_override_warns_instead_of_being_silently_ignored(
+        self, sample_data
+    ):
+        y, u = sample_data
+        identifier = SystemIdentification(SystemIdentificationConfig(ss_fixed_order=1))
+
+        with pytest.warns(UserWarning, match="ss_treshold"):
+            model = identifier.identify(y, u, ss_treshold=0.01)
+
+        assert "ss_treshold" not in model.identification_info["options"]
+
+    def test_centering_preserves_channels_by_samples_orientation(self):
+        y = np.arange(12, dtype=float).reshape(4, 3)
+        u = np.arange(8, dtype=float).reshape(2, 4)
+        identifier = SystemIdentification()
+
+        with pytest.raises(ValueError, match="same number of samples"):
+            identifier._apply_centering(y, u, "None")
+
+        centered, _ = identifier._apply_centering(y, None, "MeanVal")
+        assert centered.shape == y.shape
+        np.testing.assert_allclose(centered.mean(axis=1), 0.0)
+
 
 class TestBackwardCompatibility:
     """Test backward compatibility with original API."""

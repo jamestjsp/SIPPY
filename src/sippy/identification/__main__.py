@@ -8,6 +8,7 @@ import numpy as np
 
 from .base import StateSpaceModel, SystemIdentificationConfig
 from .factory import create_algorithm
+from .parameters import normalize_identification_options, normalize_method
 
 try:
     from sysidbox import functionset as fs
@@ -65,8 +66,8 @@ class SystemIdentification:
             and method_override.upper() != id_method.upper()
         ):
             raise ValueError("method and id_method select different algorithms")
-        method = method_override or id_method or self.config.method
-        is_time_series_method = method.upper() == "ARMA"
+        method = normalize_method(method_override or id_method or self.config.method)
+        is_time_series_method = method == "ARMA"
 
         if iddata is None and y is None:
             raise ValueError("Must provide either iddata or y")
@@ -79,19 +80,25 @@ class SystemIdentification:
         if iddata is not None:
             y = iddata.get_output_array()
             u = iddata.get_input_array()
+            kwargs["tsample"] = iddata.sample_time
 
-        # Merge config with kwargs
         config_dict = self.config.__dict__.copy()
-        config_dict.update(kwargs)
-        config_dict["method"] = method
+        config_dict.pop("method", None)
+        centering = config_dict.pop("centering", "None")
+        config_dict.pop("ic", None)
+        config_dict = normalize_identification_options(
+            method,
+            config_dict,
+            warn_unknown=False,
+            warn_deprecated=False,
+        )
+        config_dict.update(normalize_identification_options(method, kwargs))
 
         # Create algorithm instance
         algorithm = create_algorithm(method)
 
         # Apply data centering if specified
-        y_centered, u_centered = self._apply_centering(
-            y, u, config_dict.get("centering", "None")
-        )
+        y_centered, u_centered = self._apply_centering(y, u, centering)
 
         # Perform identification
         model = algorithm.identify(y_centered, u_centered, **config_dict)
@@ -102,56 +109,30 @@ class SystemIdentification:
         self, y: np.ndarray, u: Optional[np.ndarray], centering: str
     ) -> tuple:
         """Apply data centering preprocessing."""
-        y = 1.0 * np.atleast_2d(y)
-
-        [n1, n2] = y.shape
-        ydim = min(n1, n2)
-        ylength = max(n1, n2)
-        if ylength == n1:
-            y = y.T
+        y = np.atleast_2d(np.asarray(y, dtype=float)).copy()
+        ylength = y.shape[1]
 
         # Handle case where u is None (e.g., ARMA time series model)
         if u is not None:
-            u = 1.0 * np.atleast_2d(u)
-            [n1, n2] = u.shape
-            ulength = max(n1, n2)
-            udim = min(n1, n2)
-            if ulength == n1:
-                u = u.T
+            u = np.atleast_2d(np.asarray(u, dtype=float)).copy()
+            ulength = u.shape[1]
 
             # Checking data consistency
             if ulength != ylength:
-                print(
-                    "Warning: y and u lengths are not the same. Using minimum length."
+                raise ValueError(
+                    "Input and output must share the same number of samples"
                 )
-                minlength = min(ulength, ylength)
-                y = y[:, :minlength]
-                u = u[:, :minlength]
-        else:
-            # No input data (time series model like ARMA)
-            udim = 0
-            ulength = ylength
 
         if centering == "InitVal":
-            y_rif = 1.0 * y[:, 0]
-            for i in range(ylength):
-                y[:, i] = y[:, i] - y_rif
+            y -= y[:, :1]
             if u is not None:
-                u_init = 1.0 * u[:, 0]
-                for i in range(ylength):
-                    u[:, i] = u[:, i] - u_init
+                u -= u[:, :1]
         elif centering == "MeanVal":
-            y_rif = np.zeros(ydim)
-            for i in range(ydim):
-                y_rif[i] = np.mean(y[i, :])
-            for i in range(ylength):
-                y[:, i] = y[:, i] - y_rif
+            y -= np.mean(y, axis=1, keepdims=True)
             if u is not None:
-                u_mean = np.zeros(udim)
-                for i in range(udim):
-                    u_mean[i] = np.mean(u[i, :])
-                for i in range(ylength):
-                    u[:, i] = u[:, i] - u_mean
+                u -= np.mean(u, axis=1, keepdims=True)
+        elif centering != "None":
+            raise ValueError("centering must be 'None', 'InitVal', or 'MeanVal'")
 
         return y, u
 
