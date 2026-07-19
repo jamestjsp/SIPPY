@@ -12,34 +12,34 @@ from .simulation_scenarios import (
 )
 
 POLYNOMIAL_METHODS = [
-    ("ARMAX", {"na": 2, "nb": 3, "nc": 1, "nk": 0, "mode": "ILLS"}),
-    ("OE", {"nb": 3, "nf": 2, "nk": 0}),
-    ("ARARX", {"na": 2, "nb": 3, "nd": 1, "nk": 0}),
+    ("ARMAX", {"na": 2, "nb": 3, "nc": 1, "nk": 1, "mode": "ILLS"}),
+    ("OE", {"nb": 3, "nf": 2, "nk": 1}),
+    ("ARARX", {"na": 2, "nb": 3, "nd": 1, "nk": 1}),
     (
         "ARARMAX",
-        {"na": 2, "nb": 3, "nc": 1, "nd": 1, "nf": 0, "nk": 0},
+        {"na": 2, "nb": 3, "nc": 1, "nd": 1, "nf": 0, "nk": 1},
     ),
-    ("BJ", {"nb": 2, "nc": 1, "nd": 1, "nf": 2, "nk": 0}),
-    ("GEN", {"na": 2, "nb": 3, "nc": 1, "nd": 1, "nf": 1, "nk": 0}),
+    ("BJ", {"nb": 2, "nc": 1, "nd": 1, "nf": 2, "nk": 1}),
+    ("GEN", {"na": 2, "nb": 3, "nc": 1, "nd": 1, "nf": 1, "nk": 1}),
 ]
 
 MIMO_POLYNOMIAL_METHODS = [
-    ("OE", {"nb": 3, "nf": 3, "nk": 0}),
-    ("BJ", {"nb": 3, "nc": 1, "nd": 1, "nf": 3, "nk": 0}),
+    ("OE", {"nb": 3, "nf": 3, "nk": 1}),
+    ("BJ", {"nb": 3, "nc": 1, "nd": 1, "nf": 3, "nk": 1}),
     (
         "ARARX",
         {
             "na": [3, 3],
             "nb": [[3, 3], [3, 3]],
             "nd": [1, 1],
-            "nk": [[0, 0], [0, 0]],
+            "nk": [[1, 1], [1, 1]],
         },
     ),
     (
         "ARARMAX",
-        {"na": 3, "nb": 3, "nc": 1, "nd": 1, "nf": 0, "nk": 0},
+        {"na": 3, "nb": 3, "nc": 1, "nd": 1, "nf": 0, "nk": 1},
     ),
-    ("GEN", {"na": 2, "nb": 3, "nc": 1, "nd": 1, "nf": 1, "nk": 0}),
+    ("GEN", {"na": 2, "nb": 3, "nc": 1, "nd": 1, "nf": 1, "nk": 1}),
 ]
 
 
@@ -95,7 +95,7 @@ def test_armax_predicts_correlated_input_mimo_harold_simulation():
         na=[3, 3],
         nb=[[3, 3], [3, 3]],
         nc=[1, 1],
-        nk=[[0, 0], [0, 0]],
+        nk=[[1, 1], [1, 1]],
         mode="ILLS",
         max_iterations=50,
     )

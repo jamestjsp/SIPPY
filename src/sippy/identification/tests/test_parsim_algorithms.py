@@ -72,8 +72,7 @@ class TestPARSIMKAlgorithm:
 
         algo = PARSIMKAlgorithm()
 
-        with pytest.raises(ValueError, match="Missing required parameter"):
-            algo.validate_parameters()
+        assert algo.validate_parameters() is True  # ss_f defaults to 20
 
         with pytest.raises(ValueError, match="ss_f must be a positive number"):
             algo.validate_parameters(ss_f=-5)

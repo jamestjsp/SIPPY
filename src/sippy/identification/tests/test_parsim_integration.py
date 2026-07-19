@@ -169,10 +169,15 @@ class TestPARSIMIntegration:
 
         for N in [50, 100, 200]:  # Different data lengths
             u = np.random.randn(2, N)
-            y = np.random.randn(1, N)
+            y = np.zeros((1, N))
+            x = 0.0
+            for k in range(N):
+                y[0, k] = x + 0.05 * np.random.randn()
+                x = 0.7 * x + 0.5 * u[0, k] + 0.3 * u[1, k]
 
             config = SystemIdentificationConfig(
-                ss_f=min(20, N // 4),  # Adjust horizon for data size
+                # PARSIM-S/P need N - 2f + 1 >= (2m + l)f + l windowed samples
+                ss_f=min(20, N // 8),
                 ss_threshold=0.1,
             )
 

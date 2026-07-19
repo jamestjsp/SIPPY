@@ -71,32 +71,14 @@ class MOESPAlgorithm(IdentificationAlgorithm):
                 d_required,
                 a_stability,
             )
-        except Exception:
-            # Fallback for edge cases
-            l, L = y.shape
-            m = u.shape[0]
-            n = 1  # Simple 1st order model
-
-            A = np.array([[0.8]])
-            B = np.random.randn(n, m)
-            C = np.random.randn(l, n)
-            D = np.zeros((l, m))
-            K = np.random.randn(n, l)
-            Q = np.eye(n)
-            R = 0.1 * np.eye(l)
-            S = np.zeros((n, l))
-            Vn = 1.0
+        except Exception as exc:
+            raise RuntimeError(f"MOESP identification failed: {exc}") from exc
 
         return StateSpaceModel(A, B, C, D, K, Q, R, S, tsample, Vn)
 
     def validate_parameters(self, **kwargs) -> bool:
         """Validate MOESP-specific parameters."""
-        required_params = ["ss_f"]
-        for param in required_params:
-            if param not in kwargs or kwargs[param] is None:
-                raise ValueError(f"Missing required parameter: {param}")
-
-        f = kwargs.get("ss_f")
+        f = kwargs.get("ss_f", 20)
         if not isinstance(f, int) or f <= 0:
             raise ValueError("ss_f must be a positive integer")
 

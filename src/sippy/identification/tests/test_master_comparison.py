@@ -1302,7 +1302,8 @@ class TestFormerKnownFailuresComparison:
         config = SystemIdentificationConfig(method="OE")
         config.nb = 2
         config.nf = 2
-        config.nk = 1
+        # master OE_orders theta=1 corresponds to nk=2 (first B coeff at u[k-2])
+        config.nk = 2
         identifier = SystemIdentification(config)
         model_harold = identifier.identify(y=data["y"], u=data["u"])
 
@@ -1379,7 +1380,8 @@ class TestFormerKnownFailuresComparison:
         config.nc = 1
         config.nd = 1
         config.nf = 1
-        config.nk = 1
+        # master BJ_orders theta=1 corresponds to nk=2 (first B coeff at u[k-2])
+        config.nk = 2
         identifier = SystemIdentification(config)
         model_harold = identifier.identify(y=data["y"], u=data["u"])
 
@@ -1455,7 +1457,8 @@ class TestFormerKnownFailuresComparison:
         config.na = 1
         config.nb = 1
         config.nc = 1
-        config.nk = 1
+        # master ARARMAX_orders theta=1 corresponds to nk=2 (first B coeff at u[k-2])
+        config.nk = 2
         identifier = SystemIdentification(config)
         model_harold = identifier.identify(y=data["y"], u=data["u"])
 
@@ -1711,9 +1714,7 @@ def test_generate_summary_report():
     print("   - PARSIM-P: ✅ PASS")
 
     print("\n" + "=" * 80)
-    print(
-        "ALL REGISTERED ALGORITHMS HAVE REFERENCE OR BEHAVIORAL ACCURACY COVERAGE"
-    )
+    print("ALL REGISTERED ALGORITHMS HAVE REFERENCE OR BEHAVIORAL ACCURACY COVERAGE")
     print("=" * 80)
     print("\nNext Steps:")
     print("1. Run this test suite: pytest test_master_comparison.py -v")

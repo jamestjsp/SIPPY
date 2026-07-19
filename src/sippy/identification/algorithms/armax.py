@@ -18,6 +18,7 @@ from .opt_support import (
     armax_miso_id,
     gen_mimo_id,
     gen_miso_id,
+    nk_to_theta,
 )
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -87,7 +88,11 @@ class ARMAXAlgorithm(IdentificationAlgorithm):
         na = kwargs.get("na", 1)
         nb = kwargs.get("nb", 1)
         nc = kwargs.get("nc", 1)
-        theta = kwargs.get("theta", kwargs.get("nk", 0))
+        # theta keeps the solver convention (extra delay beyond q^-1); nk is
+        # the delay of the first B coefficient (nk=1 -> u[k-1]), like ARX.
+        theta = kwargs.get("theta")
+        if theta is None:
+            theta = nk_to_theta(kwargs.get("nk", 1))
 
         max_iterations = kwargs.get("max_iterations", 200)
         mode = kwargs.get("mode", kwargs.get("algorithm", self.default_mode)).upper()

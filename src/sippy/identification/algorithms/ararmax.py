@@ -10,7 +10,12 @@ from numpy.linalg import lstsq
 
 from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
 from .ararx import _state_space_from_results, _state_space_from_single_result
-from .opt_support import gen_mimo_id, gen_miso_id
+from .opt_support import (
+    apply_platform_ipopt_options,
+    gen_mimo_id,
+    gen_miso_id,
+    nk_to_theta,
+)
 
 try:
     from ..iddata import IDData
@@ -409,7 +414,7 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
                         nc=max_nc,
                         nd=max_nd,
                         nf=0,
-                        theta=np.full(nu, max_nk, dtype=int),
+                        theta=np.full(nu, nk_to_theta(max_nk), dtype=int),
                         max_iterations=kwargs_filtered.get("max_iterations", 200),
                         stability_margin=kwargs_filtered.get(
                             "stability_margin", kwargs_filtered.get("stab_marg", 1.0)
@@ -431,7 +436,7 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
                     nc=[max_nc] * ny,
                     nd=[max_nd] * ny,
                     nf=[0] * ny,
-                    theta=np.full((ny, nu), max_nk, dtype=int),
+                    theta=np.full((ny, nu), nk_to_theta(max_nk), dtype=int),
                     sample_time=sample_time,
                     max_iterations=kwargs_filtered.get("max_iterations", 200),
                     stability_margin=kwargs_filtered.get(
@@ -888,6 +893,7 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
             "ipopt.sb": "yes",
             "print_time": 0,
         }
+        apply_platform_ipopt_options(opts)
 
         # Create solver
         solver = ca.nlpsol("solver", "ipopt", nlp, opts)

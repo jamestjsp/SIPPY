@@ -83,20 +83,8 @@ class PARSIMKAlgorithm(IdentificationAlgorithm):
             A_K, C, B_K, D, K, A, B, x0, Vn = ParsimCoreAlgorithm.parsim_k(
                 y, u, f, p, threshold, np.nan, fixed_order, d_required, b_recalc
             )
-        except Exception:
-            # Fallback for edge cases
-            l, L = y.shape
-            m = u.shape[0]
-            n = 1  # Simple 1st order model
-
-            A_K = np.array([[0.9]])
-            C = np.random.randn(l, n)
-            B_K = np.random.randn(n, m)
-            D = np.zeros((l, m))
-            K = np.random.randn(n, l)
-            A = A_K + np.dot(K, C)
-            B = B_K + np.dot(K, D)
-            Vn = 1.0
+        except Exception as exc:
+            raise RuntimeError(f"PARSIM-K identification failed: {exc}") from exc
 
         # Set default covariance matrices
         n = A.shape[0]
@@ -109,12 +97,7 @@ class PARSIMKAlgorithm(IdentificationAlgorithm):
 
     def validate_parameters(self, **kwargs) -> bool:
         """Validate PARSIM-K-specific parameters."""
-        required_params = ["ss_f"]
-        for param in required_params:
-            if param not in kwargs or kwargs[param] is None:
-                raise ValueError(f"Missing required parameter: {param}")
-
-        f = kwargs.get("ss_f")
+        f = kwargs.get("ss_f", 20)
         if not isinstance(f, (int, float)) or f <= 0:
             raise ValueError("ss_f must be a positive number")
 

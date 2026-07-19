@@ -909,6 +909,15 @@ class ParsimCoreAlgorithm:
         # QR-based Kalman gain estimation
         # Stack [Zp; Uf; Yf] and perform QR decomposition
         stacked_matrix = impile(impile(Zp, Uf), Yf).T
+        # The R factor must extend past the (2m+l)*f block for G_f to be
+        # non-empty, i.e. enough windowed samples for the innovation estimate.
+        required = (2 * m + l_) * f + l_
+        if stacked_matrix.shape[0] < required:
+            raise ValueError(
+                f"Insufficient data for PARSIM QR step: {stacked_matrix.shape[0]} "
+                f"windowed samples, need at least {required}. "
+                "Reduce ss_f/ss_p or provide more samples."
+            )
         Q, R = np.linalg.qr(stacked_matrix)
         Q = Q.T
         R = R.T

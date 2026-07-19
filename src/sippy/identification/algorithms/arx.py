@@ -420,12 +420,14 @@ class ARXAlgorithm(IdentificationAlgorithm):
         """
         # For simple SISO case, create a transfer function
         if ny == 1 and nu == 1:
-            # Create denominator polynomial (AR part + 1)
-            den_coeffs = np.concatenate(([1], -A_coeffs[0, :]))
+            # Polynomial length must cover both the AR part and the delayed
+            # numerator; trailing zeros in the denominator add the delay poles.
+            poly_length = max(na, nb + nk - 1) + 1
+            den_coeffs = np.zeros(poly_length)
+            den_coeffs[0] = 1.0
+            den_coeffs[1 : na + 1] = -A_coeffs[0, :]
 
-            # Create numerator polynomial (X part with delay)
-            # Numerator and denominator must have same length for harold
-            num_coeffs_full = np.zeros(len(den_coeffs))
+            num_coeffs_full = np.zeros(poly_length)
             num_coeffs_full[nk : nk + nb] = B_coeffs[0, :]
 
             # Strip leading zeros from numerator (harold requirement)

@@ -83,8 +83,11 @@ def delayed_siso_plant(delay: int = 12, dt: float = 1.0) -> harold.State:
 
 
 def stable_arma_noise_filter(dt: float = 1.0) -> harold.Transfer:
+    # Biproper H = (1 + 0.35 q^-1) / (1 - 1.15 q^-1 + 0.32 q^-2): the ARMA
+    # innovation model includes the contemporaneous e(k) term, so the truth
+    # must too (a strictly proper H is outside the ARMA model class).
     return harold.Transfer(
-        np.array([1.0, 0.35]),
+        np.array([1.0, 0.35, 0.0]),
         np.array([1.0, -1.15, 0.32]),
         dt=dt,
     )
