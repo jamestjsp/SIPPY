@@ -285,7 +285,8 @@ class TestARXMasterExamples:
             g_sample34 = cnt.tf(NUM34, DEN3, ts)
 
             # Simulate each output channel
-            from tf2ss import lsim
+            def lsim(system, input_signal, time):
+                return cnt.lsim(cnt.ss(system), input_signal, time)
 
             Yout11, _, _ = lsim(g_sample11, Usim[0, :], Time)
             Yout12, _, _ = lsim(g_sample12, Usim[1, :], Time)
@@ -344,7 +345,7 @@ class TestARXMasterExamples:
             identifier = SystemIdentification(config)
 
             # Test identification
-            model = identifier.identify(y=id_data.y, u=id_data.u)
+            model = identifier.identify(iddata=id_data)
 
             # Verify MIMO model structure
             assert model is not None
@@ -358,11 +359,6 @@ class TestARXMasterExamples:
             assert model.C.shape[0] == 3  # 3 outputs
 
         except ImportError as e:
-            # If control library or tf2ss not available
-            pytest.skip(f"Control library not available for ARX MIMO test: {e}")
+            raise AssertionError("ARX MIMO test dependency import failed") from e
         except Exception as e:
-            # If full MIMO identification fails, test basic functionality
-            # At least test the parameter validation works
-            algorithm = ARXAlgorithm()
-            algorithm.validate_parameters(na=2, nb=2, nk=1)
-            pytest.skip(f"ARX MIMO identification partially failed: {e}")
+            raise AssertionError("ARX MIMO identification failed") from e

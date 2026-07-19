@@ -26,7 +26,7 @@ import pytest
 # Add master branch to path for imports
 MASTER_PATH = Path("/Users/josephj/Workspace/SIPPY-master")
 if MASTER_PATH.exists():
-    sys.path.insert(0, str(MASTER_PATH))
+    sys.path.append(str(MASTER_PATH))
     MASTER_AVAILABLE = True
 else:
     MASTER_AVAILABLE = False
@@ -620,56 +620,25 @@ class TestInputOutputMethodsComparison:
             data["y"],
             data["u"],
             "FIR",
-            na_ord=[0],
-            nb_ord=[5],
+            # Master theta is the delay beyond the inherent z^-1 term, so
+            # theta=0 corresponds to this repository's nk=1 convention.
+            FIR_orders=[5, 0],
             tsample=data["ts"],
         )
 
-        # Compare transfer function coefficients (same as ARX)
-        try:
-            # Extract transfer function coefficients from master
-            master_num = model_master.G.num[0][0]
-            master_den = model_master.G.den[0][0]
-
-            # Extract transfer function from harold
-            if model_harold.G_tf is not None:
-                harold_num = model_harold.G_tf.num[0]
-                harold_den = model_harold.G_tf.den[0]
-
-                # Remove leading and trailing zeros for fair comparison
-                master_num_stripped = np.trim_zeros(master_num, "fb")
-                harold_num_stripped = np.trim_zeros(harold_num, "fb")
-                master_den_stripped = np.trim_zeros(master_den, "fb")
-                harold_den_stripped = np.trim_zeros(harold_den, "fb")
-
-                # Normalize by leading denominator coefficient
-                master_num_norm = master_num_stripped / master_den_stripped[0]
-                master_den_norm = master_den_stripped / master_den_stripped[0]
-                harold_num_norm = harold_num_stripped / harold_den_stripped[0]
-                harold_den_norm = harold_den_stripped / harold_den_stripped[0]
-
-                # Compare coefficients
-                num_error = np.max(np.abs(harold_num_norm - master_num_norm))
-                den_error = np.max(np.abs(harold_den_norm - master_den_norm))
-
-                print("\nTransfer Function Comparison:")
-                print(f"Master numerator:  {master_num_stripped}")
-                print(f"Harold numerator:  {harold_num_stripped}")
-                print(f"Master denominator: {master_den_stripped}")
-                print(f"Harold denominator: {harold_den_stripped}")
-                print(f"\nNumerator error: {num_error:.2e}")
-                print(f"Denominator error: {den_error:.2e}")
-
-                # Assert transfer functions match
-                assert num_error < 1e-8, f"Numerator mismatch: {num_error}"
-                assert den_error < 1e-8, f"Denominator mismatch: {den_error}"
-
-                print("\nFIR (SISO): PASS - Transfer functions match")
-            else:
-                pytest.skip("Harold G_tf not available for comparison")
-
-        except Exception as e:
-            pytest.skip(f"Could not compare transfer functions: {e}")
+        assert model_harold.G_tf is not None
+        np.testing.assert_allclose(
+            np.trim_zeros(model_harold.G_tf.num[0], "fb"),
+            np.trim_zeros(model_master.G.num[0][0], "fb"),
+            rtol=1e-10,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            np.trim_zeros(model_harold.G_tf.den[0], "fb"),
+            np.trim_zeros(model_master.G.den[0][0], "fb"),
+            rtol=1e-10,
+            atol=1e-12,
+        )
 
     def test_armax_siso(self, arx_test_data):
         """Test ARMAX reference parity on a SISO system."""
@@ -1017,10 +986,7 @@ class TestConditionalMethodsComparison:
         Test ARMA on SISO time series with basic orders (na=1, nc=1).
 
         ARMA model: A(q) y(k) = C(q) e(k) (no input, pure time series)
-        Harold uses extended least-squares with residual approximation.
-        Master uses optimization-based simultaneous estimation.
-
-        Acceptable tolerance: 1e-4 relative error (two-stage vs simultaneous)
+        and both implementations should recover the same A and C coefficients.
         """
         from sippy_unipi import system_identification as master_sysid
 
@@ -1032,70 +998,27 @@ class TestConditionalMethodsComparison:
         config.nc = 1
         identifier = SystemIdentification(config)
 
-        try:
-            model_harold = identifier.identify(y=data["y"], u=None)
-        except Exception as e:
-            pytest.skip(f"ARMA harold failed: {e}")
+        model_harold = identifier.identify(y=data["y"], u=None)
 
         # Master branch identification
         # ARMA_orders format: [na, nc, theta]
         # na: list of length ydim (AR orders)
         # nc: list of length ydim (MA orders)
         # theta: list of lists [ydim x udim] (delays - not used for ARMA)
-        try:
-            model_master = master_sysid(
-                data["y"],
-                None,
-                "ARMA",
-                ARMA_orders=[[1], [1], [[0]]],
-                tsample=data["ts"],
-            )
-        except Exception as e:
-            pytest.skip(f"ARMA master failed: {e}")
-
-        # Master returns GEN_MIMO_model object
-        # For ARMA, we need to extract state-space from H transfer function
-        try:
-            import control.matlab as cnt
-
-            H_master = model_master.H
-            ss_master = cnt.ss(H_master)
-            A_master, _B_master, C_master, _D_master = (
-                ss_master.A,
-                ss_master.B,
-                ss_master.C,
-                ss_master.D,
-            )
-        except Exception as e:
-            pytest.skip(f"Could not extract state-space from master: {e}")
-
-        # Compute error metrics (B is not relevant for ARMA - no inputs)
-        metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, A_master, "A"),
-            "C matrix": compute_matrix_error(model_harold.C, C_master, "C"),
-        }
-
-        # Print report with relaxed tolerance
-        passes = print_comparison_report(
-            "ARMA SISO Basic (na=1, nc=1)", metrics, expected_tolerance=1e-4
+        model_master = master_sysid(
+            data["y"],
+            data["u"],
+            "ARMA",
+            ARMA_orders=[[1], [1], [[0]]],
+            tsample=data["ts"],
         )
 
-        # Note algorithmic difference
-        if not passes:
-            print(
-                "\nNote: ARMA uses extended LS with residuals (harold) vs optimization (master)"
-            )
-            print(
-                "      Acceptable tolerance: 1e-4 relative error due to different estimation"
-            )
-
-        # Relaxed assertions - ARMA is known to have algorithmic differences
-        # Accept up to 1e-3 (0.1%) relative error
-        for matrix_name, error_dict in metrics.items():
-            if error_dict is not None:
-                assert error_dict["max_rel_error"] < 1e-3, (
-                    f"{matrix_name} relative error {error_dict['max_rel_error']:.2e} exceeds 1e-3"
-                )
+        np.testing.assert_allclose(
+            model_harold.H_tf.num[0], model_master.H.num[0][0], rtol=1e-7, atol=1e-9
+        )
+        np.testing.assert_allclose(
+            model_harold.H_tf.den[0], model_master.H.den[0][0], rtol=1e-7, atol=1e-9
+        )
 
     def test_arma_siso_higher_order(self, arx_test_data):
         """
@@ -1114,71 +1037,26 @@ class TestConditionalMethodsComparison:
         config.nc = 2
         identifier = SystemIdentification(config)
 
-        try:
-            model_harold = identifier.identify(y=data["y"], u=None)
-        except Exception as e:
-            pytest.skip(f"ARMA harold failed: {e}")
+        model_harold = identifier.identify(y=data["y"], u=None)
 
         # Master branch identification
-        try:
-            model_master = master_sysid(
-                data["y"],
-                None,
-                "ARMA",
-                ARMA_orders=[[2], [2], [[0]]],
-                tsample=data["ts"],
-            )
-        except Exception as e:
-            pytest.skip(f"ARMA master failed: {e}")
-
-        # Extract state-space from master H transfer function
-        try:
-            import control.matlab as cnt
-
-            H_master = model_master.H
-            ss_master = cnt.ss(H_master)
-            A_master, _B_master, C_master, _D_master = (
-                ss_master.A,
-                ss_master.B,
-                ss_master.C,
-                ss_master.D,
-            )
-        except Exception as e:
-            pytest.skip(f"Could not extract state-space from master: {e}")
-
-        # Compute error metrics
-        metrics = {
-            "A matrix": compute_matrix_error(model_harold.A, A_master, "A"),
-            "C matrix": compute_matrix_error(model_harold.C, C_master, "C"),
-        }
-
-        # Print report
-        passes = print_comparison_report(
-            "ARMA SISO Higher Order (na=2, nc=2)", metrics, expected_tolerance=1e-4
+        model_master = master_sysid(
+            data["y"],
+            data["u"],
+            "ARMA",
+            ARMA_orders=[[2], [2], [[0]]],
+            tsample=data["ts"],
         )
 
-        if not passes:
-            print(
-                "\nNote: Higher order ARMA models may show larger differences due to:"
-            )
-            print("      1. MA term estimation using residual approximation")
-            print("      2. Different optimization paths")
-            print("      3. Multiple local minima in parameter space")
+        np.testing.assert_allclose(
+            model_harold.H_tf.num[0], model_master.H.num[0][0], rtol=1e-7, atol=1e-8
+        )
+        np.testing.assert_allclose(
+            model_harold.H_tf.den[0], model_master.H.den[0][0], rtol=1e-7, atol=1e-8
+        )
 
-        # Very relaxed assertions for higher-order case
-        for matrix_name, error_dict in metrics.items():
-            if error_dict is not None:
-                assert error_dict["max_rel_error"] < 0.1, (
-                    f"{matrix_name} relative error {error_dict['max_rel_error']:.2e} exceeds 0.1 (10%)"
-                )
-
-    def test_arma_transfer_function_comparison(self, arx_test_data):
-        """
-        Test ARMA by comparing noise transfer function H(q) = C(q)/A(q).
-
-        This tests the algorithm's core functionality: correctly identifying
-        the noise model structure from time series data.
-        """
+    def test_arma_predictions_match_master(self, arx_test_data):
+        """Test ARMA one-step-ahead predictions against the master implementation."""
         from sippy_unipi import system_identification as master_sysid
 
         data = arx_test_data
@@ -1189,98 +1067,20 @@ class TestConditionalMethodsComparison:
         config.nc = 1
         identifier = SystemIdentification(config)
 
-        try:
-            model_harold = identifier.identify(y=data["y"], u=None)
-        except Exception as e:
-            pytest.skip(f"ARMA harold failed: {e}")
+        model_harold = identifier.identify(y=data["y"], u=None)
 
         # Master branch identification
-        try:
-            model_master = master_sysid(
-                data["y"],
-                None,
-                "ARMA",
-                ARMA_orders=[[1], [1], [[0]]],
-                tsample=data["ts"],
-            )
-        except Exception as e:
-            pytest.skip(f"ARMA master failed: {e}")
+        model_master = master_sysid(
+            data["y"],
+            data["u"],
+            "ARMA",
+            ARMA_orders=[[1], [1], [[0]]],
+            tsample=data["ts"],
+        )
 
-        # Master returns GEN_MIMO_model object
-        # H is available as model_master.H
-        master_H = model_master.H
-
-        # Compare transfer functions if available
-        if model_harold.H_tf is not None and master_H is not None:
-            try:
-                # Extract noise transfer function coefficients
-                master_num = master_H.num[0][0]  # SISO numerator (C polynomial)
-                master_den = master_H.den[0][0]  # SISO denominator (A polynomial)
-
-                harold_num = model_harold.H_tf.num[0]
-                harold_den = model_harold.H_tf.den[0]
-
-                # Normalize and compare
-                master_num_stripped = np.trim_zeros(master_num, "fb")
-                harold_num_stripped = np.trim_zeros(harold_num, "fb")
-                master_den_stripped = np.trim_zeros(master_den, "fb")
-                harold_den_stripped = np.trim_zeros(harold_den, "fb")
-
-                # Normalize by leading denominator coefficient
-                master_num_norm = master_num_stripped / master_den_stripped[0]
-                master_den_norm = master_den_stripped / master_den_stripped[0]
-                harold_num_norm = harold_num_stripped / harold_den_stripped[0]
-                harold_den_norm = harold_den_stripped / harold_den_stripped[0]
-
-                print("\nARMA Noise Transfer Function H(q) = C(q)/A(q) Comparison:")
-                print(f"Master C(q) numerator:   {master_num_stripped}")
-                print(f"Harold C(q) numerator:   {harold_num_stripped}")
-                print(f"Master A(q) denominator: {master_den_stripped}")
-                print(f"Harold A(q) denominator: {harold_den_stripped}")
-
-                # Compute errors (handle different lengths)
-                min_num_len = min(len(harold_num_norm), len(master_num_norm))
-                min_den_len = min(len(harold_den_norm), len(master_den_norm))
-
-                num_error = np.max(
-                    np.abs(
-                        harold_num_norm[:min_num_len] - master_num_norm[:min_num_len]
-                    )
-                )
-                den_error = np.max(
-                    np.abs(
-                        harold_den_norm[:min_den_len] - master_den_norm[:min_den_len]
-                    )
-                )
-
-                print(f"\nC(q) numerator error:   {num_error:.2e}")
-                print(f"A(q) denominator error: {den_error:.2e}")
-
-                # ARMA is conditional - accept larger errors
-                if num_error < 1e-4 and den_error < 1e-4:
-                    print("\nARMA Noise Transfer Function: PASS - Excellent match")
-                elif num_error < 1e-2 and den_error < 1e-2:
-                    print(
-                        "\nARMA Noise Transfer Function: CONDITIONAL PASS - Within acceptable tolerance"
-                    )
-                    print(f"  C(q) error: {num_error:.2e} (< 1e-2)")
-                    print(f"  A(q) error: {den_error:.2e} (< 1e-2)")
-                    print(
-                        "  Note: ARMA uses residual-based MA estimation, differences expected"
-                    )
-                else:
-                    print("\nARMA Noise Transfer Function: FAIL - Large discrepancy")
-                    print(f"  C(q) error: {num_error:.2e}")
-                    print(f"  A(q) error: {den_error:.2e}")
-
-                # Very relaxed assertion - just ensure not completely wrong
-                assert num_error < 0.5, f"ARMA C(q) error {num_error:.2e} too large"
-                assert den_error < 0.5, f"ARMA A(q) error {den_error:.2e} too large"
-
-            except Exception as e:
-                pytest.skip(f"Could not compare ARMA transfer functions: {e}")
-        else:
-            pytest.skip("Transfer functions not available for comparison")
+        np.testing.assert_allclose(
+            model_harold.Yid, model_master.Yid, rtol=1e-10, atol=1e-12
+        )
 
 
 # ============================================================================

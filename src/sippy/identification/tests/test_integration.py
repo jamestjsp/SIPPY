@@ -302,11 +302,11 @@ class TestMasterExamplesIntegration:
             assert isinstance(model.n, (int, np.integer))
 
             # Test that model can simulate (would be used in recursive algorithms)
-            y_sim = model.simulate(u, x0=np.array([[0.0]]))
+            _, y_sim = model.simulate(u, x0=np.array([[0.0]]))
             assert y_sim.shape == y.shape
 
         except Exception as e:
-            pytest.skip(f"Recursive identification test failed: {e}")
+            raise AssertionError("Recursive identification test failed") from e
 
     def test_ex_opt_gen_inout_example_from_master(self):
         """Test Ex_OPT_GEN-INOUT.py concept from master branch - General input-output."""
@@ -355,11 +355,11 @@ class TestMasterExamplesIntegration:
                 assert model.C.shape[0] == 2  # 2 outputs
 
                 # Test that model can be used for optimization (has simulation capability)
-                y_sim = model.simulate(u)
+                _, y_sim = model.simulate(u)
                 assert y_sim.shape == y.shape
 
         except Exception as e:
-            pytest.skip(f"General input-output optimization test failed: {e}")
+            raise AssertionError("General input-output optimization test failed") from e
 
     def test_master_examples_data_validation(self):
         """Test that master examples work with new IDData validation."""

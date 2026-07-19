@@ -297,13 +297,10 @@ class TestParsimPVsMaster:
             pytest.skip("Master branch not available for comparison")
 
         # Add master branch to path
-        master_dir = os.path.dirname(master_parsim_methods_path)
-        sys.path.insert(0, master_dir)
+        master_root = os.path.dirname(os.path.dirname(master_parsim_methods_path))
+        sys.path.append(master_root)
 
-        try:
-            from Parsim_methods import PARSIM_P as PARSIM_P_master
-        except ImportError:
-            pytest.skip("Could not import master branch PARSIM_P")
+        from sippy_unipi.Parsim_methods import PARSIM_P as PARSIM_P_master
 
         # Create test data
         np.random.seed(42)
@@ -333,15 +330,8 @@ class TestParsimPVsMaster:
         assert A_h.shape == A_m.shape, "A matrices should have same shape"
         assert B_h.shape == B_m.shape, "B matrices should have same shape"
 
-        # Check if results are close (this is the ultimate test)
-        # If results differ significantly, the algorithm is wrong
-        rtol = 1e-3  # Relaxed tolerance for complex algorithm
-        atol = 1e-3
-
-        if not np.allclose(A_h, A_m, rtol=rtol, atol=atol):
-            print(f"A_harold:\n{A_h}")
-            print(f"A_master:\n{A_m}")
-            print(f"Max diff: {np.max(np.abs(A_h - A_m))}")
-
-        # Note: This test may fail initially - that's expected in TDD!
-        # The goal is to make it pass by fixing the implementation
+        for actual, expected in zip(
+            (A_K_h, C_h, B_K_h, D_h, K_h, A_h, B_h, x0_h, Vn_h),
+            (A_K_m, C_m, B_K_m, D_m, K_m, A_m, B_m, x0_m, Vn_m),
+        ):
+            np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
