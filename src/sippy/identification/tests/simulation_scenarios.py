@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-import harold
+import control
 import numpy as np
 
 ExcitationKind = Literal["white", "binary", "multisine"]
@@ -9,7 +9,7 @@ ExcitationKind = Literal["white", "binary", "multisine"]
 
 @dataclass(frozen=True)
 class IdentificationScenario:
-    plant: harold.State
+    plant: control.StateSpace
     sample_time: float
     u_train: np.ndarray
     y_train_clean: np.ndarray
@@ -24,8 +24,8 @@ class IdentificationScenario:
 
 def stable_siso_plant(
     dt: float = 1.0, direct_feedthrough: float = 0.08
-) -> harold.State:
-    return harold.State(
+) -> control.StateSpace:
+    return control.ss(
         np.array([[0.72, 0.12], [-0.08, 0.84]]),
         np.array([[0.35], [0.18]]),
         np.array([[1.0, -0.25]]),
@@ -34,8 +34,10 @@ def stable_siso_plant(
     )
 
 
-def stable_mimo_plant(dt: float = 1.0, direct_feedthrough: bool = True) -> harold.State:
-    return harold.State(
+def stable_mimo_plant(
+    dt: float = 1.0, direct_feedthrough: bool = True
+) -> control.StateSpace:
+    return control.ss(
         np.array(
             [
                 [0.72, 0.08, 0.0],
@@ -54,8 +56,8 @@ def stable_mimo_plant(dt: float = 1.0, direct_feedthrough: bool = True) -> harol
     )
 
 
-def unstable_siso_plant(dt: float = 1.0) -> harold.State:
-    return harold.State(
+def unstable_siso_plant(dt: float = 1.0) -> control.StateSpace:
+    return control.ss(
         np.array([[1.015, 0.0], [0.0, 0.93]]),
         np.array([[0.06], [0.2]]),
         np.array([[0.7, 0.3]]),
@@ -64,7 +66,7 @@ def unstable_siso_plant(dt: float = 1.0) -> harold.State:
     )
 
 
-def delayed_siso_plant(delay: int = 12, dt: float = 1.0) -> harold.State:
+def delayed_siso_plant(delay: int = 12, dt: float = 1.0) -> control.StateSpace:
     if delay < 1:
         raise ValueError("delay must be at least one sample")
 
@@ -79,14 +81,14 @@ def delayed_siso_plant(delay: int = 12, dt: float = 1.0) -> harold.State:
     c = np.zeros((1, order))
     c[0, 0] = 1.0
     d = np.zeros((1, 1))
-    return harold.State(a, b, c, d, dt=dt)
+    return control.ss(a, b, c, d, dt=dt)
 
 
-def stable_arma_noise_filter(dt: float = 1.0) -> harold.Transfer:
+def stable_arma_noise_filter(dt: float = 1.0) -> control.TransferFunction:
     # Biproper H = (1 + 0.35 q^-1) / (1 - 1.15 q^-1 + 0.32 q^-2): the ARMA
     # innovation model includes the contemporaneous e(k) term, so the truth
     # must too (a strictly proper H is outside the ARMA model class).
-    return harold.Transfer(
+    return control.tf(
         np.array([1.0, 0.35, 0.0]),
         np.array([1.0, -1.15, 0.32]),
         dt=dt,
@@ -94,7 +96,7 @@ def stable_arma_noise_filter(dt: float = 1.0) -> harold.Transfer:
 
 
 def simulate_noise_process(
-    noise_filter: harold.Transfer,
+    noise_filter: control.TransferFunction,
     *,
     n_samples: int,
     seed: int,
@@ -102,7 +104,7 @@ def simulate_noise_process(
 ) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
     innovations = rng.standard_normal(n_samples + burn_in)
-    output, _ = harold.simulate_linear_system(noise_filter, innovations[:, np.newaxis])
+    output = control.forced_response(noise_filter, U=innovations).outputs
     return innovations[burn_in:], np.asarray(output).reshape(-1)[burn_in:]
 
 
@@ -168,12 +170,9 @@ def generate_excitation(
     return excitation / scale
 
 
-def _simulate(plant: harold.State, inputs: np.ndarray) -> np.ndarray:
-    output, _ = harold.simulate_linear_system(plant, inputs.T)
-    output = np.asarray(output, dtype=float)
-    if output.ndim == 1:
-        output = output[:, np.newaxis]
-    return output.T
+def _simulate(plant: control.StateSpace, inputs: np.ndarray) -> np.ndarray:
+    output = control.forced_response(plant, U=inputs, squeeze=False).outputs
+    return np.asarray(output, dtype=float)
 
 
 def _noise_for_snr(
@@ -209,7 +208,7 @@ def _noise_for_snr(
 
 
 def simulate_scenario(
-    plant: harold.State,
+    plant: control.StateSpace,
     *,
     n_train: int,
     n_validation: int,
@@ -220,7 +219,7 @@ def simulate_scenario(
     noise_color: float = 0.0,
     seed: int = 0,
 ) -> IdentificationScenario:
-    n_inputs = plant.shape[1]
+    n_inputs = plant.ninputs
     u_train = generate_excitation(
         n_inputs,
         n_train,
@@ -253,7 +252,7 @@ def simulate_scenario(
     )
     return IdentificationScenario(
         plant=plant,
-        sample_time=float(plant.SamplingPeriod),
+        sample_time=float(plant.dt),
         u_train=u_train,
         y_train_clean=y_train_clean,
         noise_train=noise_train,

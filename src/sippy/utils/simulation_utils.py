@@ -4,6 +4,7 @@ System simulation and analysis utilities.
 
 import warnings
 
+import control
 import numpy as np
 from scipy import fftpack, signal, stats
 from scipy.linalg import solve_discrete_are
@@ -42,16 +43,6 @@ except ImportError:
     extract_matrices_batch_compiled = None
     pinv_compiled_svd = None
     NUMBA_AVAILABLE = False
-
-try:
-    import harold
-
-    HAROLD_AVAILABLE = True
-except ImportError:
-    HAROLD_AVAILABLE = False
-    warnings.warn(
-        "harold library not available. Some simulation features will be limited."
-    )
 
 
 def ordinate_sequence(y, f, p):
@@ -562,8 +553,8 @@ def get_fir_coef(model, inds, deps, sampling, tss):
 
     Parameters:
     -----------
-    model : harold.State or object with similar interface
-        State-space model
+    model : control.InputOutputSystem or StateSpaceModel
+        Control-system model or SIPPY model wrapper.
     inds : list
         List of independent variables
     deps : list
@@ -578,31 +569,24 @@ def get_fir_coef(model, inds, deps, sampling, tss):
     fir_model : dict
         Nested dictionary of FIR coefficients
     """
-    if not HAROLD_AVAILABLE:
-        warnings.warn("harold not available, returning mock FIR coefficients")
-        fir_model = {}
-        for dep in deps:
-            fir_model[dep] = {}
-            for ind in inds:
-                fir_model[dep][ind] = np.random.randn(int(tss * 60 / sampling)) * 0.01
-        return fir_model
+    system = getattr(model, "G", model)
+    if system is None or not isinstance(system, control.InputOutputSystem):
+        raise TypeError("model must be a python-control system or a SIPPY model with G")
+    if len(inds) != system.ninputs or len(deps) != system.noutputs:
+        raise ValueError("input and output names must match the model dimensions")
+    if sampling <= 0 or tss <= 0:
+        raise ValueError("sampling and tss must be positive")
 
-    fir_model = dict()
     t = np.arange(0, tss * 60, sampling)
-    Gc = harold.undiscretize(model, method="backward euler")
-    imp_response, _ = harold.simulate_impulse_response(Gc, t)
+    response = control.impulse_response(system, T=t, squeeze=False)
+    sample_time = 1.0 if system.dt is True else float(system.dt)
+    impulse = np.asarray(response.outputs, dtype=float) * sample_time
 
+    fir_model = {}
     for depidx, dep in enumerate(deps):
-        fir_model[dep] = dict()
+        fir_model[dep] = {}
         for indidx, ind in enumerate(inds):
-            if model.NumberOfInputs == 1 and model.NumberOfOutputs == 1:
-                fir_model[dep][ind] = imp_response * model.SamplingPeriod
-            elif model.NumberOfInputs == 1 and model.NumberOfOutputs > 1:
-                fir_model[dep][ind] = imp_response[:, depidx] * model.SamplingPeriod
-            else:
-                fir_model[dep][ind] = (
-                    imp_response[:, depidx, indidx] * model.SamplingPeriod
-                )
+            fir_model[dep][ind] = impulse[depidx, indidx, :]
 
     return fir_model
 

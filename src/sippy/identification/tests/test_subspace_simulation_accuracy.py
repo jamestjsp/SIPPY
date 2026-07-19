@@ -43,7 +43,7 @@ def mimo_scenario():
 
 @pytest.mark.parametrize("method", SUBSPACE_METHODS)
 @pytest.mark.parametrize("scenario_name", ["siso_scenario", "mimo_scenario"])
-def test_subspace_method_predicts_held_out_harold_simulation(
+def test_subspace_method_predicts_held_out_control_simulation(
     method, scenario_name, request
 ):
     scenario = request.getfixturevalue(scenario_name)
@@ -52,7 +52,7 @@ def test_subspace_method_predicts_held_out_harold_simulation(
         u=scenario.u_train,
         ss_f=12,
         ss_p=12,
-        ss_fixed_order=scenario.plant.a.shape[0],
+        ss_fixed_order=scenario.plant.A.shape[0],
         ss_d_required=True,
         tsample=scenario.sample_time,
     )
@@ -64,7 +64,7 @@ def test_subspace_method_predicts_held_out_harold_simulation(
 
 
 @pytest.mark.parametrize("method", SUBSPACE_METHODS)
-def test_subspace_method_identifies_unstable_harold_system(method):
+def test_subspace_method_identifies_unstable_control_system(method):
     scenario = simulate_scenario(
         unstable_siso_plant(),
         n_train=360,

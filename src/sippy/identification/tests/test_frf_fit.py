@@ -2,6 +2,7 @@
 Tests for fitting parametric transfer functions to FD frequency responses.
 """
 
+import control
 import numpy as np
 import pytest
 from scipy import signal
@@ -120,6 +121,8 @@ class TestFitFRFModel:
         fd, u = siso_fd_result
         par = fit_frf_model(fd, na=2, nb=2, nk=1)
         assert isinstance(par, StateSpaceModel)
+        assert isinstance(par.G, control.StateSpace)
+        assert isinstance(par.G_tf, control.TransferFunction)
         ch = par.identification_info["frf_fit"][0][0]
         np.testing.assert_allclose(ch["a"], A_TRUE, atol=0.02)
         np.testing.assert_allclose(ch["b"], [0.5, 0.3], atol=0.02)
@@ -181,7 +184,8 @@ class TestFitFRFModel:
         fd = FrequencyDomainAlgorithm().identify(y=y, u=u, dt=0.25)
         par = fit_frf_model(fd, na=2, nb=2, nk=1)
         assert par.ts == 0.25
-        assert par.G_tf.SamplingPeriod == pytest.approx(0.25)
+        assert par.G.dt == pytest.approx(0.25)
+        assert par.G_tf.dt == pytest.approx(0.25)
 
     def test_diagnostics_recorded(self, siso_fd_result):
         fd, _ = siso_fd_result

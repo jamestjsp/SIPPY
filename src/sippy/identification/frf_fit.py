@@ -24,6 +24,7 @@ References:
 import warnings
 from typing import Any
 
+import control
 import numpy as np
 
 from .base import StateSpaceModel, realize_transfer_function
@@ -184,7 +185,7 @@ def fit_frf_model(
     Each output-input channel of the non-parametric frequency response in
     ``model.identification_info`` is fitted with a rational transfer
     function (see :func:`fit_rational_frf`); the resulting transfer matrix
-    is realized as a state-space model via harold.
+    is realized as a state-space model via python-control and Slycot.
 
     Parameters
     ----------
@@ -206,7 +207,7 @@ def fit_frf_model(
     -------
     StateSpaceModel
         Parametric model with real A, B, C, D matrices, ``G_tf`` set to the
-        fitted harold transfer function, and per-channel fit diagnostics in
+        fitted control transfer function, and per-channel fit diagnostics in
         ``identification_info["frf_fit"]``.
     """
     if not np.isfinite(min_coherence) or not 0 <= min_coherence <= 1:
@@ -283,12 +284,10 @@ def fit_frf_model(
         num_rows.append(num_row)
         den_rows.append(den_row)
 
-    import harold
-
     if n_outputs == 1 and n_inputs == 1:
-        G_tf = harold.Transfer(num_rows[0][0], den_rows[0][0], dt=model.ts)
+        G_tf = control.tf(num_rows[0][0], den_rows[0][0], dt=model.ts)
     else:
-        G_tf = harold.Transfer(num_rows, den_rows, dt=model.ts)
+        G_tf = control.tf(num_rows, den_rows, dt=model.ts)
 
     A, B, C, D = realize_transfer_function(G_tf)
     A = np.atleast_2d(A)

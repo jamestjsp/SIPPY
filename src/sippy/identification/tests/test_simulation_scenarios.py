@@ -1,6 +1,8 @@
-import harold
+import control
 import numpy as np
 import pytest
+
+from sippy.utils.simulation_utils import get_fir_coef, get_step_response
 
 from .simulation_scenarios import (
     delayed_siso_plant,
@@ -113,8 +115,7 @@ def test_long_delay_plant_has_no_response_before_delay():
     impulse = np.zeros((40, 1))
     impulse[0, 0] = 1.0
 
-    output, _ = harold.simulate_linear_system(plant, impulse)
-    output = np.asarray(output).ravel()
+    output = control.forced_response(plant, U=impulse[:, 0]).outputs.ravel()
 
     np.testing.assert_allclose(output[: delay + 1], 0.0)
     assert output[delay + 1] != 0.0
@@ -130,3 +131,32 @@ def test_normalized_rmse_handles_exact_and_degraded_predictions():
 
     np.testing.assert_allclose(normalized_rmse(actual, actual), 0.0)
     assert normalized_rmse(actual, np.zeros_like(actual))[0] > 0.9
+
+
+def test_fir_and_step_response_support_control_siso():
+    fir = get_fir_coef(
+        stable_siso_plant(dt=0.25),
+        ["u"],
+        ["y"],
+        sampling=0.25,
+        tss=0.025,
+    )
+    step = get_step_response(fir)
+
+    assert fir["y"]["u"].shape == (6,)
+    assert fir["y"]["u"][0] == pytest.approx(0.08)
+    np.testing.assert_allclose(step["y"]["u"], np.cumsum(fir["y"]["u"]))
+
+
+def test_fir_coefficients_support_control_mimo():
+    fir = get_fir_coef(
+        stable_mimo_plant(),
+        ["u1", "u2"],
+        ["y1", "y2"],
+        sampling=1.0,
+        tss=0.1,
+    )
+
+    assert set(fir) == {"y1", "y2"}
+    assert set(fir["y1"]) == {"u1", "u2"}
+    assert all(values.shape == (6,) for row in fir.values() for values in row.values())
