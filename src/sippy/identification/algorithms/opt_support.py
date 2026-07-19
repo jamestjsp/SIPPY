@@ -83,16 +83,24 @@ class MISOResult:
         if not self.b_coeffs:
             g_tf = control.tf([0.0], den_g, dt=sample_time)
         else:
+            required_length = max(
+                len(den_g),
+                max(
+                    int(delay) + 1 + b_vector.size
+                    for b_vector, delay in zip(self.b_coeffs, self.delay)
+                ),
+            )
+            if len(den_g) < required_length:
+                den_g.extend([0.0] * (required_length - len(den_g)))
             num_g = []
             for b_vector, delay in zip(self.b_coeffs, self.delay):
                 if b_vector.size == 0:
                     num_g.append([0.0])
                     continue
-                leading_zeros = np.zeros(int(delay), dtype=float)
-                num_g.append(np.concatenate((leading_zeros, b_vector)).tolist())
-            required_den_length = max(len(numerator) + 1 for numerator in num_g)
-            if len(den_g) < required_den_length:
-                den_g.extend([0.0] * (required_den_length - len(den_g)))
+                numerator = np.zeros(required_length)
+                start = int(delay) + 1
+                numerator[start : start + b_vector.size] = b_vector
+                num_g.append(numerator.tolist())
             if len(num_g) == 1:
                 g_tf = control.tf(num_g[0], den_g, dt=sample_time)
             else:

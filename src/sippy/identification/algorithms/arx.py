@@ -12,7 +12,6 @@ from sippy import systems as control
 from ..base import (
     IdentificationAlgorithm,
     StateSpaceModel,
-    identity_transfer_function,
     realize_transfer_function,
 )
 
@@ -320,7 +319,8 @@ class ARXAlgorithm(IdentificationAlgorithm):
         """
         Create G_tf and H_tf transfer functions for ARX.
 
-        For ARX: H_tf = 1 (unity, since ARX has no noise model).
+        For ARX: H(q) = A(q)^-1 because white innovations enter before the
+        autoregressive filter.
 
         Parameters:
         -----------
@@ -350,7 +350,13 @@ class ARXAlgorithm(IdentificationAlgorithm):
             A, B, C, D = self._realize_mimo_arx(A_coeffs, B_coeffs, na, nb, nk, ny, nu)
             G_tf = control.ss2tf(control.ss(A, B, C, D, dt=Ts))
 
-        H_tf = identity_transfer_function(ny, Ts)
+        if ny == 1:
+            numerator_h = np.zeros(polynomial_length)
+            numerator_h[0] = 1.0
+            H_tf = control.tf(numerator_h, denominator, dt=Ts)
+        else:
+            A_h, B_h, C_h, D_h = self._realize_mimo_arx_noise(A_coeffs, na, ny)
+            H_tf = control.ss2tf(control.ss(A_h, B_h, C_h, D_h, dt=Ts))
         return G_tf, H_tf
 
     def _create_transfer_function(self, A_coeffs, B_coeffs, na, nb, nk, ny, nu, Ts):
@@ -437,5 +443,25 @@ class ARXAlgorithm(IdentificationAlgorithm):
                     destination_start : destination_start + nu,
                     source_start : source_start + nu,
                 ] = np.eye(nu)
+
+        return A, B, C, D
+
+    def _realize_mimo_arx_noise(self, A_coeffs, na, ny):
+        n_states = na * ny
+        A = np.zeros((n_states, n_states))
+        B = np.zeros((n_states, ny))
+        C = np.zeros((ny, n_states))
+        D = np.eye(ny)
+
+        for lag in range(na):
+            block = slice(lag * ny, (lag + 1) * ny)
+            C[:, block] = A_coeffs[:, lag, :]
+
+        A[:ny, :] = C
+        B[:ny, :] = np.eye(ny)
+        for lag in range(1, na):
+            destination = slice(lag * ny, (lag + 1) * ny)
+            source = slice((lag - 1) * ny, lag * ny)
+            A[destination, source] = np.eye(ny)
 
         return A, B, C, D

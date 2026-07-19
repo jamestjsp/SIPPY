@@ -2080,7 +2080,7 @@ def build_armax_regression_parallel(y, u, noise_hat, na, nb, nc, nk, max_order, 
     nk : int
         Input delay
     max_order : int
-        Maximum order among na, nb+nk, nc
+        Maximum order among na, nb+nk-1, nc
     N_eff : int
         Effective number of data points (N - max_order)
 
@@ -2093,7 +2093,7 @@ def build_armax_regression_parallel(y, u, noise_hat, na, nb, nc, nk, max_order, 
     ------
     - Row i of Phi contains:
       - AR part: -y[i+max_order-1], -y[i+max_order-2], ..., -y[i+max_order-na]
-      - X part: u[max_order+i-1-nk], u[max_order+i-2-nk], ..., u[max_order+i-nb-nk]
+      - X part: u[max_order+i-nk], u[max_order+i-1-nk], ..., u[max_order+i-nb+1-nk]
       - MA part: noise_hat[max_order+i-1], noise_hat[max_order+i-2], ..., noise_hat[max_order+i-nc]
     - Uses prange for parallel execution across rows
     - 3-4x speedup on multi-core systems compared to sequential loops
@@ -2109,7 +2109,7 @@ def build_armax_regression_parallel(y, u, noise_hat, na, nb, nc, nk, max_order, 
 
         # X part (lagged inputs) - explicit loop
         for j in range(nb):
-            Phi[i, na + j] = u[max_order + i - 1 - (nk + j)]
+            Phi[i, na + j] = u[max_order + i - (nk + j)]
 
         # MA part (estimated noise terms) - explicit loop
         for j in range(nc):

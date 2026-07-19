@@ -157,7 +157,7 @@ class ILLSHandler(ARMAXModeHandler):
         ny, N = 1, y.size  # Assume SISO for now
 
         # Check data length
-        max_order = max(na, nb + nk, nc)
+        max_order = max(na, nb + nk - 1, nc)
         if N <= max_order:
             return None, {"error": "Insufficient data length"}
 
@@ -199,7 +199,7 @@ class ILLSHandler(ARMAXModeHandler):
 
                     # X part (lagged inputs) - explicit loop
                     for j in range(nb):
-                        Phi[i, na + j] = u[max_order + i - 1 - (nk + j)]
+                        Phi[i, na + j] = u[max_order + i - (nk + j)]
 
                     # MA part (estimated noise terms) - explicit loop
                     for j in range(nc):
@@ -395,7 +395,7 @@ class RLLSHandler(ARMAXModeHandler):
         nu = 1
         N = y.size
 
-        max_order = max(na, nb + nk, nc)
+        max_order = max(na, nb + nk - 1, nc)
         nt = na + nb + nc + 1  # Total number of parameters
 
         if N <= max_order:
@@ -414,23 +414,15 @@ class RLLSHandler(ARMAXModeHandler):
             if k > max_order:
                 # Step 1: Build regressor vector
                 vecY = y[k - na : k][::-1]  # Y vector
-                vecU = u[k - nb - nk : k - nk][::-1]  # U vector
+                vecU = u[k - nk - nb + 1 : k - nk + 1][::-1]  # U vector
                 vecE = E[k - nc : k][::-1]  # E vector
 
                 # ARMAX regressor
                 phi = np.hstack((-vecY, vecU, vecE))
 
                 # Step 2: Gain update
-                try:
-                    K_t = np.dot(
-                        np.dot(P_t, phi),
-                        np.linalg.inv(
-                            forgetting_factor + np.dot(np.dot(phi.T, P_t), phi)
-                        ),
-                    )
-                except np.linalg.LinAlgError:
-                    # Handle singular matrix
-                    K_t = np.zeros(nt - 1)
+                gain_denominator = forgetting_factor + phi.T @ P_t @ phi
+                K_t = (P_t @ phi) / gain_denominator
 
                 # Step 3: Parameter update
                 theta = theta + np.dot(K_t, (y[k] - np.dot(phi.T, theta)))
