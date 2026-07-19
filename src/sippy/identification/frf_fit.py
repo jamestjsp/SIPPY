@@ -186,7 +186,7 @@ def fit_frf_model(
     Each output-input channel of the non-parametric frequency response in
     ``model.identification_info`` is fitted with a rational transfer
     function (see :func:`fit_rational_frf`); the resulting transfer matrix
-    is realized as a state-space model via python-control and Slycot.
+    is realized as a state-space model via the ctrlsys-backed systems module.
 
     Parameters
     ----------

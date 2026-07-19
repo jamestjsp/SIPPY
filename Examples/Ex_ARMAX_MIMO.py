@@ -104,7 +104,7 @@ def generate_mimo_system():
     err_output2, _ = signal.dlsim(h_tf2, err_input[1, :].reshape(-1, 1))
     err_output3, _ = signal.dlsim(h_tf3, err_input[2, :].reshape(-1, 1))
 
-    print("🔄 Note: Identified models support simulation through python-control")
+    print("🔄 Note: Identified models support simulation through sippy.systems")
     print(f"Input data shape: {Usim.shape}")
     print(f"Input noise shape: {err_input.shape}")
     print(

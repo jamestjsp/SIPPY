@@ -3,11 +3,11 @@
 @author: Giuseppe Armenise, revised by RBdC
 """
 
-import control.matlab as cnt
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from sippy import systems as cnt
 from sippy.identification import IDData, SystemIdentification
 from sippy.utils.signal_utils import GBN_seq, white_noise_var
 
@@ -402,7 +402,5 @@ EV = 100.0 * (
 plt.title(f"Validation: | Explained Variance BJ = {EV}%")
 
 
-## Advanced plotting can use model.G and model.G_tf with python-control.
-print(
-    "\n🔍 Use python-control with model.G or model.G_tf for Bode and step-response analysis"
-)
+## Advanced plotting can use model.G and model.G_tf with sippy.systems.
+print("\n🔍 Use sippy.systems with model.G or model.G_tf for response analysis")

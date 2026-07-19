@@ -166,7 +166,7 @@ class TestMasterExamplesIntegration:
                 assert hasattr(model, "n")
 
             except Exception as e:
-                # Some methods may require slycot or other dependencies
+                # Some methods may require optional solver dependencies
                 pytest.skip(
                     f"{method} method failed (possibly due to missing dependencies): {e}"
                 )

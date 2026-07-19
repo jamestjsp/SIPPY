@@ -33,12 +33,12 @@ SIPPY requires Python 3.13 or newer and uses
 uv sync
 ```
 
-[python-control](https://python-control.readthedocs.io/) supplies transfer-
-function, state-space, analysis, and simulation APIs. Slycot is required for
-robust SISO and MIMO transfer-function realization; precompiled Slycot wheels
-are available from PyPI, so `uv sync` installs it without a local Fortran build
-on supported platforms. CasADi and IPOPT support nonlinear polynomial-model
-estimation. NumPy, SciPy, Pandas, and Numba provide the numerical runtime.
+[ctrlsys](https://pypi.org/project/ctrlsys/) supplies the C11-backed SLICOT
+routines used for transfer-function realization, frequency response, and
+discrete simulation. SIPPY exposes these routines through its `sippy.systems`
+model API, so callers do not handle Fortran-order work arrays or routine status
+codes directly. CasADi and IPOPT support nonlinear polynomial-model estimation.
+NumPy, SciPy, Pandas, and Numba provide the numerical runtime.
 
 ## Quick start
 

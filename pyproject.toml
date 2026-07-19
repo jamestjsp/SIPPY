@@ -9,14 +9,15 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "casadi>=3.7.2",
-    "control>=0.10.2",
     "ctrlsys>=1.1.1",
     "joblib>=1.4.0",
     "jupyterlab>=4.4.9",
+    "matplotlib>=3.10.7",
     "numba>=0.60.0",
+    "numpy>=2.3.4",
     "pandas>=2.3.3",
     "pytest>=8.4.2",
-    "slycot>=0.7.0",
+    "scipy>=1.16.2",
 ]
 
 [dependency-groups]

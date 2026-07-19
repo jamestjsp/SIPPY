@@ -18,9 +18,7 @@ setuptools.setup(
     install_requires=(
         "numpy",
         "scipy",
-        "control>=0.10.2",
         "ctrlsys>=1.1.1",
-        "slycot>=0.7.0",
     ),
     classifiers=(
         "Development Status :: 4 - Beta",

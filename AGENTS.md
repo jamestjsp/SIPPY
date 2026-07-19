@@ -48,9 +48,10 @@ time in returned models.
 - Preserve numerical accuracy and cover regressions with behavioral assertions.
 - Test applicable SISO and MIMO cases, delays, low and high SNR, correlated
   inputs, colored noise, and unstable dynamics.
-- Use python-control for transfer functions, state-space models, and simulation.
-  Pass discrete sample time as `dt=...`; control state matrices use uppercase
-  attributes. Slycot is required for transfer-function realization.
+- Use `sippy.systems` for transfer functions, state-space models, frequency
+  response, and simulation. Pass discrete sample time as `dt=...`; state
+  matrices use uppercase attributes. Keep raw `ctrlsys` calls isolated in the
+  systems backend, pass Fortran-order copies, and check every `info` code.
 - Put algorithm implementations in `identification/algorithms/` and register
   them in `algorithms/__init__.py`.
 - Reuse `compiled_utils.py` only when it preserves correctness and robustness.

@@ -6,8 +6,8 @@ Created on Fri Jan 19 2018
 
 In this test, no error occurs.
 Using method='N4SID','MOESP' or 'CVA', if the message
-"Kalman filter cannot be calculated" is shown, it means
-that the package slycot is not well-installed.
+"Kalman filter cannot be calculated" is shown, inspect the data conditioning
+and the reported ctrlsys routine status.
 
 """
 

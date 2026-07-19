@@ -222,7 +222,7 @@ def main():
     print("\n💡 Key modern APIs demonstrated:")
     print("  • IDData for structured data management")
     print("  • Modern parameter naming (ss_* vs SS_*)")
-    print("  • python-control model integration")
+    print("  • ctrlsys-backed model integration")
     print("  • Step response analysis")
     print("  • Multi-algorithm testing")
 

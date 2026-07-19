@@ -1230,31 +1230,32 @@ config = SystemIdentificationConfig(method='CUSTOM')
 model = SystemIdentification(config).identify(y, u)
 ```
 
-### Integration with python-control
+### Integration with ctrlsys
 
-SIPPY returns python-control objects directly. `model.G` is a
-`control.StateSpace`; polynomial algorithms also expose `model.G_tf` and
-`model.H_tf` as `control.TransferFunction` objects.
+SIPPY returns its own control-system objects backed by the C11 `ctrlsys`
+package. `model.G` is a `sippy.systems.StateSpace`; polynomial algorithms also
+expose `model.G_tf` and `model.H_tf` as `sippy.systems.TransferFunction`
+objects.
 
 ```python
-import control
+import numpy as np
+
+from sippy import systems
 
 system = model.G
-transfer = model.G_tf if model.G_tf is not None else control.ss2tf(system)
+transfer = model.G_tf if model.G_tf is not None else systems.ss2tf(system)
 
-poles = control.poles(system)
-zeros = control.zeros(system)
-frequency_response = control.frequency_response(system, w)
-step = control.step_response(system)
-impulse = control.impulse_response(system)
+poles = np.linalg.eigvals(system.A)
+frequency_response = systems.frequency_response(system, w)
+impulse = systems.impulse_response(system, T=t, squeeze=False)
 
 print(system.A, system.B, system.C, system.D)
-print(step.time, step.outputs)
+print(impulse.time, impulse.outputs)
 ```
 
-Slycot is a required dependency and supplies robust transfer-function to
-state-space realization, including MIMO systems. Precompiled wheels are
-available from PyPI on supported platforms and are installed by `uv sync`.
+`sippy.systems` uses `ctrlsys.tc04ad`, `tb04ad`, `tb05ad`, and `tf01md` for
+conversion, analysis, and simulation. It preserves caller arrays by passing
+Fortran-order copies and raises `CtrlSysError` for nonzero routine status codes.
 
 ### Batch Processing
 
@@ -1318,8 +1319,7 @@ def process_dataset_files(data_dir, output_dir):
 
 - **SIPPY GitHub**: https://github.com/CPCLAB-UNIPI/SIPPY
 - **Master Branch Documentation**: Original user_guide.pdf
-- **Python Control**: https://python-control.readthedocs.io/
-- **Slycot**: https://pypi.org/project/slycot/
+- **ctrlsys**: https://pypi.org/project/ctrlsys/
 
 ### Performance Benchmarks
 

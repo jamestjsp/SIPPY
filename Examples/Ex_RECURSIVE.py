@@ -3,20 +3,13 @@
 @author: Giuseppe Armenise, revised by RBdC
 """
 
-import warnings
-
-import control.matlab as cnt
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from sippy import systems as cnt
 from sippy.identification import IDData, SystemIdentification
 from sippy.utils.signal_utils import GBN_seq, white_noise_var
-
-# Suppress the harmless control library warning about return_x
-warnings.filterwarnings(
-    action="ignore", message="return_x specified for a transfer function system"
-)
 
 ## TEST RECURSIVE IDENTIFICATION METHODS
 

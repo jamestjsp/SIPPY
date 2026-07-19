@@ -48,7 +48,7 @@ RUN echo 'export PATH="/home/vscode/.local/bin:$PATH"' >> /home/vscode/.zshrc &&
     /home/vscode/.local/bin/uv tool install jupyterlab
     
 USER root
-RUN /root/.local/bin/uv pip install --system "ctrlsys>=1.1.1" "slycot>=0.7.0" "control>=0.10.2"
+RUN /root/.local/bin/uv pip install --system "ctrlsys>=1.1.1"
     
 USER vscode
 

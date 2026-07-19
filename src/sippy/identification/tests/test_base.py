@@ -191,7 +191,7 @@ def test_realize_transfer_function_uses_control_state_space_conventions():
     )
 
 
-def test_realize_mimo_transfer_function_with_slycot():
+def test_realize_mimo_transfer_function_with_ctrlsys():
     transfer_function = control.tf(
         [[[0.2], [0.1]], [[0.3], [0.4]]],
         [

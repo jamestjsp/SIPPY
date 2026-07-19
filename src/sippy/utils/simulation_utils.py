@@ -572,7 +572,7 @@ def get_fir_coef(model, inds, deps, sampling, tss):
     """
     system = getattr(model, "G", model)
     if system is None or not isinstance(system, control.InputOutputSystem):
-        raise TypeError("model must be a python-control system or a SIPPY model with G")
+        raise TypeError("model must be a SIPPY system or a model with G")
     if len(inds) != system.ninputs or len(deps) != system.noutputs:
         raise ValueError("input and output names must match the model dimensions")
     if sampling <= 0 or tss <= 0:
