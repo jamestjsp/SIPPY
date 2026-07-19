@@ -2,8 +2,7 @@
 Test cases for OE (Output Error) identification algorithm implementation.
 """
 
-from unittest.mock import patch
-
+import control
 import numpy as np
 import pandas as pd
 import pytest
@@ -84,26 +83,17 @@ class TestOEAlgorithm:
         ):
             algorithm.validate_parameters(nb=2, nf=2, nk=-1)
 
-    @patch("sippy.identification.algorithms.oe.HAROLD_AVAILABLE", True)
     def test_oe_basic_identification(self):
         """Test basic OE identification functionality."""
         algorithm = OEAlgorithm()
 
-        with patch("sippy.identification.algorithms.oe.harold") as mock_harold:
-            # Mock the harold state space creation
-            mock_ss = mock_harold.StateSpace.return_value
-            mock_ss.A = np.eye(2)
-            mock_ss.B = np.zeros((2, 1))
-            mock_ss.C = np.zeros((1, 2))
-            mock_ss.D = np.zeros((1, 1))
+        result = algorithm.identify(self.data, self.config)
 
-            result = algorithm.identify(self.data, self.config)
-
-            assert isinstance(result, StateSpaceModel)
-            assert result.A is not None
-            assert result.B is not None
-            assert result.C is not None
-            assert result.D is not None
+        assert isinstance(result, StateSpaceModel)
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert isinstance(result.H_tf, control.TransferFunction)
+        assert result.G_tf.dt == pytest.approx(self.data.sample_time)
 
     def test_oe_with_different_orders(self):
         """Test OE with different model orders."""
@@ -116,15 +106,8 @@ class TestOEAlgorithm:
             config.nf = nf
             config.nk = 1
 
-            with patch("sippy.identification.algorithms.oe.harold") as mock_harold:
-                mock_ss = mock_harold.StateSpace.return_value
-                mock_ss.A = np.eye(nf)
-                mock_ss.B = np.zeros((nf, 1))
-                mock_ss.C = np.zeros((1, nf))
-                mock_ss.D = np.zeros((1, 1))
-
-                result = algorithm.identify(self.data, config)
-                assert result is not None
+            result = algorithm.identify(self.data, config)
+            assert isinstance(result.G_tf, control.TransferFunction)
 
     def test_oe_mimo_system(self):
         """Test OE with MIMO system."""
@@ -149,25 +132,19 @@ class TestOEAlgorithm:
 
         algorithm = OEAlgorithm()
 
-        with patch("sippy.identification.algorithms.oe.harold") as mock_harold:
-            mock_ss = mock_harold.StateSpace.return_value
-            mock_ss.A = np.eye(2)
-            mock_ss.B = np.zeros((2, 2))
-            mock_ss.C = np.zeros((2, 2))
-            mock_ss.D = np.zeros((2, 2))
+        result = algorithm.identify(data, config)
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert result.G.shape == (2, 2)
+        assert result.G_tf.shape == (2, 2)
 
-            result = algorithm.identify(data, config)
-            assert result is not None
+    def test_oe_transfer_functions_preserve_sample_time(self):
+        result = OEAlgorithm().identify(self.data, self.config)
 
-    def test_oe_without_harold(self):
-        """Test OE algorithm graceful degradation without harold."""
-        algorithm = OEAlgorithm()
-
-        with patch("sippy.identification.algorithms.oe.HAROLD_AVAILABLE", False):
-            result = algorithm.identify(self.data, self.config)
-            # Should return a mock model when harold is not available
-            assert result is not None
-            assert isinstance(result, StateSpaceModel)
+        assert result.G_tf.dt == pytest.approx(1.0)
+        assert result.H_tf.dt == pytest.approx(1.0)
+        assert result.H_tf.num[0][0] == pytest.approx([1.0])
+        assert result.H_tf.den[0][0] == pytest.approx([1.0])
 
     def test_oe_data_validation(self):
         """Test OE algorithm validates input data."""
@@ -206,16 +183,9 @@ class TestOEAlgorithm:
         config.nf = 3  # Denominator order determines state dimension
         config.nk = 0
 
-        with patch("sippy.identification.algorithms.oe.harold") as mock_harold:
-            mock_ss = mock_harold.StateSpace.return_value
-            mock_ss.A = np.eye(3)  # nf = 3
-            mock_ss.B = np.zeros((3, 1))
-            mock_ss.C = np.zeros((1, 3))
-            mock_ss.D = np.zeros((1, 1))
-
-            result = algorithm.identify(self.data, config)
-            assert result.A.shape == (3, 3)  # State dimension = nf
-            assert result.n == 3
+        result = algorithm.identify(self.data, config)
+        assert result.A.shape == (3, 3)  # State dimension = nf
+        assert result.n == 3
 
     def test_oe_noise_modeling(self):
         """Test OE properly models output error structure."""
@@ -226,14 +196,6 @@ class TestOEAlgorithm:
         config.nf = 2
         config.nk = 0
 
-        with patch("sippy.identification.algorithms.oe.harold") as mock_harold:
-            mock_ss = mock_harold.StateSpace.return_value
-            mock_ss.A = np.array([[0.0, 1.0], [-0.3, 0.2]])  # F coefficients
-            mock_ss.B = np.array([[0.1], [0.5]])  # B coefficients
-            mock_ss.C = np.array([[0.0, 1.0]])  # Observer canonical form
-            mock_ss.D = np.array([[0.0]])
-
-            result = algorithm.identify(self.data, config)
-            assert result is not None
-            # State matrix should reflect F polynomial coefficients
-            assert result.A.shape == (2, 2)  # nf = 2 states
+        result = algorithm.identify(self.data, config)
+        assert result is not None
+        assert result.A.shape == (2, 2)  # nf = 2 states

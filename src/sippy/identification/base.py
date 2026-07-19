@@ -43,6 +43,17 @@ def realize_transfer_function(transfer_function: object) -> tuple[np.ndarray, ..
     return realization.A, realization.B, realization.C, realization.D
 
 
+def identity_transfer_function(
+    size: int, sample_time: float
+) -> control.TransferFunction:
+    numerator = [
+        [[1.0] if output == input_ else [0.0] for input_ in range(size)]
+        for output in range(size)
+    ]
+    denominator = [[[1.0] for _ in range(size)] for _ in range(size)]
+    return control.tf(numerator, denominator, dt=sample_time)
+
+
 class IdentificationAlgorithm(ABC):
     """Abstract base class for system identification algorithms."""
 

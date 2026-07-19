@@ -2,13 +2,18 @@
 ARX (AutoRegressive with eXogenous inputs) identification algorithm.
 """
 
-import warnings
 from typing import TYPE_CHECKING, Optional
 
+import control
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import (
+    IdentificationAlgorithm,
+    StateSpaceModel,
+    identity_transfer_function,
+    realize_transfer_function,
+)
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -24,21 +29,6 @@ except ImportError:
     create_regression_matrix_arx_compiled = None
     create_regression_matrix_arx_mimo_compiled = None
     NUMBA_AVAILABLE = False
-
-# Import harold for test mocking and availability checking
-try:
-    import harold
-
-    HAROLD_IMPORTED = True
-    # Check for either modern (State) or legacy (StateSpace) API
-    if hasattr(harold, "State") or hasattr(harold, "StateSpace"):
-        HAROLD_AVAILABLE = True
-    else:
-        HAROLD_AVAILABLE = False
-except ImportError:
-    harold = None
-    HAROLD_IMPORTED = False
-    HAROLD_AVAILABLE = False
 
 
 class ARXAlgorithm(IdentificationAlgorithm):
@@ -266,26 +256,9 @@ class ARXAlgorithm(IdentificationAlgorithm):
             A_coeffs, B_coeffs, na, nb, nk, ny, nu, sample_time
         )
 
-        # Create state-space representation
-        if HAROLD_AVAILABLE and harold is not None:
-            model = self._create_transfer_function(
-                A_coeffs, B_coeffs, na, nb, nk, ny, nu, sample_time
-            )
-        else:
-            # Warn about harold availability only when needed
-            if harold is None:
-                warnings.warn(
-                    "harold library not available. ARX algorithm will be limited."
-                )
-            else:
-                warnings.warn(
-                    "harold library not available. ARX algorithm will be limited."
-                )
-
-            # Fallback when harold is not available
-            model = self._create_mock_model(
-                A_coeffs, B_coeffs, na, nb, nk, ny, nu, sample_time
-            )
+        model = self._create_transfer_function(
+            A_coeffs, B_coeffs, na, nb, nk, ny, nu, sample_time
+        )
 
         # Attach transfer functions and predictions to model
         model.G_tf = G_tf
@@ -360,47 +333,27 @@ class ARXAlgorithm(IdentificationAlgorithm):
 
         Returns:
         --------
-        G_tf, H_tf : harold.Transfer objects or None
-            Transfer functions (None if harold not available)
+        G_tf, H_tf : control.TransferFunction
+            Deterministic and noise transfer functions.
         """
-        if not HAROLD_AVAILABLE or harold is None:
-            return None, None
+        if ny == 1 and nu == 1:
+            polynomial_length = max(na, nb + nk - 1) + 1
+            numerator = np.zeros(polynomial_length)
+            numerator[nk : nk + nb] = B_coeffs[0, :]
+            denominator = np.zeros(polynomial_length)
+            denominator[0] = 1.0
+            denominator[1 : na + 1] = -A_coeffs[0, :]
+            G_tf = control.tf(numerator, denominator, dt=Ts)
+        else:
+            A, B, C, D = self._realize_mimo_arx(A_coeffs, B_coeffs, na, nb, nk, ny, nu)
+            G_tf = control.ss2tf(control.ss(A, B, C, D, dt=Ts))
 
-        if ny != 1 or nu != 1:
-            return None, None
-
-        try:
-            # Create G(q) = B / A - Deterministic transfer function
-            max_order = max(na, nb + nk)
-
-            # Build numerator with delay
-            NUM_G_full = np.zeros(max_order + 1)
-            NUM_G_full[nk : nk + nb] = B_coeffs[0, :] if ny == 1 else B_coeffs[0, :nb]
-
-            # Build denominator
-            # Note: ARX regression returns coefficients for -y[k-1], so we negate
-            DEN_G = np.zeros(max_order + 1)
-            DEN_G[0] = 1.0
-            DEN_G[1 : na + 1] = -A_coeffs[0, :]
-
-            # Strip leading zeros from numerator for harold compatibility
-            NUM_G = np.trim_zeros(NUM_G_full, "f")
-            if len(NUM_G) == 0:
-                NUM_G = np.array([0.0])
-
-            G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
-
-            # H(q) = 1 - ARX has no noise model (H is unity)
-            H_tf = harold.Transfer([1.0], [1.0], dt=Ts)
-
-            return G_tf, H_tf
-        except Exception as e:
-            warnings.warn(f"Failed to create ARX transfer functions with harold: {e}")
-            return None, None
+        H_tf = identity_transfer_function(ny, Ts)
+        return G_tf, H_tf
 
     def _create_transfer_function(self, A_coeffs, B_coeffs, na, nb, nk, ny, nu, Ts):
         """
-        Create transfer function model from ARX parameters using harold.
+        Create a state-space model from ARX parameters.
 
         Parameters:
         -----------
@@ -420,73 +373,13 @@ class ARXAlgorithm(IdentificationAlgorithm):
         """
         # For simple SISO case, create a transfer function
         if ny == 1 and nu == 1:
-            # Polynomial length must cover both the AR part and the delayed
-            # numerator; trailing zeros in the denominator add the delay poles.
-            poly_length = max(na, nb + nk - 1) + 1
-            den_coeffs = np.zeros(poly_length)
-            den_coeffs[0] = 1.0
-            den_coeffs[1 : na + 1] = -A_coeffs[0, :]
-
-            num_coeffs_full = np.zeros(poly_length)
-            num_coeffs_full[nk : nk + nb] = B_coeffs[0, :]
-
-            # Strip leading zeros from numerator (harold requirement)
-            num_coeffs = np.trim_zeros(num_coeffs_full, "f")
-            if len(num_coeffs) == 0:
-                num_coeffs = np.array([0.0])
-
-            # Create transfer function
-            try:
-                # Use modern Harold API if available, fallback to legacy
-                if hasattr(harold, "Transfer"):
-                    tf = harold.Transfer(num_coeffs, den_coeffs, dt=Ts)
-                else:
-                    tf = harold.TransferFunction(num_coeffs, den_coeffs, dt=Ts)
-
-                # Fixed 2025-10-12: Removed incorrect harold.undiscretize() call
-                # that was identified in migration accuracy investigation
-                # Convert discrete-time transfer function to state-space
-                ss_model = harold.transfer_to_state(tf)
-            except Exception as e:
-                warnings.warn(
-                    f"Failed to create ARX transfer function with harold: {e}"
-                )
-                # Fall back to mock model
-                return self._create_mock_model(
-                    A_coeffs, B_coeffs, na, nb, nk, ny, nu, Ts
-                )
-            # Extract actual matrices from ss_model
-            # Harold uses lowercase attributes (.a, .b, .c, .d)
-            A = ss_model.a
-            B = ss_model.b
-            C = ss_model.c
-            D = ss_model.d
-
-            # Check if we got real arrays (not mocked objects for testing)
-            if not isinstance(A, np.ndarray):
-                # Fallback for mocked harold - create simple companion form
-                n_states = na
-                A = np.zeros((n_states, n_states))
-                if na > 1:
-                    A[:-1, 1:] = np.eye(na - 1)
-                A[-1, :] = -A_coeffs[0, :]
-
-                B = np.zeros((n_states, nu))
-                B_flat = B_coeffs.flatten()
-                if len(B_flat) >= n_states:
-                    B[:, 0] = B_flat[:n_states]
-                else:
-                    B[: len(B_flat), 0] = B_flat
-
-                C = np.zeros((ny, n_states))
-                C[0, -1] = 1.0
-
-                D = np.zeros((ny, nu))
+            transfer_function, _ = self._create_transfer_functions_arx(
+                A_coeffs, B_coeffs, na, nb, nk, ny, nu, Ts
+            )
+            A, B, C, D = realize_transfer_function(transfer_function)
         else:
             A, B, C, D = self._realize_mimo_arx(A_coeffs, B_coeffs, na, nb, nk, ny, nu)
 
-        # Use local matrices (not ss_model attributes) for dimensions
-        # This ensures tests with mocked harold don't break
         return StateSpaceModel(
             A=A,
             B=B,
@@ -544,80 +437,3 @@ class ARXAlgorithm(IdentificationAlgorithm):
                 ] = np.eye(nu)
 
         return A, B, C, D
-
-    def _create_mock_model(self, A_coeffs, B_coeffs, na, nb, nk, ny, nu, Ts):
-        """
-        Create a mock state-space model when harold is not available.
-
-        Parameters:
-        -----------
-        A_coeffs, B_coeffs : ndarray
-            AR and exogenous coefficients
-        na, nb, nk : int
-            Model orders and delay
-        ny, nu : int
-            Number of outputs and inputs
-        Ts : float
-            Sampling time
-
-        Returns:
-        --------
-        model : StateSpaceModel
-            Mock state-space model
-        """
-        # Create simple companion form state-space representation
-        n_states = na * ny  # Simplified state dimension
-
-        # State matrix A (companion form)
-        A = np.zeros((n_states, n_states))
-        for i in range(n_states - 1):
-            A[i, i + 1] = 1
-        if na > 0:
-            # Handle AR coefficients assignment properly
-            if A_coeffs.shape[0] == ny and A_coeffs.shape[1] == na:
-                A[-ny:, :na] = -A_coeffs
-            else:
-                # Fallback for different shapes
-                for i in range(min(ny, A_coeffs.shape[0])):
-                    for j in range(min(na, A_coeffs.shape[1])):
-                        A[n_states - ny + i, j] = -A_coeffs[i, j]
-
-        # Input matrix B
-        B = np.zeros((n_states, nu))
-        if nb > 0:
-            # Handle B coefficients properly
-            if B_coeffs.shape[0] == ny:
-                # Each output row contains coefficients for all inputs at all nb lags
-                # Extract direct feedthrough (k=0) from the first nu coefficients per output
-                for i in range(ny):
-                    # B_coeffs[i, :] shape = [nb * nu]
-                    # Take the first nu which represent direct feedthrough (k=nk position)
-                    direct_coeffs = (
-                        B_coeffs[i, :nu] if B_coeffs.shape[1] >= nu else B_coeffs[i, :]
-                    )
-                    B[-ny + i, :] = direct_coeffs[:nu]
-            else:
-                # Fallback case
-                B_flat = B_coeffs.flatten()
-                if len(B_flat) >= nu * ny:
-                    B[-ny:, :] = B_flat[: nu * ny].reshape(ny, nu)
-
-        # Output matrix C
-        C = np.zeros((ny, n_states))
-        C[:, -ny:] = np.eye(ny)
-
-        # Feedthrough matrix D (zero for ARX)
-        D = np.zeros((ny, nu))
-
-        return StateSpaceModel(
-            A=A,
-            B=B,
-            C=C,
-            D=D,
-            K=np.zeros((A.shape[0], C.shape[0])),
-            Q=np.eye(A.shape[0]),
-            R=np.eye(C.shape[0]),
-            S=np.zeros((A.shape[0], C.shape[0])),
-            ts=Ts,
-            Vn=0.01,
-        )

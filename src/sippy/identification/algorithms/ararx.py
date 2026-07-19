@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING, List, Optional, Sequence
-from unittest.mock import MagicMock
 
+import control
 import numpy as np
 
-from ..base import IdentificationAlgorithm, StateSpaceModel, SystemIdentificationConfig
+from ..base import (
+    IdentificationAlgorithm,
+    StateSpaceModel,
+    SystemIdentificationConfig,
+    realize_transfer_function,
+)
 from .opt_support import (
-    HAROLD_AVAILABLE,
     MISOResult,
     gen_mimo_id,
     gen_miso_id,
@@ -24,9 +27,6 @@ else:
         from ..iddata import IDData
     except ImportError:
         IDData = None  # type: ignore
-
-if HAROLD_AVAILABLE:  # pragma: no cover - optional dependency
-    import harold
 
 
 def _block_diag(mats: Sequence[np.ndarray]) -> np.ndarray:
@@ -100,40 +100,20 @@ def _ss_matrices_from_result(
 ) -> tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, Optional[object], Optional[object]
 ]:
-    """Return state-space matrices (and optional TFs) for a MISO result."""
+    """Return state-space matrices and transfer functions for a MISO result."""
 
     if nu == 0:
-        if HAROLD_AVAILABLE:
-            try:
-                _, H_tf = result.build_transfer_function(sample_time)
-                if H_tf is not None:
-                    noise_model = harold.transfer_to_state(H_tf)
-                    A = noise_model.a
-                    B = np.zeros((A.shape[0], 0))
-                    C = noise_model.c
-                    D = np.zeros((C.shape[0], 0))
-                    return A, B, C, D, None, H_tf
-            except Exception as exc:
-                warnings.warn(
-                    f"harold noise-model realization failed, using companion fallback: {exc}"
-                )
-        A, B, C, D = _companion_from_polynomials(result, nu)
-        return A, B, C, D, None, None
+        _, H_tf = result.build_transfer_function(sample_time)
+        A, _, C, _ = realize_transfer_function(H_tf)
+        B = np.zeros((A.shape[0], 0))
+        D = np.zeros((C.shape[0], 0))
+        return A, B, C, D, None, H_tf
 
-    if HAROLD_AVAILABLE:
-        try:
-            G_tf, H_tf = result.build_transfer_function(sample_time)
-            if G_tf is not None:
-                ss_model = harold.transfer_to_state(G_tf)
-                if ss_model.b.shape[1] == nu and ss_model.d.shape[0] == 1:
-                    return ss_model.a, ss_model.b, ss_model.c, ss_model.d, G_tf, H_tf
-        except Exception as exc:  # pragma: no cover - harold failure is rare
-            warnings.warn(
-                f"harold.transfer_to_state failed, using companion fallback: {exc}"
-            )
-
-    A, B, C, D = _companion_from_polynomials(result, nu)
-    return A, B, C, D, None, None
+    G_tf, H_tf = result.build_transfer_function(sample_time)
+    A, B, C, D = realize_transfer_function(G_tf)
+    if B.shape[1] != nu or D.shape[0] != 1:
+        raise ValueError("Transfer realization dimensions do not match MISO result")
+    return A, B, C, D, G_tf, H_tf
 
 
 def _state_space_from_single_result(
@@ -165,6 +145,19 @@ def _state_space_from_single_result(
         identification_info={"reached_max": result.reached_max},
     )
     return model
+
+
+def _diagonal_noise_transfer_function(
+    results: List[MISOResult], sample_time: float
+) -> control.TransferFunction:
+    size = len(results)
+    numerators = [[np.array([0.0]) for _ in range(size)] for _ in range(size)]
+    denominators = [[np.array([1.0]) for _ in range(size)] for _ in range(size)]
+    for index, result in enumerate(results):
+        _, noise_transfer = result.build_transfer_function(sample_time)
+        numerators[index][index] = noise_transfer.num[0][0]
+        denominators[index][index] = noise_transfer.den[0][0]
+    return control.tf(numerators, denominators, dt=sample_time)
 
 
 def _state_space_from_results(
@@ -207,6 +200,8 @@ def _state_space_from_results(
     R = np.eye(ny)
     S = np.zeros((total_states, ny))
     Yid = np.vstack(y_hat_rows)
+    G_tf = control.ss2tf(control.ss(A, B, C, D, dt=sample_time))
+    H_tf = _diagonal_noise_transfer_function(results, sample_time)
 
     model = StateSpaceModel(
         A=A,
@@ -219,8 +214,8 @@ def _state_space_from_results(
         S=S,
         ts=sample_time,
         Vn=sum(res.noise_variance for res in results),
-        G_tf=None,
-        H_tf=None,
+        G_tf=G_tf,
+        H_tf=H_tf,
         Yid=Yid,
         identification_info={"reached_max": reached},
     )
@@ -351,32 +346,6 @@ class ARARXAlgorithm(IdentificationAlgorithm):
                 raise ValueError(f"Unsupported type for {name}: {type(value)}")
         return True
 
-    def _create_mock_model(
-        self, nu: int, ny: int, sample_time: float = 1.0
-    ) -> StateSpaceModel:
-        """Create a minimal companion-form state-space model for tests.
-
-        This method is patchable by tests and provides a fallback when
-        the optimization framework is unavailable.
-        """
-        # Simple companion-form model with minimal state dimension
-        n_states = max(1, ny)  # At least one state
-
-        A = np.eye(n_states)  # Identity matrix, companion-like
-        B = np.zeros((n_states, nu))  # Zero input coupling
-        C = np.zeros((ny, n_states))
-        C[:ny, :ny] = np.eye(ny)  # Direct output states
-        D = np.zeros((ny, nu))
-
-        K = np.zeros((n_states, ny))
-        Q = np.eye(n_states)
-        R = np.eye(ny)
-        S = np.zeros((n_states, ny))
-
-        return StateSpaceModel(
-            A=A, B=B, C=C, D=D, K=K, Q=Q, R=R, S=S, ts=sample_time, Vn=0.01
-        )
-
     def identify(
         self,
         y: Optional[np.ndarray] = None,
@@ -471,16 +440,6 @@ class ARARXAlgorithm(IdentificationAlgorithm):
             raise ValueError(
                 "For multi-input systems, nb must be specified as a vector"
             )
-
-        # Check if _create_mock_model has been patched (for testing)
-        # If patched, use it directly instead of attempting optimization
-        # However, for harold integration tests, we want to let the algorithm proceed normally
-        if hasattr(self, "_create_mock_model") and isinstance(
-            self._create_mock_model, MagicMock
-        ):
-            # Only use mock fallback if harold is not available or if test explicitly disables harold
-            if not HAROLD_AVAILABLE or hasattr(self._create_mock_model, "_force_mock"):
-                return self._create_mock_model(nu, ny, sample_time)
 
         # Check minimum required data length
         if isinstance(na, (int, np.integer)):
@@ -577,11 +536,7 @@ class ARARXAlgorithm(IdentificationAlgorithm):
                     enforce_stability=enforce_stability,
                 )
                 return _state_space_from_single_result(result, nu, sample_time)
-            except (RuntimeError, Exception) as exc:
-                # Fallback to mock model when optimization fails
-                # This supports tests that patch _create_mock_model
-                if hasattr(self, "_create_mock_model"):
-                    return self._create_mock_model(nu, ny, sample_time)
+            except Exception as exc:
                 raise RuntimeError(
                     "CasADi is required for ARARX NLP identification"
                 ) from exc
@@ -608,10 +563,7 @@ class ARARXAlgorithm(IdentificationAlgorithm):
                 enforce_stability=enforce_stability,
             )
             return _state_space_from_results(results, nu, sample_time)
-        except (RuntimeError, Exception) as exc:
-            # Fallback to mock model when optimization fails
-            if hasattr(self, "_create_mock_model"):
-                return self._create_mock_model(nu, ny, sample_time)
+        except Exception as exc:
             raise RuntimeError(
-                "CasAdi is required for ARARX NLP identification"
+                "CasADi is required for ARARX NLP identification"
             ) from exc

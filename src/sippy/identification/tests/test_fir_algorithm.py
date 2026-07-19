@@ -2,8 +2,7 @@
 Test cases for FIR identification algorithm implementation.
 """
 
-from unittest.mock import patch
-
+import control
 import numpy as np
 import pandas as pd
 import pytest
@@ -55,30 +54,19 @@ class TestFIRAlgorithm:
         algorithm = FIRAlgorithm()
         assert algorithm.get_algorithm_name() == "FIR"
 
-    @patch("sippy.identification.algorithms.fir.HAROLD_AVAILABLE", True)
     def test_fir_basic_identification(self):
         """Test basic FIR identification functionality."""
         algorithm = FIRAlgorithm()
 
-        # Test that algorithm can be called
-        with patch("sippy.identification.algorithms.fir.harold") as mock_harold:
-            # Mock the harold state space creation
-            mock_ss = mock_harold.StateSpace.return_value
-            mock_ss.A = np.zeros((3, 3))
-            mock_ss.B = np.zeros((3, 1))
-            mock_ss.C = np.zeros((1, 3))
-            mock_ss.D = np.zeros((1, 1))
+        result = algorithm.identify(
+            iddata=self.data, nb=self.config.nb, nk=self.config.nk
+        )
 
-            # Use new signature with iddata and **kwargs
-            result = algorithm.identify(
-                iddata=self.data, nb=self.config.nb, nk=self.config.nk
-            )
-
-            assert isinstance(result, StateSpaceModel)
-            assert result.A is not None
-            assert result.B is not None
-            assert result.C is not None
-            assert result.D is not None
+        assert isinstance(result, StateSpaceModel)
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert isinstance(result.H_tf, control.TransferFunction)
+        assert result.G_tf.dt == pytest.approx(self.data.sample_time)
 
     def test_fir_with_different_orders(self):
         """Test FIR with different number of coefficients."""
@@ -90,16 +78,8 @@ class TestFIRAlgorithm:
             config.nb = nb
             config.nk = 1
 
-            with patch("sippy.identification.algorithms.fir.harold") as mock_harold:
-                mock_ss = mock_harold.StateSpace.return_value
-                mock_ss.A = np.zeros((nb, nb))
-                mock_ss.B = np.zeros((nb, 1))
-                mock_ss.C = np.zeros((1, nb))
-                mock_ss.D = np.zeros((1, 1))
-
-                # Use new signature
-                result = algorithm.identify(iddata=self.data, nb=nb, nk=1)
-                assert result is not None
+            result = algorithm.identify(iddata=self.data, nb=nb, nk=1)
+            assert isinstance(result.G_tf, control.TransferFunction)
 
     def test_fir_mimo_system(self):
         """Test FIR with MIMO system."""
@@ -123,29 +103,19 @@ class TestFIRAlgorithm:
 
         algorithm = FIRAlgorithm()
 
-        with patch("sippy.identification.algorithms.fir.harold") as mock_harold:
-            mock_ss = mock_harold.StateSpace.return_value
-            mock_ss.A = np.zeros((5, 5))
-            mock_ss.B = np.zeros((5, 2))
-            mock_ss.C = np.zeros((2, 5))
-            mock_ss.D = np.zeros((2, 2))
+        result = algorithm.identify(iddata=data, nb=5, nk=1)
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert result.G.shape == (2, 2)
+        assert result.G_tf.shape == (2, 2)
 
-            # Use new signature
-            result = algorithm.identify(iddata=data, nb=5, nk=1)
-            assert result is not None
+    def test_fir_transfer_function_preserves_delay_and_coefficients(self):
+        result = FIRAlgorithm().identify(iddata=self.data, nb=2, nk=1)
 
-    def test_fir_without_harold(self):
-        """Test FIR algorithm graceful degradation without harold."""
-        algorithm = FIRAlgorithm()
-
-        with patch("sippy.identification.algorithms.fir.HAROLD_AVAILABLE", False):
-            # Use new signature
-            result = algorithm.identify(
-                iddata=self.data, nb=self.config.nb, nk=self.config.nk
-            )
-            # Should return a mock model when harold is not available
-            assert result is not None
-            assert isinstance(result, StateSpaceModel)
+        numerator = result.G_tf.num[0][0]
+        denominator = result.G_tf.den[0][0]
+        assert numerator == pytest.approx([0.8, 0.3], abs=0.02)
+        assert denominator == pytest.approx([1.0, 0.0, 0.0])
 
     def test_fir_invalid_parameters(self):
         """Test FIR algorithm with invalid parameters."""
@@ -185,18 +155,6 @@ class TestFIRAlgorithm:
             tsample=1.0,
         )
 
-        # This should work since our algorithm should handle MIMO
-        config = SystemIdentificationConfig(method="FIR")
-        config.nb = 5
-        config.nk = 1
-
-        with patch("sippy.identification.algorithms.fir.harold") as mock_harold:
-            mock_ss = mock_harold.StateSpace.return_value
-            mock_ss.A = np.eye(5)
-            mock_ss.B = np.zeros((5, 2))
-            mock_ss.C = np.zeros((3, 5))
-            mock_ss.D = np.zeros((3, 2))
-
-            # Use new signature
-            result = algorithm.identify(iddata=data, nb=5, nk=1)
-            assert result is not None
+        result = algorithm.identify(iddata=data, nb=5, nk=1)
+        assert result.G.shape == (3, 2)
+        assert result.G_tf.shape == (3, 2)

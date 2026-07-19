@@ -15,16 +15,10 @@ from __future__ import annotations
 import sys
 import warnings
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 
+import control
 import numpy as np
-
-try:
-    import harold
-
-    HAROLD_AVAILABLE = True
-except ImportError:  # pragma: no cover - harold is an optional dependency
-    HAROLD_AVAILABLE = False
 
 try:  # pragma: no cover - CasADi is optional but required for NLP methods
     from casadi import DM, SX, mtimes, nlpsol, norm_inf, vertcat
@@ -60,11 +54,8 @@ class MISOResult:
 
     def build_transfer_function(
         self, sample_time: float
-    ) -> Tuple[Optional["harold.Transfer"], Optional["harold.Transfer"]]:
-        """Return (G, H) transfer functions when harold is available."""
-
-        if not HAROLD_AVAILABLE:
-            return None, None
+    ) -> Tuple[control.TransferFunction, control.TransferFunction]:
+        """Return the control-native deterministic and noise transfer functions."""
 
         # Build denominator polynomials A(q), D(q), F(q)
         a_poly = (
@@ -83,17 +74,12 @@ class MISOResult:
             else np.array([1.0])
         )
 
-        # Multiply polynomials with harold when available (safer, often faster)
-        try:
-            den_g = harold.haroldpolymul(a_poly, f_poly).tolist()
-            den_h = harold.haroldpolymul(a_poly, d_poly).tolist()
-        except Exception:
-            den_g = np.convolve(a_poly, f_poly).tolist()
-            den_h = np.convolve(a_poly, d_poly).tolist()
+        den_g = np.convolve(a_poly, f_poly).tolist()
+        den_h = np.convolve(a_poly, d_poly).tolist()
 
         # Construct numerators per input (respecting delays)
         if not self.b_coeffs:
-            g_tf = harold.Transfer([0.0], den_g, dt=sample_time)
+            g_tf = control.tf([0.0], den_g, dt=sample_time)
         else:
             num_g = []
             for b_vector, delay in zip(self.b_coeffs, self.delay):
@@ -106,10 +92,10 @@ class MISOResult:
             if len(den_g) < required_den_length:
                 den_g.extend([0.0] * (required_den_length - len(den_g)))
             if len(num_g) == 1:
-                g_tf = harold.Transfer(num_g[0], den_g, dt=sample_time)
+                g_tf = control.tf(num_g[0], den_g, dt=sample_time)
             else:
                 den_matrix = [[den_g for _ in num_g]]
-                g_tf = harold.Transfer([num_g], den_matrix, dt=sample_time)
+                g_tf = control.tf([num_g], den_matrix, dt=sample_time)
 
         num_h = (
             np.concatenate(([1.0], self.c_coeffs)).tolist()
@@ -122,7 +108,7 @@ class MISOResult:
             num_h = num_h + [0.0] * (len(den_h) - len(num_h))
         elif len(den_h) < len(num_h):
             den_h = den_h + [0.0] * (len(num_h) - len(den_h))
-        h_tf = harold.Transfer(num_h, den_h, dt=sample_time)
+        h_tf = control.tf(num_h, den_h, dt=sample_time)
 
         return g_tf, h_tf
 
@@ -289,9 +275,13 @@ def opt_id(
             elif flag == "ARMA":
                 phi = vertcat(-vecY, vecE)
             elif flag == "ARARX":
-                phi = vertcat(-vecY, vecU, -vecV)
+                phi = vertcat(-vecY, vecU, -vecV) if Na != 0 else vertcat(vecU, -vecV)
             elif flag == "ARARMAX":
-                phi = vertcat(-vecY, vecU, vecE, -vecV)
+                phi = (
+                    vertcat(-vecY, vecU, vecE, -vecV)
+                    if Na != 0
+                    else vertcat(vecU, vecE, -vecV)
+                )
             else:
                 phi = vertcat(-vecY, vecU, -vecW, vecE, -vecV)
 

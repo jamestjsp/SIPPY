@@ -15,6 +15,7 @@ GEN generalizes all other input-output methods:
 
 from unittest.mock import patch
 
+import control
 import numpy as np
 import pandas as pd
 import pytest
@@ -237,16 +238,15 @@ class TestGENAlgorithm:
             assert result is not None
             assert isinstance(result, StateSpaceModel)
 
-    def test_gen_without_harold(self):
-        """Test GEN algorithm graceful degradation without harold."""
-        algorithm = GENAlgorithm()
+    def test_gen_uses_control_models(self):
+        result = GENAlgorithm().identify(
+            y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
+        )
 
-        with patch("sippy.identification.algorithms.gen.HAROLD_AVAILABLE", False):
-            result = algorithm.identify(
-                y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
-            )
-            assert result is not None
-            assert isinstance(result, StateSpaceModel)
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert isinstance(result.H_tf, control.TransferFunction)
+        assert result.G_tf.dt == pytest.approx(self.data.sample_time)
 
     def test_gen_insufficient_data(self):
         """Test GEN algorithm with insufficient data."""
@@ -298,9 +298,10 @@ class TestGENAlgorithm:
             y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
         )
 
-        # Check that transfer functions are created (when harold available)
-        assert hasattr(result, "G_tf")
-        assert hasattr(result, "H_tf")
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert isinstance(result.H_tf, control.TransferFunction)
+        assert result.G_tf.dt == pytest.approx(1.0)
+        assert result.H_tf.dt == pytest.approx(1.0)
 
     def test_gen_yid_computation(self):
         """Test GEN computes one-step-ahead predictions (Yid)."""

@@ -2,8 +2,7 @@
 Test cases for ARX identification algorithm implementation.
 """
 
-from unittest.mock import patch
-
+import control
 import numpy as np
 import pandas as pd
 import pytest
@@ -49,39 +48,23 @@ class TestARXAlgorithm:
         assert algorithm is not None
         assert isinstance(algorithm, IdentificationAlgorithm)
 
-    @patch("sippy.identification.algorithms.arx.HAROLD_AVAILABLE", True)
     def test_arx_basic_identification(self):
         """Test basic ARX identification functionality."""
         algorithm = ARXAlgorithm()
 
-        # Test that algorithm can be called
-        with patch("sippy.identification.algorithms.arx.harold") as mock_harold:
-            # Mock the harold state space creation
-            mock_ss = mock_harold.StateSpace.return_value
-            mock_ss.A = np.eye(2)
-            mock_ss.B = np.zeros((2, 1))
-            mock_ss.C = np.zeros((1, 2))
-            mock_ss.D = np.zeros((1, 1))
+        result = algorithm.identify(
+            iddata=self.data,
+            na=self.config.na,
+            nb=self.config.nb,
+            nk=self.config.nk,
+        )
 
-            # Mock the undiscretize function
-            mock_undiscretize = mock_harold.undiscretize.return_value = mock_ss
-            mock_undiscretize.A = np.eye(2)
-            mock_undiscretize.B = np.zeros((2, 1))
-            mock_undiscretize.C = np.zeros((1, 2))
-            mock_undiscretize.D = np.zeros((1, 1))
-
-            result = algorithm.identify(
-                iddata=self.data,
-                na=self.config.na,
-                nb=self.config.nb,
-                nk=self.config.nk,
-            )
-
-            assert isinstance(result, StateSpaceModel)
-            assert result.A is not None
-            assert result.B is not None
-            assert result.C is not None
-            assert result.D is not None
+        assert isinstance(result, StateSpaceModel)
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert isinstance(result.H_tf, control.TransferFunction)
+        assert result.G.dt == pytest.approx(self.data.sample_time)
+        assert result.G_tf.dt == pytest.approx(self.data.sample_time)
 
     def test_arx_algorithm_name(self):
         """Test algorithm returns correct name."""
@@ -99,16 +82,10 @@ class TestARXAlgorithm:
             config.nb = nb
             config.nk = 1
 
-            with patch("sippy.identification.algorithms.arx.harold") as mock_harold:
-                mock_tf = mock_harold.TransferFunction.return_value
-                mock_tf.NumberOfInputs = 1
-                mock_tf.NumberOfOutputs = 1
-                mock_tf.SamplingPeriod = 1.0
-
-                result = algorithm.identify(
-                    iddata=self.data, na=config.na, nb=config.nb, nk=config.nk
-                )
-                assert result is not None
+            result = algorithm.identify(
+                iddata=self.data, na=config.na, nb=config.nb, nk=config.nk
+            )
+            assert isinstance(result.G_tf, control.TransferFunction)
 
     def test_arx_mimo_system(self):
         """Test ARX with MIMO system."""
@@ -133,32 +110,28 @@ class TestARXAlgorithm:
 
         algorithm = ARXAlgorithm()
 
-        with patch("sippy.identification.algorithms.arx.harold") as mock_harold:
-            mock_tf = mock_harold.TransferFunction.return_value
-            mock_tf.NumberOfInputs = 2
-            mock_tf.NumberOfOutputs = 2
-            mock_tf.SamplingPeriod = 1.0
+        result = algorithm.identify(
+            iddata=data, na=config.na, nb=config.nb, nk=config.nk
+        )
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert result.G.shape == (2, 2)
+        assert result.G_tf.shape == (2, 2)
 
-            result = algorithm.identify(
-                iddata=data, na=config.na, nb=config.nb, nk=config.nk
-            )
-            assert result is not None
+    def test_arx_transfer_function_preserves_delay_and_coefficients(self):
+        result = ARXAlgorithm().identify(
+            iddata=self.data,
+            na=self.config.na,
+            nb=self.config.nb,
+            nk=self.config.nk,
+        )
 
-    def test_arx_without_harold(self):
-        """Test ARX algorithm graceful degradation without harold."""
-        algorithm = ARXAlgorithm()
-
-        with patch("sippy.identification.algorithms.arx.HAROLD_AVAILABLE", False):
-            with pytest.warns(UserWarning, match="harold library not available"):
-                result = algorithm.identify(
-                    iddata=self.data,
-                    na=self.config.na,
-                    nb=self.config.nb,
-                    nk=self.config.nk,
-                )
-                # Should return a mock model when harold is not available
-                assert result is not None
-                assert isinstance(result, StateSpaceModel)
+        numerator = result.G_tf.num[0][0]
+        denominator = result.G_tf.den[0][0]
+        assert numerator.shape == (1,)
+        assert denominator.shape == (2,)
+        assert numerator[0] == pytest.approx(0.8, abs=0.03)
+        assert denominator[1] == pytest.approx(-0.5, abs=0.03)
 
     def test_arx_invalid_parameters(self):
         """Test ARX algorithm with invalid parameters."""
@@ -201,20 +174,14 @@ class TestARXAlgorithm:
             tsample=1.0,
         )
 
-        # This should work since our algorithm should handle MIMO
-        with patch("sippy.identification.algorithms.arx.harold") as mock_harold:
-            mock_tf = mock_harold.TransferFunction.return_value
-            mock_tf.NumberOfInputs = 2
-            mock_tf.NumberOfOutputs = 3
-            mock_tf.SamplingPeriod = 1.0
-
-            result = algorithm.identify(
-                iddata=invalid_data,
-                na=self.config.na,
-                nb=self.config.nb,
-                nk=self.config.nk,
-            )
-            assert result is not None
+        result = algorithm.identify(
+            iddata=invalid_data,
+            na=self.config.na,
+            nb=self.config.nb,
+            nk=self.config.nk,
+        )
+        assert result.G.shape == (3, 2)
+        assert result.G_tf.shape == (3, 2)
 
 
 class TestARXMasterExamples:

@@ -5,10 +5,16 @@ OE (Output Error) identification algorithm.
 import warnings
 from typing import TYPE_CHECKING, Optional
 
+import control
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
+from ..base import (
+    IdentificationAlgorithm,
+    StateSpaceModel,
+    identity_transfer_function,
+    realize_transfer_function,
+)
 from .ararx import _state_space_from_results, _state_space_from_single_result
 from .opt_support import (
     apply_platform_ipopt_options,
@@ -19,19 +25,6 @@ from .opt_support import (
 
 if TYPE_CHECKING:
     from ..iddata import IDData
-
-try:
-    import harold
-
-    # Check if harold has the required components
-    if hasattr(harold, "State") or hasattr(harold, "StateSpace"):
-        HAROLD_AVAILABLE = True
-    else:
-        HAROLD_AVAILABLE = False
-        warnings.warn("harold library incomplete. OE algorithm will be limited.")
-except ImportError:
-    HAROLD_AVAILABLE = False
-    warnings.warn("harold library not available. OE algorithm will be limited.")
 
 # Check for CasADi availability for NLP-based identification
 try:
@@ -368,16 +361,9 @@ class OEAlgorithm(IdentificationAlgorithm):
             B_coeffs, F_coeffs, nb, nf, nk, ny, nu, sample_time
         )
 
-        # Create state-space representation
-        if HAROLD_AVAILABLE:
-            model = self._create_state_space_from_oe(
-                B_coeffs, F_coeffs, nb, nf, nk, ny, nu, sample_time
-            )
-        else:
-            # Fallback when harold is not available
-            model = self._create_mock_model(
-                B_coeffs, F_coeffs, nb, nf, nk, ny, nu, sample_time
-            )
+        model = self._create_state_space_from_oe(
+            B_coeffs, F_coeffs, nb, nf, nk, ny, nu, sample_time
+        )
 
         # Attach transfer functions and predictions to model
         model.G_tf = G_tf
@@ -454,15 +440,9 @@ class OEAlgorithm(IdentificationAlgorithm):
             B_coeffs, F_coeffs, nb, nf, nk, ny, nu, sample_time
         )
 
-        # Create state-space representation
-        if HAROLD_AVAILABLE:
-            model = self._create_state_space_from_oe(
-                B_coeffs, F_coeffs, nb, nf, nk, ny, nu, sample_time
-            )
-        else:
-            model = self._create_mock_model(
-                B_coeffs, F_coeffs, nb, nf, nk, ny, nu, sample_time
-            )
+        model = self._create_state_space_from_oe(
+            B_coeffs, F_coeffs, nb, nf, nk, ny, nu, sample_time
+        )
 
         # Attach results
         model.G_tf = G_tf
@@ -721,38 +701,29 @@ class OEAlgorithm(IdentificationAlgorithm):
 
         Returns:
         --------
-        G_tf, H_tf : harold.Transfer objects or None
-            Transfer functions (None if harold not available)
+        G_tf, H_tf : control.TransferFunction
+            Deterministic and noise transfer functions.
         """
-        if not HAROLD_AVAILABLE:
-            return None, None
-
-        try:
-            import harold
-
-            # Create G(q) = B / F - Deterministic transfer function
+        if ny == 1 and nu == 1:
             polynomial_length = max(nf + 1, nb + nk)
+            numerator = np.zeros(polynomial_length)
+            numerator[nk : nk + nb] = B_coeffs[0, :]
+            denominator = np.zeros(polynomial_length)
+            denominator[0] = 1.0
+            denominator[1 : nf + 1] = F_coeffs[0, :]
+            G_tf = control.tf(numerator, denominator, dt=Ts)
+        else:
+            model = self._create_state_space_from_oe(
+                B_coeffs, F_coeffs, nb, nf, nk, ny, nu, Ts
+            )
+            G_tf = control.ss2tf(model.G)
 
-            NUM_G = np.zeros(polynomial_length)
-            NUM_G[nk : nk + nb] = B_coeffs[0, :] if ny == 1 else B_coeffs[0, :nb]
-
-            DEN_G = np.zeros(polynomial_length)
-            DEN_G[0] = 1.0
-            DEN_G[1 : nf + 1] = F_coeffs[0, :]
-
-            G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
-
-            # H(q) = 1 - OE has no noise model (H is unity)
-            H_tf = harold.Transfer([1.0], [1.0], dt=Ts)
-
-            return G_tf, H_tf
-        except Exception as e:
-            warnings.warn(f"Failed to create OE transfer functions with harold: {e}")
-            return None, None
+        H_tf = identity_transfer_function(ny, Ts)
+        return G_tf, H_tf
 
     def _create_state_space_from_oe(self, B_coeffs, F_coeffs, nb, nf, nk, ny, nu, Ts):
         """
-        Create state-space model from OE parameters using harold.
+        Create a state-space model from OE parameters.
 
         Parameters:
         -----------
@@ -840,94 +811,6 @@ class OEAlgorithm(IdentificationAlgorithm):
 
         # D matrix - direct feedthrough
         D = np.zeros((ny, nu))
-
-        # Use local matrices for test mocking compatibility
-        return StateSpaceModel(
-            A=A,
-            B=B,
-            C=C,
-            D=D,
-            K=np.zeros((A.shape[0], C.shape[0])),
-            Q=np.eye(A.shape[0]),
-            R=np.eye(C.shape[0]),
-            S=np.zeros((A.shape[0], C.shape[0])),
-            ts=Ts,
-            Vn=0.01,
-        )
-
-    def _create_mock_model(self, B_coeffs, F_coeffs, nb, nf, nk, ny, nu, Ts):
-        """
-        Create a mock state-space model when harold is not available.
-
-        Parameters:
-        -----------
-        B_coeffs, F_coeffs : ndarray
-            Numerator and denominator coefficient arrays
-        nb, nf, nk : int
-            Model orders and delay
-        ny, nu : int
-            Number of outputs and inputs
-        Ts : float
-            Sampling time
-
-        Returns:
-        --------
-        model : StateSpaceModel
-            Mock state-space model
-        """
-        n_states = nf
-
-        # State matrix (companion form of F polynomial)
-        A = np.zeros((n_states, n_states))
-        if nf > 1:
-            for i in range(nf - 1):
-                A[i, i + 1] = 1.0
-        if nf > 0:
-            if F_coeffs.shape[0] == 1:
-                # SISO case
-                A[-1, :] = -F_coeffs.T.flatten()
-            else:
-                # MIMO case - use average F coefficients for state matrix
-                avg_F = np.mean(F_coeffs, axis=0)
-                A[-1, :] = -avg_F
-
-        # Input matrix
-        B = np.zeros((n_states, nu))
-        if ny == 1:  # SISO case
-            # Handle case where B_coeffs might have more elements than B columns
-            coeffs_flat = B_coeffs.flatten()
-            if coeffs_flat.shape[0] >= n_states:
-                B[:, 0] = coeffs_flat[:n_states]
-            else:
-                B[: coeffs_flat.shape[0], 0] = coeffs_flat
-        else:  # MIMO case - average over outputs
-            for j in range(nu):
-                if B_coeffs.shape[1] >= j + 1:
-                    temp_coeffs = np.mean(B_coeffs[:, j::nu], axis=1)
-                    if temp_coeffs.shape[0] >= n_states:
-                        B[:, j] = temp_coeffs[:n_states]
-                    else:
-                        B[: temp_coeffs.shape[0], j] = temp_coeffs
-
-        # Output matrix
-        C = np.zeros((ny, n_states))
-        for i in range(ny):
-            if nf > 0:
-                C[i, :] = np.concatenate(([0.0] * (nf - 1), [1.0]))
-            else:
-                C[i, :] = np.array([])
-
-        # Feedthrough matrix
-        D = np.zeros((ny, nu))
-
-        # Validate matrix dimensions
-        if (
-            A.shape != (n_states, n_states)
-            or B.shape != (n_states, nu)
-            or C.shape != (ny, n_states)
-            or D.shape != (ny, nu)
-        ):
-            raise ValueError("Matrix dimension mismatch in state-space model creation")
 
         return StateSpaceModel(
             A=A,

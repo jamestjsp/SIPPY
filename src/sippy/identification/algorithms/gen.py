@@ -25,28 +25,21 @@ GEN generalizes all other input-output methods:
 import warnings
 from typing import TYPE_CHECKING, Optional
 
+import control
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
+from ..base import (
+    IdentificationAlgorithm,
+    StateSpaceModel,
+    identity_transfer_function,
+    realize_transfer_function,
+)
 from .ararx import _state_space_from_results
 from .opt_support import apply_platform_ipopt_options, gen_mimo_id, nk_to_theta
 
 if TYPE_CHECKING:
     from ..iddata import IDData
-
-# Import harold for transfer functions
-try:
-    import harold
-
-    if hasattr(harold, "State"):
-        HAROLD_AVAILABLE = True
-    else:
-        HAROLD_AVAILABLE = False
-        warnings.warn("harold library incomplete. GEN algorithm will be limited.")
-except ImportError:
-    HAROLD_AVAILABLE = False
-    warnings.warn("harold library not available. GEN algorithm will be limited.")
 
 # Check for CasADi availability for NLP-based identification
 try:
@@ -347,40 +340,22 @@ class GENAlgorithm(IdentificationAlgorithm):
             sample_time,
         )
 
-        # Create state-space representation
-        if HAROLD_AVAILABLE:
-            model = self._create_state_space_from_gen(
-                A_coeffs,
-                B_coeffs,
-                C_coeffs,
-                D_coeffs,
-                F_coeffs,
-                na,
-                nb,
-                nc,
-                nd,
-                nf,
-                nk,
-                ny,
-                nu,
-                sample_time,
-            )
-        else:
-            model = self._create_mock_model(
-                A_coeffs,
-                B_coeffs,
-                C_coeffs,
-                D_coeffs,
-                F_coeffs,
-                na,
-                nb,
-                nc,
-                nd,
-                nf,
-                ny,
-                nu,
-                sample_time,
-            )
+        model = self._create_state_space_from_gen(
+            A_coeffs,
+            B_coeffs,
+            C_coeffs,
+            D_coeffs,
+            F_coeffs,
+            na,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            ny,
+            nu,
+            sample_time,
+        )
 
         # Attach results
         model.G_tf = G_tf
@@ -838,40 +813,22 @@ class GENAlgorithm(IdentificationAlgorithm):
             sample_time,
         )
 
-        # Create state-space representation
-        if HAROLD_AVAILABLE:
-            model = self._create_state_space_from_gen(
-                A_coeffs,
-                B_coeffs,
-                C_coeffs,
-                D_coeffs,
-                F_coeffs,
-                na,
-                nb,
-                nc,
-                nd,
-                nf,
-                nk,
-                ny,
-                nu,
-                sample_time,
-            )
-        else:
-            model = self._create_mock_model(
-                A_coeffs,
-                B_coeffs,
-                C_coeffs,
-                D_coeffs,
-                F_coeffs,
-                na,
-                nb,
-                nc,
-                nd,
-                nf,
-                ny,
-                nu,
-                sample_time,
-            )
+        model = self._create_state_space_from_gen(
+            A_coeffs,
+            B_coeffs,
+            C_coeffs,
+            D_coeffs,
+            F_coeffs,
+            na,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            ny,
+            nu,
+            sample_time,
+        )
 
         # Attach transfer functions and predictions to model
         model.G_tf = G_tf
@@ -917,65 +874,49 @@ class GENAlgorithm(IdentificationAlgorithm):
 
         Returns:
         --------
-        G_tf, H_tf : harold.Transfer objects or None
-            Transfer functions (None if harold not available)
+        G_tf, H_tf : control.TransferFunction
+            Deterministic and noise transfer functions.
         """
-        if not HAROLD_AVAILABLE:
-            return None, None
-
-        try:
-            import harold
-
-            # G_tf = B(q) / [A(q) * F(q)]
+        if ny == 1 and nu == 1:
             polynomial_length_g = max(nb + nk, na + nf + 1)
+            numerator_g = np.zeros(polynomial_length_g)
+            numerator_g[nk : nk + nb] = B_coeffs[0, :nb]
+            a_poly = np.concatenate([[1.0], A_coeffs[0, :na]])
+            f_poly = np.concatenate([[1.0], F_coeffs[0, :nf]])
+            denominator_g = np.zeros(polynomial_length_g)
+            denominator_product = np.convolve(a_poly, f_poly)
+            denominator_g[: len(denominator_product)] = denominator_product
+            G_tf = control.tf(numerator_g, denominator_g, dt=Ts)
 
-            NUM_G = np.zeros(polynomial_length_g)
-            NUM_G[nk : nk + nb] = B_coeffs[0, :nb]
-
-            DEN_G = np.zeros(polynomial_length_g)
-            DEN_G[0] = 1.0
-
-            # Multiply A(q) and F(q) polynomials
-            if na > 0 and nf > 0:
-                A_poly = np.concatenate([[1.0], A_coeffs[0, :]])
-                F_poly = np.concatenate([[1.0], F_coeffs[0, :]])
-                AF_poly = harold.haroldpolymul(A_poly, F_poly)
-                DEN_G[: len(AF_poly)] = AF_poly
-            elif na > 0:
-                DEN_G[: na + 1] = np.concatenate([[1.0], A_coeffs[0, :]])
-            elif nf > 0:
-                DEN_G[: nf + 1] = np.concatenate([[1.0], F_coeffs[0, :]])
-
-            G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
-
-            # H_tf = C(q) / [A(q) * D(q)]
             max_order_h = max(nc, na + nd)
-
-            NUM_H = np.zeros(max_order_h + 1)
-            NUM_H[0] = 1.0
+            numerator_h = np.zeros(max_order_h + 1)
+            numerator_h[0] = 1.0
             if nc > 0:
-                NUM_H[1 : nc + 1] = C_coeffs[0, :]
-
-            DEN_H = np.zeros(max_order_h + 1)
-            DEN_H[0] = 1.0
-
-            # Multiply A(q) and D(q) polynomials
-            if na > 0 and nd > 0:
-                A_poly = np.concatenate([[1.0], A_coeffs[0, :]])
-                D_poly = np.concatenate([[1.0], D_coeffs[0, :]])
-                AD_poly = harold.haroldpolymul(A_poly, D_poly)
-                DEN_H[: len(AD_poly)] = AD_poly
-            elif na > 0:
-                DEN_H[: na + 1] = np.concatenate([[1.0], A_coeffs[0, :]])
-            elif nd > 0:
-                DEN_H[: nd + 1] = np.concatenate([[1.0], D_coeffs[0, :]])
-
-            H_tf = harold.Transfer(NUM_H, DEN_H, dt=Ts)
-
+                numerator_h[1 : nc + 1] = C_coeffs[0, :nc]
+            d_poly = np.concatenate([[1.0], D_coeffs[0, :nd]])
+            denominator_h = np.zeros(max_order_h + 1)
+            denominator_product = np.convolve(a_poly, d_poly)
+            denominator_h[: len(denominator_product)] = denominator_product
+            H_tf = control.tf(numerator_h, denominator_h, dt=Ts)
             return G_tf, H_tf
-        except Exception as e:
-            warnings.warn(f"Failed to create GEN transfer functions with harold: {e}")
-            return None, None
+
+        model = self._create_state_space_from_gen(
+            A_coeffs,
+            B_coeffs,
+            C_coeffs,
+            D_coeffs,
+            F_coeffs,
+            na,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            ny,
+            nu,
+            Ts,
+        )
+        return control.ss2tf(model.G), identity_transfer_function(ny, Ts)
 
     def _create_state_space_from_gen(
         self,
@@ -995,7 +936,7 @@ class GENAlgorithm(IdentificationAlgorithm):
         Ts,
     ):
         """
-        Create state-space model from GEN coefficients using harold.
+        Create a state-space model from GEN coefficients.
 
         Parameters:
         -----------
@@ -1079,75 +1020,6 @@ class GENAlgorithm(IdentificationAlgorithm):
 
         # Output from last state
         C[0, -1] = 1.0
-
-        return StateSpaceModel(
-            A=A,
-            B=B,
-            C=C,
-            D=D,
-            K=np.zeros((A.shape[0], C.shape[0])),
-            Q=np.eye(A.shape[0]),
-            R=np.eye(C.shape[0]),
-            S=np.zeros((A.shape[0], C.shape[0])),
-            ts=Ts,
-            Vn=0.01,
-        )
-
-    def _create_mock_model(
-        self,
-        A_coeffs,
-        B_coeffs,
-        C_coeffs,
-        D_coeffs,
-        F_coeffs,
-        na,
-        nb,
-        nc,
-        nd,
-        nf,
-        ny,
-        nu,
-        Ts,
-    ):
-        """
-        Create a mock state-space model when harold is not available.
-
-        Parameters:
-        -----------
-        A_coeffs, B_coeffs, C_coeffs, D_coeffs, F_coeffs : ndarray
-            Polynomial coefficients
-        na, nb, nc, nd, nf : int
-            Polynomial orders
-        ny, nu : int
-            Number of outputs and inputs
-        Ts : float
-            Sampling time
-
-        Returns:
-        --------
-        model : StateSpaceModel
-            Mock state-space model
-        """
-        # State dimension based on complexity
-        n_states = max(na, nb, nc, nd, nf) + max(nb, nc, nd, nf)
-
-        if n_states == 0:
-            n_states = 1
-
-        # State matrix A (companion-like form)
-        A = np.eye(n_states) * 0.9
-
-        # Input matrix B
-        B = np.zeros((n_states, nu))
-        if nb > 0:
-            B[0, 0] = 1.0
-
-        # Output matrix C
-        C = np.zeros((ny, n_states))
-        C[0, -1] = 1.0
-
-        # Feedthrough matrix D
-        D = np.zeros((ny, nu))
 
         return StateSpaceModel(
             A=A,

@@ -4,6 +4,7 @@ Test suite for ARARX (Auto-Regressive Auto-Regressive X) algorithm implementatio
 
 from unittest.mock import patch
 
+import control
 import numpy as np
 import pandas as pd
 import pytest
@@ -199,14 +200,12 @@ class TestARARXAlgorithm:
         assert result is not None
         assert isinstance(result, StateSpaceModel)
 
-    def test_ararx_without_harold(self):
-        """Test ARARX algorithm graceful degradation without harold."""
-        algorithm = ARARXAlgorithm()
+    def test_ararx_builds_control_models(self):
+        result = ARARXAlgorithm().identify(self.data, self.config)
 
-        with patch("sippy.identification.algorithms.ararx.HAROLD_AVAILABLE", False):
-            result = algorithm.identify(self.data, self.config)
-            assert result is not None
-            assert isinstance(result, StateSpaceModel)
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert isinstance(result.H_tf, control.TransferFunction)
 
     def test_ararx_insufficient_data(self):
         """Test ARARX algorithm with insufficient data."""
@@ -392,35 +391,17 @@ class TestARARXAlgorithm:
             result_1.A, result_2.A, rtol=1e-10
         )
 
-    def test_ararx_algorithm_with_mock_fallback(self):
-        """Test ARARX algorithm works with mock fallback when real implementation unavailable."""
+    def test_ararx_optimization_failure_is_not_hidden(self):
         algorithm = ARARXAlgorithm()
 
-        # Patch the algorithm to use mock implementation
-        with patch.object(algorithm, "_create_mock_model") as mock_method:
-            # Create a mock StateSpaceModel to return
-            from sippy.identification.base import StateSpaceModel
-
-            mock_state_space = StateSpaceModel(
-                A=np.eye(2),
-                B=np.zeros((2, 1)),
-                C=np.array([[1, 0]]),
-                D=np.zeros((1, 1)),
-                K=np.zeros((2, 1)),
-                Q=np.eye(2),
-                R=np.eye(1),
-                S=np.zeros((2, 1)),
-                ts=1.0,
-                Vn=0.01,
-            )
-            mock_method.return_value = mock_state_space
-            result = algorithm.identify(self.data, self.config)
-
-            assert result is not None
-            assert isinstance(result, StateSpaceModel)
-            assert hasattr(result, "A")
-            assert hasattr(result, "B")
-            assert mock_method.called
+        with (
+            patch(
+                "sippy.identification.algorithms.ararx.gen_miso_id",
+                side_effect=RuntimeError("solver failed"),
+            ),
+            pytest.raises(RuntimeError, match="ARARX NLP identification"),
+        ):
+            algorithm.identify(self.data, self.config)
 
     def test_ararx_with_zero_na(self):
         """Test ARARX works with na=0 (no output AR component)."""
@@ -442,30 +423,13 @@ class TestARARXAlgorithm:
         assert result_with_ar is not None
         assert isinstance(result_with_ar, StateSpaceModel)
 
-    def test_ararx_harold_integration(self):
-        """Test ARARX algorithm with harold integration when available."""
-        algorithm = ARARXAlgorithm()
+    def test_ararx_control_models_preserve_sample_time(self):
+        result = ARARXAlgorithm().identify(self.data, self.config)
 
-        with (
-            patch("sippy.identification.algorithms.ararx.HAROLD_AVAILABLE", True),
-            patch("sippy.identification.algorithms.ararx.harold") as mock_harold,
-        ):
-            # Mock harold.Transfer and harold.transfer_to_state
-            mock_ss = mock_harold.transfer_to_state.return_value
-
-            # Mock haroldpolymul to return a simple array
-            mock_harold.haroldpolymul.return_value = np.array([1.0, 0.5, 0.2])
-
-            # Mock state-space matrices (lowercase for harold.State)
-            mock_ss.a = np.eye(2)
-            mock_ss.b = np.eye(2, 1)
-            mock_ss.c = np.array([[1, 0]])
-            mock_ss.d = np.zeros((1, 1))
-
-            result = algorithm.identify(self.data, self.config)
-
-            assert result is not None
-            assert isinstance(result, StateSpaceModel)
+        assert result.ts == pytest.approx(1.0)
+        assert result.G.dt == pytest.approx(1.0)
+        assert result.G_tf.dt == pytest.approx(1.0)
+        assert result.H_tf.dt == pytest.approx(1.0)
 
     def test_ararx_simulation_and_prediction(self):
         """Test ARARX can simulate and predict outputs."""

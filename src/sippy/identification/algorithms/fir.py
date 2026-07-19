@@ -2,13 +2,13 @@
 FIR (Finite Impulse Response) identification algorithm.
 """
 
-import warnings
 from typing import TYPE_CHECKING, Optional
 
+import control
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel
+from ..base import IdentificationAlgorithm, StateSpaceModel, identity_transfer_function
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -22,19 +22,6 @@ try:
 except ImportError:
     create_regression_matrix_fir_compiled = None
     NUMBA_AVAILABLE = False
-
-try:
-    import harold
-
-    # Check if harold has the required components
-    if hasattr(harold, "State"):
-        HAROLD_AVAILABLE = True
-    else:
-        HAROLD_AVAILABLE = False
-        warnings.warn("harold library incomplete. FIR algorithm will be limited.")
-except ImportError:
-    HAROLD_AVAILABLE = False
-    warnings.warn("harold library not available. FIR algorithm will be limited.")
 
 
 class FIRAlgorithm(IdentificationAlgorithm):
@@ -205,14 +192,9 @@ class FIRAlgorithm(IdentificationAlgorithm):
             fir_coeffs, nb, nk, ny, nu, sample_time
         )
 
-        # Create state-space representation
-        if HAROLD_AVAILABLE:
-            model = self._create_state_space_from_fir(
-                fir_coeffs, nb, nk, ny, nu, sample_time
-            )
-        else:
-            # Fallback when harold is not available
-            model = self._create_mock_model(fir_coeffs, nb, nk, ny, nu, sample_time)
+        model = self._create_state_space_from_fir(
+            fir_coeffs, nb, nk, ny, nu, sample_time
+        )
 
         # Attach transfer functions and predictions to model
         model.G_tf = G_tf
@@ -297,36 +279,33 @@ class FIRAlgorithm(IdentificationAlgorithm):
 
         Returns:
         --------
-        G_tf, H_tf : harold.Transfer objects or None
-            Transfer functions (None if harold not available)
+        G_tf, H_tf : control.TransferFunction
+            Deterministic and noise transfer functions.
         """
-        if not HAROLD_AVAILABLE:
-            return None, None
+        polynomial_length = nb + nk
+        coefficient_blocks = fir_coeffs.reshape(ny, nb, nu)
+        numerators = []
+        denominators = []
+        for output in range(ny):
+            numerator_row = []
+            denominator_row = []
+            for input_ in range(nu):
+                numerator = np.zeros(polynomial_length)
+                numerator[nk : nk + nb] = coefficient_blocks[output, :, input_]
+                denominator = np.zeros(polynomial_length)
+                denominator[0] = 1.0
+                numerator_row.append(numerator)
+                denominator_row.append(denominator)
+            numerators.append(numerator_row)
+            denominators.append(denominator_row)
 
-        try:
-            import harold
-
-            # Create G(q) = B(q) - FIR transfer function with delay
-            # For FIR, numerator is the FIR coefficients, denominator is 1
-            NUM_G = np.zeros(nb + nk)
-            NUM_G[nk : nk + nb] = fir_coeffs[0, :nb] if ny == 1 else fir_coeffs[0, :nb]
-
-            DEN_G = np.zeros(nb + nk)
-            DEN_G[0] = 1.0
-
-            G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
-
-            # H(q) = 1 - FIR has no noise model (white noise only)
-            H_tf = harold.Transfer([1.0], [1.0], dt=Ts)
-
-            return G_tf, H_tf
-        except Exception as e:
-            warnings.warn(f"Failed to create FIR transfer functions with harold: {e}")
-            return None, None
+        G_tf = control.tf(numerators, denominators, dt=Ts)
+        H_tf = identity_transfer_function(ny, Ts)
+        return G_tf, H_tf
 
     def _create_state_space_from_fir(self, fir_coeffs, nb, nk, ny, nu, Ts):
         """
-        Create state-space model from FIR coefficients using harold.
+        Create a delay-chain state-space model from FIR coefficients.
 
         Parameters:
         -----------
@@ -366,68 +345,6 @@ class FIRAlgorithm(IdentificationAlgorithm):
                 destination = slice(lag * nu, (lag + 1) * nu)
                 source = slice((lag - 1) * nu, lag * nu)
                 A[destination, source] = np.eye(nu)
-
-        # Use local matrices for test mocking compatibility
-        return StateSpaceModel(
-            A=A,
-            B=B,
-            C=C,
-            D=D,
-            K=np.zeros((A.shape[0], C.shape[0])),
-            Q=np.eye(A.shape[0]),
-            R=np.eye(C.shape[0]),
-            S=np.zeros((A.shape[0], C.shape[0])),
-            ts=Ts,
-            Vn=0.01,
-        )
-
-    def _create_mock_model(self, fir_coeffs, nb, nk, ny, nu, Ts):
-        """
-        Create a mock state-space model when harold is not available.
-
-        Parameters:
-        -----------
-        fir_coeffs : ndarray
-            FIR coefficients array
-        nb, nk : int
-            Number of coefficients and input delay
-        ny, nu : int
-            Number of outputs and inputs
-        Ts : float
-            Sampling time
-
-        Returns:
-        --------
-        model : StateSpaceModel
-            Mock state-space model
-        """
-        # Create simple delay chain state-space representation
-        n_states = nb
-
-        # State matrix (shift register)
-        A = np.zeros((n_states, n_states))
-        if n_states > 1:
-            for i in range(n_states - 1):
-                A[i, i + 1] = 1
-
-        # Input matrix (input enters at the beginning)
-        B = np.zeros((n_states, nu))
-        B[0, :] = np.ones(nu)
-
-        # Output matrix (weighted sum of states + direct feedthrough)
-        C = np.zeros((ny, n_states))
-        D = np.zeros((ny, nu))
-
-        # Fill C and D from FIR coefficients
-        for i in range(ny):  # For each output
-            for j in range(nu):  # For each input
-                # Simple mapping - this is a simplified version
-                for k in range(nb):
-                    if k < fir_coeffs.shape[1]:
-                        if k == 0:
-                            D[i, j] = fir_coeffs[i, k * nu + j]
-                        else:
-                            C[i, k - 1] = fir_coeffs[i, k * nu + j]
 
         return StateSpaceModel(
             A=A,

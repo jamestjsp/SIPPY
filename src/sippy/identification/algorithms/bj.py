@@ -5,10 +5,16 @@ Box-Jenkins (BJ) identification algorithm.
 import warnings
 from typing import TYPE_CHECKING, Optional
 
+import control
 import numpy as np
 from numpy.linalg import lstsq
 
-from ..base import IdentificationAlgorithm, StateSpaceModel, realize_transfer_function
+from ..base import (
+    IdentificationAlgorithm,
+    StateSpaceModel,
+    identity_transfer_function,
+    realize_transfer_function,
+)
 from .ararx import _state_space_from_results, _state_space_from_single_result
 from .opt_support import (
     apply_platform_ipopt_options,
@@ -29,19 +35,6 @@ try:
 except ImportError:
     create_regression_matrix_bj_compiled = None
     NUMBA_AVAILABLE = False
-
-try:
-    import harold
-
-    # Check if harold has the required components
-    if hasattr(harold, "State"):
-        HAROLD_AVAILABLE = True
-    else:
-        HAROLD_AVAILABLE = False
-        warnings.warn("harold library incomplete. BJ algorithm will be limited.")
-except ImportError:
-    HAROLD_AVAILABLE = False
-    warnings.warn("harold library not available. BJ algorithm will be limited.")
 
 # Check for CasADi availability for NLP-based identification
 try:
@@ -362,34 +355,19 @@ class BJAlgorithm(IdentificationAlgorithm):
             sample_time,
         )
 
-        # Create state-space representation
-        if HAROLD_AVAILABLE:
-            model = self._create_state_space_from_bj(
-                B_coeffs,
-                noise_ar_coeffs,
-                noise_ma_coeffs,
-                nb,
-                nc,
-                nd,
-                nf,
-                nk,
-                ny,
-                nu,
-                sample_time,
-            )
-        else:
-            model = self._create_mock_model(
-                B_coeffs,
-                noise_ar_coeffs,
-                noise_ma_coeffs,
-                nb,
-                nc,
-                nd,
-                nf,
-                ny,
-                nu,
-                sample_time,
-            )
+        model = self._create_state_space_from_bj(
+            B_coeffs,
+            noise_ar_coeffs,
+            noise_ma_coeffs,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            ny,
+            nu,
+            sample_time,
+        )
 
         # Attach results
         model.G_tf = G_tf
@@ -802,35 +780,19 @@ class BJAlgorithm(IdentificationAlgorithm):
             sample_time,
         )
 
-        # Create state-space representation
-        if HAROLD_AVAILABLE:
-            model = self._create_state_space_from_bj(
-                input_coeffs,
-                noise_ar_coeffs,
-                noise_ma_coeffs,
-                nb,
-                nc,
-                nd,
-                nf,
-                nk,
-                ny,
-                nu,
-                sample_time,
-            )
-        else:
-            # Fallback when harold is not available
-            model = self._create_mock_model(
-                input_coeffs,
-                noise_ar_coeffs,
-                noise_ma_coeffs,
-                nb,
-                nc,
-                nd,
-                nf,
-                ny,
-                nu,
-                sample_time,
-            )
+        model = self._create_state_space_from_bj(
+            input_coeffs,
+            noise_ar_coeffs,
+            noise_ma_coeffs,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            ny,
+            nu,
+            sample_time,
+        )
 
         # Attach transfer functions and predictions to model
         model.G_tf = G_tf
@@ -871,49 +833,45 @@ class BJAlgorithm(IdentificationAlgorithm):
 
         Returns:
         --------
-        G_tf, H_tf : harold.Transfer objects or None
-            Transfer functions (None if harold not available)
+        G_tf, H_tf : control.TransferFunction
+            Deterministic and noise transfer functions.
         """
-        if not HAROLD_AVAILABLE:
-            return None, None
-
-        try:
-            import harold
-
+        if ny == 1 and nu == 1:
             polynomial_length_g = max(nb + nk, nf + 1)
-            NUM_G = np.zeros(polynomial_length_g)
-            NUM_G[nk : nk + nb] = (
-                input_coeffs[0, :nb] if ny == 1 else input_coeffs[0, :nb]
-            )
-
-            DEN_G = np.zeros(polynomial_length_g)
-            DEN_G[0] = 1.0
+            numerator_g = np.zeros(polynomial_length_g)
+            numerator_g[nk : nk + nb] = input_coeffs[0, :nb]
+            denominator_g = np.zeros(polynomial_length_g)
+            denominator_g[0] = 1.0
             if nf > 0:
-                DEN_G[1 : nf + 1] = noise_ma_coeffs[0, :nf]
+                denominator_g[1 : nf + 1] = noise_ma_coeffs[0, :nf]
+            G_tf = control.tf(numerator_g, denominator_g, dt=Ts)
 
-            G_tf = harold.Transfer(NUM_G, DEN_G, dt=Ts)
-
-            # H_tf = E(q)/F(q) - Noise transfer function
             max_order_h = max(nc, nd)
-
-            NUM_H = np.zeros(max_order_h + 1)
-            NUM_H[0] = 1.0
-            NUM_H[1 : nc + 1] = (
-                noise_ar_coeffs[0, :] if ny == 1 else noise_ar_coeffs[0, :]
-            )
-
-            DEN_H = np.zeros(max_order_h + 1)
-            DEN_H[0] = 1.0
+            numerator_h = np.zeros(max_order_h + 1)
+            numerator_h[0] = 1.0
+            numerator_h[1 : nc + 1] = noise_ar_coeffs[0, :nc]
+            denominator_h = np.zeros(max_order_h + 1)
+            denominator_h[0] = 1.0
             if nd > 0:
                 d_start = nf if noise_ma_coeffs.shape[1] >= nf + nd else 0
-                DEN_H[1 : nd + 1] = noise_ma_coeffs[0, d_start : d_start + nd]
-
-            H_tf = harold.Transfer(NUM_H, DEN_H, dt=Ts)
-
+                denominator_h[1 : nd + 1] = noise_ma_coeffs[0, d_start : d_start + nd]
+            H_tf = control.tf(numerator_h, denominator_h, dt=Ts)
             return G_tf, H_tf
-        except Exception as e:
-            warnings.warn(f"Failed to create BJ transfer functions with harold: {e}")
-            return None, None
+
+        model = self._create_state_space_from_bj(
+            input_coeffs,
+            noise_ar_coeffs,
+            noise_ma_coeffs,
+            nb,
+            nc,
+            nd,
+            nf,
+            nk,
+            ny,
+            nu,
+            Ts,
+        )
+        return control.ss2tf(model.G), identity_transfer_function(ny, Ts)
 
     def _create_state_space_from_bj(
         self,
@@ -930,7 +888,7 @@ class BJAlgorithm(IdentificationAlgorithm):
         Ts,
     ):
         """
-        Create state-space model from BJ coefficients using harold.
+        Create a state-space model from BJ coefficients.
 
         Parameters:
         -----------
@@ -1051,16 +1009,15 @@ class BJAlgorithm(IdentificationAlgorithm):
                     Vn=0.01,
                 )
 
-        # Fallback for MIMO - create simplified model
-        return self._create_mock_model(
+        return self._create_mimo_state_space(
             input_coeffs, noise_ar_coeffs, noise_ma_coeffs, nb, nc, nd, nf, ny, nu, Ts
         )
 
-    def _create_mock_model(
+    def _create_mimo_state_space(
         self, input_coeffs, noise_ar_coeffs, noise_ma_coeffs, nb, nc, nd, nf, ny, nu, Ts
     ):
         """
-        Create a mock state-space model when harold is not available.
+        Create the MIMO state-space realization for BJ coefficients.
 
         Parameters:
         -----------
@@ -1076,11 +1033,8 @@ class BJAlgorithm(IdentificationAlgorithm):
         Returns:
         --------
         model : StateSpaceModel
-            Mock state-space model
+            State-space model.
         """
-        # Create simplified state-space model for BJ
-        # Focus on input dynamics primarily, with simplified noise modeling
-
         # State dimension based on complexity
         n_states = nb * nu + max(nc, nd, nf)
 

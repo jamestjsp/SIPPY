@@ -2,8 +2,7 @@
 Test suite for Box-Jenkins (BJ) algorithm implementation.
 """
 
-from unittest.mock import patch
-
+import control
 import numpy as np
 import pandas as pd
 import pytest
@@ -225,21 +224,20 @@ class TestBJAlgorithm:
         assert result is not None
         assert isinstance(result, StateSpaceModel)
 
-    def test_bj_without_harold(self):
-        """Test BJ algorithm graceful degradation without harold."""
-        algorithm = BJAlgorithm()
+    def test_bj_uses_control_models(self):
+        result = BJAlgorithm().identify(
+            iddata=self.data,
+            nb=self.config.nb,
+            nc=self.config.nc,
+            nd=self.config.nd,
+            nf=self.config.nf,
+            nk=self.config.nk,
+        )
 
-        with patch("sippy.identification.algorithms.bj.HAROLD_AVAILABLE", False):
-            result = algorithm.identify(
-                iddata=self.data,
-                nb=self.config.nb,
-                nc=self.config.nc,
-                nd=self.config.nd,
-                nf=self.config.nf,
-                nk=self.config.nk,
-            )
-            assert result is not None
-            assert isinstance(result, StateSpaceModel)
+        assert isinstance(result.G, control.StateSpace)
+        assert isinstance(result.G_tf, control.TransferFunction)
+        assert isinstance(result.H_tf, control.TransferFunction)
+        assert result.G_tf.dt == pytest.approx(self.data.sample_time)
 
     def test_bj_insufficient_data(self):
         """Test BJ algorithm with insufficient data."""
@@ -413,7 +411,5 @@ class TestBJAlgorithm:
         assert A_state_dim >= config.nf
         assert result.H_tf is not None
 
-        import harold
-
-        noise_realization = harold.transfer_to_state(result.H_tf)
-        assert noise_realization.a.shape[0] >= config.nd
+        noise_realization = control.tf2ss(result.H_tf, method="slycot")
+        assert noise_realization.A.shape[0] >= config.nd
