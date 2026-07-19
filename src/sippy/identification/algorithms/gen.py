@@ -22,7 +22,6 @@ GEN generalizes all other input-output methods:
 - BJ = GEN(0, nb, nc, nd, nf, nk)
 """
 
-import warnings
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -67,10 +66,6 @@ class GENAlgorithm(IdentificationAlgorithm):
        - Optional stability constraints for A, D, and F polynomials
        - True maximum likelihood estimates
 
-    2. **Simplified Method** (Direct LS) - Fallback when CasADi unavailable:
-       - Single-pass least squares approximation
-       - Approximated noise terms with heuristics
-       - 50-200x faster but may produce suboptimal parameters
     """
 
     def __init__(self):
@@ -224,19 +219,10 @@ class GENAlgorithm(IdentificationAlgorithm):
                 )
                 return _state_space_from_results(results, u.shape[0], sample_time)
             except Exception as e:
-                warnings.warn(
-                    f"NLP identification failed: {e}. Falling back to simplified LS method."
-                )
-                return self._identify_ills(
-                    y, u, na, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered
-                )
+                raise RuntimeError("GEN prediction-error optimization failed") from e
         else:
-            # Fall back to simplified least squares
-            warnings.warn(
-                "CasADi not available. Using simplified LS method (may be less accurate than master branch)."
-            )
-            return self._identify_ills(
-                y, u, na, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered
+            raise RuntimeError(
+                "CasADi is required for GEN prediction-error identification"
             )
 
     def _identify_nlp(

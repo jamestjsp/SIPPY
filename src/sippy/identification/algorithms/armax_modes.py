@@ -674,11 +674,9 @@ class OPTHandler(ARMAXModeHandler):
                 or np.any(np.isnan(initial_guess))
                 or np.any(np.abs(initial_guess) > 2)
             ):
-                # Use small random values if initial guess is problematic
-                initial_guess = np.random.randn(n_params) * 0.01
+                initial_guess = np.zeros(n_params)
         except Exception:
-            # Use very small random values as fallback
-            initial_guess = np.random.randn(n_params) * 0.01
+            initial_guess = np.zeros(n_params)
 
         # Parameter bounds - more conservative to prevent overflow
         bounds = [(-5, 5)] * n_params  # Tighter bounds for numerical stability

@@ -2,7 +2,6 @@
 Box-Jenkins (BJ) identification algorithm.
 """
 
-import warnings
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -61,11 +60,6 @@ class BJAlgorithm(IdentificationAlgorithm):
        - Equality constraints: W - Ww = 0, V - Vw = 0, Yid - Yidw = 0
        - Optional stability constraints for F and D polynomials
        - Exact maximum likelihood estimates
-
-    2. **Simplified Method** (Direct LS) - Fallback when CasADi unavailable:
-       - Combined single least squares solve
-       - Approximated noise terms (hardcoded 0.1 scaling)
-       - 50-150x faster but may differ from reference results
 
     Model Structure:
     ----------------
@@ -253,19 +247,10 @@ class BJAlgorithm(IdentificationAlgorithm):
                 )
                 return _state_space_from_results(results, u.shape[0], sample_time)
             except Exception as e:
-                warnings.warn(
-                    f"NLP identification failed: {e}. Falling back to simplified LS method."
-                )
-                return self._identify_ills(
-                    y, u, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered
-                )
+                raise RuntimeError("BJ prediction-error optimization failed") from e
         else:
-            # Fall back to simplified least squares
-            warnings.warn(
-                "CasADi not available. Using simplified LS method (may be less accurate than master branch)."
-            )
-            return self._identify_ills(
-                y, u, nb, nc, nd, nf, nk, sample_time, **kwargs_filtered
+            raise RuntimeError(
+                "CasADi is required for BJ prediction-error identification"
             )
 
     def _identify_nlp(

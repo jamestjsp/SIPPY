@@ -189,10 +189,11 @@ class ParsimCoreAlgorithm:
                     Ob_K[l_:, :],
                 )
             except (np.linalg.LinAlgError, ValueError):
-                # Fallback to random initialization on linear algebra errors
-                A_K = np.random.randn(n, n) * 0.1
+                A_K = np.linalg.pinv(Ob_K[0 : l_ * (f - 1), :]) @ Ob_K[l_:, :]
         else:
-            A_K = np.random.randn(n, n) * 0.1
+            raise ValueError(
+                "PARSIM-K future horizon is too short for the identified order"
+            )
 
         C = Ob_K[0:l_, :]
 

@@ -9,7 +9,6 @@ import pandas as pd
 import pytest
 
 import sippy
-from sippy import systems as control
 from sippy.identification import SystemIdentification
 from sippy.identification.algorithms.ararmax import ARARMAXAlgorithm
 from sippy.identification.base import StateSpaceModel, SystemIdentificationConfig
@@ -375,30 +374,23 @@ class TestARARMAXAlgorithm:
         assert model.C is not None
         assert model.D is not None
 
-    def test_ararmax_builds_control_models(self):
+    def test_ararmax_requires_casadi(self):
         algorithm = ARARMAXAlgorithm()
         config = SystemIdentificationConfig(
             method="ARARMAX", na=[1, 1], nb=[1], nc=[1, 1], nd=[1], nf=[1], nk=[1]
         )
 
         with patch("sippy.identification.algorithms.ararmax.CASADI_AVAILABLE", False):
-            model = algorithm.identify(
-                iddata=self.iddata_siso,
-                na=config.na,
-                nb=config.nb,
-                nc=config.nc,
-                nd=config.nd,
-                nf=config.nf,
-                nk=config.nk,
-            )
-
-        assert isinstance(model, StateSpaceModel)
-        assert isinstance(model.G, control.StateSpace)
-        assert isinstance(model.G_tf, control.TransferFunction)
-        assert isinstance(model.H_tf, control.TransferFunction)
-        assert model.G.dt == pytest.approx(self.iddata_siso.sample_time)
-        assert model.G_tf.dt == pytest.approx(self.iddata_siso.sample_time)
-        assert model.H_tf.dt == pytest.approx(self.iddata_siso.sample_time)
+            with pytest.raises(RuntimeError, match="CasADi is required"):
+                algorithm.identify(
+                    iddata=self.iddata_siso,
+                    na=config.na,
+                    nb=config.nb,
+                    nc=config.nc,
+                    nd=config.nd,
+                    nf=config.nf,
+                    nk=config.nk,
+                )
 
     def test_ararmax_vs_arax_performance(self):
         """Test ARARMAX performs better than ARX on colored noise."""

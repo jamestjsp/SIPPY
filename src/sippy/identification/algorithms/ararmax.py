@@ -2,11 +2,9 @@
 ARARMAX (Auto-Regressive ARMAX) identification algorithm.
 """
 
-import warnings
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-from numpy.linalg import lstsq
 
 from sippy import systems as control
 
@@ -259,64 +257,11 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
                 )
                 return _state_space_from_results(results, nu, sample_time)
             except Exception as e:
-                warnings.warn(
-                    f"NLP identification failed: {e}. Falling back to simplified LS method."
-                )
-                # Fall through to existing implementation
+                raise RuntimeError("ARARMAX prediction-error optimization failed") from e
         else:
-            warnings.warn(
-                "CasADi not available. Using simplified LS method (may be less accurate than master branch)."
+            raise RuntimeError(
+                "CasADi is required for ARARMAX prediction-error identification"
             )
-            # Fall through to existing implementation
-
-        # EXISTING SIMPLIFIED IMPLEMENTATION (FALLBACK)
-        # Convert to format expected by regression builder (samples x channels)
-        u_values = u.T  # Transpose to (samples, inputs)
-        y_values = y.T  # Transpose to (samples, outputs)
-
-        # Build regression matrices for ARARMAX
-        # Combine ARX structure with ARMA noise modeling
-        phi, target = self._build_regression_matrices_ararmax(
-            u_values, y_values, na, nb, nc, nd, nf, nk
-        )
-
-        if phi.shape[0] < phi.shape[1]:
-            raise ValueError("Insufficient data for reliable parameter estimation")
-
-        # Solve least squares problem
-        theta, residuals, rank, s = lstsq(phi, target, rcond=None)
-
-        # Extract system matrices from estimated parameters
-        A, B, C, D, x0 = self._extract_state_space_matrices_ararmax(
-            theta, na, nb, nc, nd, nf, nk, sample_time, nu, ny
-        )
-
-        # Create G_tf and H_tf transfer functions
-        G_tf, H_tf = self._create_transfer_functions_ararmax(
-            theta, na, nb, nc, nd, nf, nk, sample_time
-        )
-
-        # Compute one-step-ahead predictions (Yid) for identification data
-        Yid = self._compute_yid_ararmax(
-            u_values, y_values, theta, na, nb, nc, nd, nf, nk
-        )
-
-        return StateSpaceModel(
-            A=A,
-            B=B,
-            C=C,
-            D=D,
-            K=None,
-            Q=None,
-            R=None,
-            S=None,
-            ts=sample_time,
-            Vn=None,
-            G_tf=G_tf,
-            H_tf=H_tf,
-            Yid=Yid,
-            identification_info={"fit_start": max_order},
-        )
 
     def _identify_nlp(self, u, y, na, nb, nc, nd, nf, nk, sample_time, **kwargs):
         """

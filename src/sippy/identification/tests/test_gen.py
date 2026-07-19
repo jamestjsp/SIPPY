@@ -435,13 +435,20 @@ class TestGENAlgorithm:
         assert result is not None
         assert isinstance(result, StateSpaceModel)
 
-    def test_gen_ills_fallback(self):
-        """Test GEN falls back to ILLS when CasADi unavailable."""
+    def test_gen_requires_casadi(self):
+        """Test GEN rejects an unavailable prediction-error backend."""
         algorithm = GENAlgorithm()
 
         with patch("sippy.identification.algorithms.gen.CASADI_AVAILABLE", False):
-            result = algorithm.identify(
-                y=None, u=None, iddata=self.data, na=1, nb=2, nc=1, nd=1, nf=1, nk=1
-            )
-            assert result is not None
-            assert isinstance(result, StateSpaceModel)
+            with pytest.raises(RuntimeError, match="CasADi is required"):
+                algorithm.identify(
+                    y=None,
+                    u=None,
+                    iddata=self.data,
+                    na=1,
+                    nb=2,
+                    nc=1,
+                    nd=1,
+                    nf=1,
+                    nk=1,
+                )

@@ -1009,6 +1009,11 @@ def create_regression_matrix_armax_compiled(u, y, na, nb, nc, nk, ny, nu, N):
     y_matrix : ndarray
         Flattened output matrix
     """
+    if nc > 0:
+        raise ValueError(
+            "ARMAX regression requires innovation estimates; use the ILLS builder"
+        )
+
     max_lag = max(na, nb + nk - 1, nc)
     N_eff = N - max_lag
 
@@ -1041,14 +1046,6 @@ def create_regression_matrix_armax_compiled(u, y, na, nb, nc, nk, ny, nu, N):
                 if delay_idx >= 0 and delay_idx + N_eff <= N:
                     Phi[:, col_idx] = u[i, delay_idx : delay_idx + N_eff]
                 col += 1
-
-    # Fill MA part
-    for i in range(nc):
-        for j in range(ny):
-            col_idx = na * ny + nb * ny * nu + i * ny + j
-            # Initialize with small random values (would need proper estimation)
-            Phi[:, col_idx] = np.random.randn(N_eff) * 0.01
-        col += 1
 
     # Output matrix - ensure proper flattenng for MIMO
     y_matrix = y[:, max_lag:N]
@@ -1337,38 +1334,16 @@ def matrix_operations_a_compiled(X_fd, O_i, n, B_recalc, u, f, N):
     A, B : ndarray
         State transition and input matrices
     """
-    Ob = np.linalg.pinv(O_i)
+    X_next = X_fd[:, 1:N]
+    X_curr = X_fd[:, 0 : N - 1]
+    if B_recalc and u.shape[0] > 0:
+        U_slice = u[:, f : f + N - 1]
+        regressor = np.vstack((X_curr, U_slice))
+        coefficients = X_next @ np.linalg.pinv(regressor)
+        return coefficients[:, :n], coefficients[:, n:]
 
-    # Extract states
-    X_hat = np.dot(Ob, O_i)
-
-    if B_recalc and u.shape[0] > 0 and f < N:
-        # Try to compute B matrix
-        if np.abs(np.linalg.det(u[:, f : f + N - 1])) > 1e-10:
-            U_slice = u[:, f : f + N - 1]
-            X_next = X_fd[:, 1:N]
-            X_curr = X_fd[:, 0 : N - 1]
-
-            # Simple B estimation
-            A_temp = np.random.randn(n, n) * 0.1  # Temporary A for B calculation
-            B_est = np.dot(X_next - np.dot(X_curr, A_temp), np.linalg.pinv(U_slice))
-
-            # Simple A estimation
-            A = np.dot(X_next, np.linalg.pinv(np.hstack([X_curr, U_slice])))[:, :n]
-        else:
-            A = np.random.randn(n, n) * 0.1
-            B_est = np.random.randn(n, u.shape[0]) * 0.1
-    else:
-        A = (
-            np.dot(X_next, np.linalg.pinv(X_curr))
-            if "X_next" in locals()
-            else np.random.randn(n, n) * 0.1
-        )
-        B_est = (
-            np.random.randn(n, u.shape[0]) * 0.1 if n > 0 else np.zeros((0, u.shape[0]))
-        )
-
-    return A, B_est
+    A = X_next @ np.linalg.pinv(X_curr)
+    return A, np.zeros((n, u.shape[0]))
 
 
 @jit

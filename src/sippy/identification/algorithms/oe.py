@@ -2,7 +2,6 @@
 OE (Output Error) identification algorithm.
 """
 
-import warnings
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -50,11 +49,6 @@ class OEAlgorithm(IdentificationAlgorithm):
        - Equality constraint: symbolic Yid - optimization Yid = 0
        - Optional stability constraints via companion matrix norms
        - Exact maximum likelihood estimates
-
-    2. **Simplified Method** (Direct LS) - Fallback when CasADi unavailable:
-       - Uses actual outputs in single-pass least squares
-       - 30-100x faster but may be less accurate for noise-heavy data
-       - Approximation of true OE solution
 
     Model Structure:
     ----------------
@@ -242,18 +236,11 @@ class OEAlgorithm(IdentificationAlgorithm):
                 )
                 return _state_space_from_results(results, u.shape[0], sample_time)
             except Exception as e:
-                warnings.warn(
-                    f"NLP identification failed: {e}. Falling back to simplified LS method."
-                )
-                return self._identify_ills(
-                    y, u, nb, nf, nk, sample_time, **kwargs_filtered
-                )
+                raise RuntimeError("OE prediction-error optimization failed") from e
         else:
-            # Fall back to simplified iterative least squares
-            warnings.warn(
-                "CasADi not available. Using simplified LS method (may be less accurate than master branch)."
+            raise RuntimeError(
+                "CasADi is required for OE prediction-error identification"
             )
-            return self._identify_ills(y, u, nb, nf, nk, sample_time, **kwargs_filtered)
 
     def _identify_ills(
         self, y, u, nb, nf, nk, sample_time, **kwargs
