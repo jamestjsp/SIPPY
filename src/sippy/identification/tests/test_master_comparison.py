@@ -809,9 +809,9 @@ class TestConditionalMethodsComparison:
         _, output_master = simulate_ss_system(
             A_master, B_master, C_master, D_master, validation_input
         )
-        response_error = np.linalg.norm(output_control - output_master) / np.linalg.norm(
-            output_master
-        )
+        response_error = np.linalg.norm(
+            output_control - output_master
+        ) / np.linalg.norm(output_master)
 
         assert response_error < 1e-5
 
@@ -865,9 +865,9 @@ class TestConditionalMethodsComparison:
         _, output_master = simulate_ss_system(
             A_master, B_master, C_master, D_master, validation_input
         )
-        response_error = np.linalg.norm(output_control - output_master) / np.linalg.norm(
-            output_master
-        )
+        response_error = np.linalg.norm(
+            output_control - output_master
+        ) / np.linalg.norm(output_master)
 
         assert response_error < 1e-5
 
