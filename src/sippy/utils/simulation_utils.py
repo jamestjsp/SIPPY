@@ -475,7 +475,7 @@ def K_calc(A, C, Q, R, S):
         K = np.linalg.solve(innovation_covariance.T, numerator.T).T
         Calculated = True
     except (ValueError, np.linalg.LinAlgError, IndexError):
-        K = []
+        K = np.zeros((A.shape[0], C.shape[0]))
         warnings.warn("Kalman filter cannot be calculated")
         Calculated = False
     return K, Calculated

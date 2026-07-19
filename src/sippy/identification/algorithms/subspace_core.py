@@ -5,7 +5,6 @@ Core subspace identification algorithms implementation.
 import warnings
 
 import numpy as np
-import scipy as sc
 from numpy.linalg import pinv
 
 from ...utils.signal_utils import information_criterion, rescale
@@ -112,15 +111,31 @@ class SubspaceCoreAlgorithm:
 
         elif weights == "CVA":
             YfdotPIort_Uf_YfdotPIort_Uf_T = np.dot(YfdotPIort_Uf, YfdotPIort_Uf.T)
-            if YfdotPIort_Uf_YfdotPIort_Uf_T.shape[0] == 0:
+            covariance = 0.5 * (
+                YfdotPIort_Uf_YfdotPIort_Uf_T
+                + YfdotPIort_Uf_YfdotPIort_Uf_T.T
+            )
+            eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+            largest_eigenvalue = max(float(eigenvalues[-1]), 0.0)
+            tolerance = (
+                max(covariance.shape)
+                * np.finfo(np.float64).eps
+                * largest_eigenvalue
+            )
+            retained = eigenvalues > tolerance
+            if not np.any(retained):
                 warnings.warn("CVA weighting failed, falling back to N4SID")
                 W1 = None
                 U_n, S_n, V_n = np.linalg.svd(O_i, full_matrices=False)
             else:
-                sqrt_term = sc.linalg.sqrtm(YfdotPIort_Uf_YfdotPIort_Uf_T)
-                sqrt_term_real = sqrt_term.real
-                W1 = sqrt_term_real
-                W1dotOi = np.linalg.solve(sqrt_term_real, O_i)
+                retained_vectors = eigenvectors[:, retained]
+                retained_eigenvalues = eigenvalues[retained]
+                square_roots = np.sqrt(retained_eigenvalues)
+                W1 = (retained_vectors * square_roots) @ retained_vectors.T
+                inverse_square_root = (
+                    retained_vectors * (1.0 / square_roots)
+                ) @ retained_vectors.T
+                W1dotOi = inverse_square_root @ O_i
                 if NUMBA_AVAILABLE and Z_dot_PIort_compiled is not None:
                     try:
                         W1_dot_Oi_dot_PIort_Uf = Z_dot_PIort_compiled(W1dotOi, Uf)

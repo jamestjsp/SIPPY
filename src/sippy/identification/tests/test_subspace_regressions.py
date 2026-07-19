@@ -87,6 +87,31 @@ def test_subspace_identification_returns_nonzero_kalman_gain(method):
     assert np.linalg.norm(model.K) > 1e-3
 
 
+def test_cva_handles_rank_deficient_output_covariance():
+    rng = np.random.default_rng(81)
+    sample_count = 300
+    u = rng.normal(size=(1, sample_count))
+    y_base = np.zeros(sample_count)
+    for sample in range(1, sample_count):
+        y_base[sample] = 0.65 * y_base[sample - 1] + 0.4 * u[0, sample - 1]
+    y = np.vstack((y_base, y_base))
+
+    model = create_algorithm("CVA").identify(
+        y=y,
+        u=u,
+        ss_f=10,
+        ss_fixed_order=1,
+    )
+
+    assert np.all(np.isfinite(model.A))
+    assert np.all(np.isfinite(model.B))
+    assert np.all(np.isfinite(model.C))
+    assert np.all(np.isfinite(model.D))
+    assert model.K.shape == (1, 2)
+    assert np.all(np.isfinite(model.K))
+    np.testing.assert_allclose(model.C[0], model.C[1], rtol=1e-10, atol=1e-10)
+
+
 @pytest.mark.parametrize("method", ["PARSIM-K", "PARSIM-S", "PARSIM-P"])
 def test_parsim_handles_a_constant_input_channel(method):
     rng = np.random.default_rng(7)
