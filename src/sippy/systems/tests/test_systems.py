@@ -199,6 +199,37 @@ def test_state_frequency_response_does_not_mutate_caller_arrays():
         np.testing.assert_array_equal(matrix, original)
 
 
+@pytest.mark.parametrize(
+    ("state_count", "frequency_count", "sample_time"),
+    [(4, 1, None), (4, 8, 0.1), (4, 32, 0.1), (24, 8, None), (24, 128, 0.1)],
+)
+def test_state_frequency_response_optimized_paths_match_dense_solve(
+    state_count, frequency_count, sample_time
+):
+    rng = np.random.default_rng(state_count * 1000 + frequency_count)
+    A = rng.normal(scale=0.02, size=(state_count, state_count))
+    A += np.diag(np.linspace(0.2, 0.85, state_count))
+    A *= 0.9 / np.max(np.abs(np.linalg.eigvals(A)))
+    B = rng.normal(scale=0.1, size=(state_count, 2))
+    C = rng.normal(scale=0.1, size=(2, state_count))
+    D = rng.normal(scale=0.01, size=(2, 2))
+    system = ss(A, B, C, D, dt=sample_time)
+    frequencies = np.geomspace(0.01, 20.0, frequency_count)
+
+    response = frequency_response(system, frequencies).frdata
+    evaluation_points = (
+        1j * frequencies
+        if sample_time is None
+        else np.exp(1j * frequencies * sample_time)
+    )
+    expected = np.empty_like(response)
+    identity = np.eye(state_count)
+    for index, point in enumerate(evaluation_points):
+        expected[:, :, index] = C @ np.linalg.solve(point * identity - A, B) + D
+
+    np.testing.assert_allclose(response, expected, rtol=2e-11, atol=2e-12)
+
+
 def test_ctrlsys_info_code_becomes_python_exception(monkeypatch):
     import sippy.systems._backend as backend
 
@@ -217,6 +248,13 @@ def test_ctrlsys_info_code_becomes_python_exception(monkeypatch):
 
     with pytest.raises(CtrlSysError, match=r"tc04ad failed with info=2"):
         tf2ss(tf([1.0], [1.0, -0.5], dt=1.0))
+
+
+def test_batched_frequency_response_preserves_ctrlsys_singularity_error():
+    system = ss([[1.0]], [[1.0]], [[1.0]], [[0.0]], dt=1.0)
+
+    with pytest.raises(CtrlSysError, match=r"tb05ad failed with info=2"):
+        frequency_response(system, np.zeros(16))
 
 
 def test_forced_response_uses_discrete_state_equations():

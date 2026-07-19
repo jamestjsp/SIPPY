@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 import ctrlsys
 import numpy as np
+from scipy import linalg
 
 if TYPE_CHECKING:
     from ._models import StateSpace, TransferFunction
@@ -220,25 +221,102 @@ def state_to_transfer(
 
 def state_frequency_response(system: "StateSpace", omega: np.ndarray) -> np.ndarray:
     response = np.empty((system.noutputs, system.ninputs, omega.size), dtype=complex)
-    for index, frequency in enumerate(omega):
-        if system.dt is None or system.dt == 0:
-            evaluation_point = 1j * frequency
-        else:
-            sample_time = 1.0 if system.dt is True else float(system.dt)
-            evaluation_point = np.exp(1j * frequency * sample_time)
-        if system.nstates == 0:
-            response[:, :, index] = system.D
-            continue
-        dynamic, _, _, _, _, info = ctrlsys.tb05ad(
-            "N",
-            "G",
+    if omega.size == 0:
+        return response
+    if system.nstates == 0:
+        response[:] = system.D[:, :, None]
+        return response
+
+    if system.dt is None or system.dt == 0:
+        evaluation_points = 1j * omega
+    else:
+        sample_time = 1.0 if system.dt is True else float(system.dt)
+        evaluation_points = np.exp(1j * omega * sample_time)
+
+    if system.nstates <= 12 and omega.size >= 16:
+        return _batched_state_frequency_response(system, evaluation_points)
+
+    is_upper_hessenberg = not np.any(np.tril(system.A, -2))
+    if is_upper_hessenberg:
+        A = _fortran_copy(system.A)
+        B = _fortran_copy(system.B)
+        C = _fortran_copy(system.C)
+        inita = "H"
+    elif omega.size == 1 and system.nstates < 64:
+        A = system.A
+        B = system.B
+        C = system.C
+        inita = "G"
+    elif system.nstates <= 12 or (
+        system.nstates <= 64 and omega.size >= 4 * system.nstates
+    ):
+        A, B, C, _, _, _, info = ctrlsys.tb01wd(
+            system.nstates,
+            system.ninputs,
+            system.noutputs,
             _fortran_copy(system.A),
             _fortran_copy(system.B),
             _fortran_copy(system.C),
-            evaluation_point,
+        )
+        _check_info("tb01wd", info)
+        inita = "H"
+    else:
+        A, transformation = linalg.hessenberg(system.A, calc_q=True, check_finite=False)
+        B = transformation.T @ system.B
+        C = system.C @ transformation
+        A = _fortran_copy(A)
+        B = _fortran_copy(B)
+        C = _fortran_copy(C)
+        inita = "H"
+
+    for index, evaluation_point in enumerate(evaluation_points):
+        if inita == "G":
+            call_A = _fortran_copy(A)
+            call_B = _fortran_copy(B)
+            call_C = _fortran_copy(C)
+        else:
+            call_A, call_B, call_C = A, B, C
+        dynamic, _, _, _, _, info = ctrlsys.tb05ad(
+            "N", inita, call_A, call_B, call_C, evaluation_point
         )
         _check_info("tb05ad", info)
         response[:, :, index] = dynamic + system.D
+    return response
+
+
+def _batched_state_frequency_response(
+    system: "StateSpace", evaluation_points: np.ndarray
+) -> np.ndarray:
+    response = np.empty(
+        (system.noutputs, system.ninputs, evaluation_points.size), dtype=complex
+    )
+    bytes_per_pencil = 16 * system.nstates * system.nstates
+    batch_size = max(1, (64 * 1024 * 1024) // bytes_per_pencil)
+    identity = np.eye(system.nstates, dtype=complex)
+    for start in range(0, evaluation_points.size, batch_size):
+        stop = min(start + batch_size, evaluation_points.size)
+        points = evaluation_points[start:stop]
+        pencils = points[:, None, None] * identity[None, :, :] - system.A[None, :, :]
+        inputs = np.broadcast_to(system.B, (points.size, *system.B.shape))
+        try:
+            solutions = np.linalg.solve(pencils, inputs)
+        except np.linalg.LinAlgError:
+            for index, evaluation_point in enumerate(evaluation_points):
+                dynamic, _, _, _, _, info = ctrlsys.tb05ad(
+                    "N",
+                    "G",
+                    _fortran_copy(system.A),
+                    _fortran_copy(system.B),
+                    _fortran_copy(system.C),
+                    evaluation_point,
+                )
+                _check_info("tb05ad", info)
+                response[:, :, index] = dynamic + system.D
+            return response
+        response[:, :, start:stop] = np.einsum(
+            "on,knm->omk", system.C, solutions, optimize=True
+        )
+    response += system.D[:, :, None]
     return response
 
 
