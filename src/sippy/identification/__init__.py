@@ -15,12 +15,14 @@ from ..utils import (
 from .__main__ import SystemIdentification, system_identification
 from .base import SystemIdentificationConfig
 from .iddata import IDData
+from .uncertainty import FrequencyResponseUncertainty
 
 __all__ = [
     "SystemIdentification",
     "system_identification",
     "SystemIdentificationConfig",
     "IDData",
+    "FrequencyResponseUncertainty",
     "GBN_seq",
     "white_noise_var",
     "get_fir_coef",

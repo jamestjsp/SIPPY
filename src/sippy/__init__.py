@@ -5,6 +5,7 @@ New modular architecture with object-oriented identification algorithms.
 """
 
 from .identification import (
+    FrequencyResponseUncertainty,
     GBN_seq,
     SystemIdentification,
     SystemIdentificationConfig,
@@ -18,6 +19,7 @@ from .identification import (
 
 __all__ = [
     "SystemIdentification",
+    "FrequencyResponseUncertainty",
     "system_identification",
     "SystemIdentificationConfig",
     "GBN_seq",

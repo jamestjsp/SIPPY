@@ -537,10 +537,37 @@ def compute_csd_matrices(
     S_yy : ndarray, shape (F, l)
         Output auto-spectra
     """
+    freqs, S_uu_segments, S_uy_segments, S_yy_segments = compute_csd_segment_matrices(
+        u,
+        y,
+        dt=dt,
+        nperseg=nperseg,
+        window=window,
+        noverlap=noverlap,
+    )
+    return (
+        freqs,
+        np.mean(S_uu_segments, axis=0),
+        np.mean(S_uy_segments, axis=0),
+        np.mean(S_yy_segments, axis=0),
+    )
+
+
+def compute_csd_segment_matrices(
+    u: np.ndarray,
+    y: np.ndarray,
+    dt: float = 1.0,
+    nperseg: int = 1024,
+    window: str = "hann",
+    noverlap: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return the individual Welch-segment spectra before averaging."""
     u = np.atleast_2d(np.asarray(u, dtype=float))
     y = np.atleast_2d(np.asarray(y, dtype=float))
     if u.shape[1] != y.shape[1]:
         raise ValueError("Input and output must share the same number of samples")
+    if not np.all(np.isfinite(u)) or not np.all(np.isfinite(y)):
+        raise ValueError("Input and output must contain only finite values")
     if not np.isfinite(dt) or dt <= 0:
         raise ValueError(f"Sampling interval must be positive and finite, got {dt}")
 
@@ -558,8 +585,8 @@ def compute_csd_matrices(
     if noverlap is None:
         noverlap = nperseg // 2
     noverlap = int(noverlap)
-    if noverlap >= nperseg:
-        raise ValueError("noverlap must be less than nperseg")
+    if noverlap < 0 or noverlap >= nperseg:
+        raise ValueError("noverlap must be non-negative and less than nperseg")
 
     taper = scipy_signal.get_window(window, nperseg)
     step = nperseg - noverlap
@@ -573,20 +600,18 @@ def compute_csd_matrices(
 
     U = segment_ffts(u)
     Y = segment_ffts(y)
-    n_segments = U.shape[1]
-
-    S_uu = np.einsum("msf,nsf->fmn", np.conj(U), U, optimize=True) / n_segments
-    S_uy = np.einsum("msf,lsf->fml", np.conj(U), Y, optimize=True) / n_segments
-    S_yy = np.mean(np.abs(Y) ** 2, axis=1).T
+    S_uu = np.einsum("msf,nsf->sfmn", np.conj(U), U, optimize=True)
+    S_uy = np.einsum("msf,lsf->sfml", np.conj(U), Y, optimize=True)
+    S_yy = np.transpose(np.abs(Y) ** 2, (1, 2, 0))
 
     fs = 1.0 / dt
     spectral_scale = np.full(U.shape[-1], 2.0 / (fs * np.sum(taper**2)))
     spectral_scale[0] *= 0.5
     if nperseg % 2 == 0:
         spectral_scale[-1] *= 0.5
-    S_uu *= spectral_scale[:, None, None]
-    S_uy *= spectral_scale[:, None, None]
-    S_yy *= spectral_scale[:, None]
+    S_uu *= spectral_scale[None, :, None, None]
+    S_uy *= spectral_scale[None, :, None, None]
+    S_yy *= spectral_scale[None, :, None]
     freqs = rfftfreq(nperseg, dt)
 
     return freqs, S_uu, S_uy, S_yy
@@ -629,6 +654,25 @@ def smooth_csd_along_frequency(S: np.ndarray, smoothing_bins: int) -> np.ndarray
             np.imag(S), window, axis=0, mode="constant"
         )
     return smoothed / coverage
+
+
+def solve_frf_from_spectra(
+    S_uu: np.ndarray, S_uy: np.ndarray, S_yy: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Solve the MIMO H1 response, coherence, residual spectrum, and SNR."""
+    _, n_inputs, _ = S_uu.shape
+    scale = np.mean(np.real(np.trace(S_uu, axis1=1, axis2=2))) / max(n_inputs, 1)
+    regularization = (1e-12 * scale if scale > 0 else 1e-30) * np.eye(n_inputs)
+    projected = np.linalg.solve(S_uu + regularization, S_uy)
+    response = np.transpose(projected, (0, 2, 1))
+
+    explained = np.real(np.einsum("fml,fml->fl", np.conj(S_uy), projected))
+    residual = np.maximum(np.real(S_yy) - explained, 0.0)
+    spectrum_scale = max(float(np.max(np.real(S_yy))), 1e-300)
+    epsilon = 1e-12 * spectrum_scale
+    coherence = np.clip(explained / (np.real(S_yy) + epsilon), 0.0, 1.0)
+    snr = np.maximum(explained, 0.0) / (residual + epsilon)
+    return response, coherence, residual, snr
 
 
 def estimate_frf_mimo(
@@ -680,6 +724,7 @@ def estimate_frf_mimo(
         omega : ndarray (F,) normalized frequency (rad/sample)
         G : ndarray (F, l, m) complex frequency response matrix
         coherence : ndarray (F, l) multiple coherence per output
+        residual_spectrum, signal_to_noise_ratio : ndarray (F, l)
         S_uu, S_uy, S_yy : the underlying (smoothed) CSD estimates
     """
     freqs, S_uu, S_uy, S_yy = compute_csd_matrices(
@@ -689,20 +734,7 @@ def estimate_frf_mimo(
         S_uu = smooth_csd_along_frequency(S_uu, smoothing_bins)
         S_uy = smooth_csd_along_frequency(S_uy, smoothing_bins)
         S_yy = smooth_csd_along_frequency(S_yy, smoothing_bins)
-    F, m, _ = S_uu.shape
-
-    # Tikhonov-style diagonal loading keeps the solve well-posed at
-    # frequencies where the input has (numerically) no power.
-    scale = np.mean(np.real(np.trace(S_uu, axis1=1, axis2=2))) / max(m, 1)
-    reg = (1e-12 * scale if scale > 0 else 1e-30) * np.eye(m)
-
-    # G^T = S_uu^{-1} S_uy, batched over the frequency axis
-    Z = np.linalg.solve(S_uu + reg, S_uy)
-    G = np.transpose(Z, (0, 2, 1))
-
-    numerator = np.real(np.einsum("fml,fml->fl", np.conj(S_uy), Z))
-    epsilon = 1e-12 * np.max(S_yy) if np.max(S_yy) > 0 else 1e-30
-    coherence = np.clip(numerator / (S_yy + epsilon), 0.0, 1.0)
+    G, coherence, residual_spectrum, snr = solve_frf_from_spectra(S_uu, S_uy, S_yy)
 
     omega = 2 * np.pi * freqs * dt
 
@@ -711,6 +743,8 @@ def estimate_frf_mimo(
         "omega": omega,
         "G": G,
         "coherence": coherence,
+        "residual_spectrum": residual_spectrum,
+        "signal_to_noise_ratio": snr,
         "S_uu": S_uu,
         "S_uy": S_uy,
         "S_yy": S_yy,

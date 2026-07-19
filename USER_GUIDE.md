@@ -240,13 +240,18 @@ fir_coeffs = model.get_fir_coefficients(
     tss=60.0
 )
 
-# Model uncertainty analysis
-freqs, magnitude, ci95, ci68, snr = model.get_model_uncertainty(
+# Frequency response and empirical uncertainty analysis
+response = model.frequency_response()
+uncertainty = model.get_model_uncertainty(
     input_data=u_test,
     output_data=y_test,
-    input_name='input_1',
-    output_name='output'
+    nperseg=256,
 )
+lower95, upper95 = uncertainty.magnitude_confidence_interval(0.95)
+uncertainty.model_response             # shape (frequency, output, input)
+uncertainty.empirical_response         # Welch/H1 validation estimate
+uncertainty.coherence                  # shape (frequency, output)
+uncertainty.signal_to_noise_ratio
 ```
 
 ---
@@ -286,9 +291,11 @@ Two estimators are available:
   per-output *multiple coherence* is reported.
 
 The default `fd_method='auto'` picks `correlation` for SISO and `welch`
-otherwise. The result is returned in `model.identification_info` (the
-state-space matrices are 1×1 placeholders since the method is
-non-parametric):
+otherwise. The result has the same analysis-method surface as every other
+identification result, but it does not pretend to have a parametric
+state-space realization. Use `model.frequency_response()` for the identified
+FRF; simulation, stability, and time-response methods require fitting a
+parametric model first:
 
 ```python
 from sippy.identification import SystemIdentification, SystemIdentificationConfig
@@ -298,11 +305,33 @@ model = ident.identify(y=y, u=u)          # u: (m, N), y: (l, N) or 1-D
 
 fr = model.identification_info['frequency_response']
 q = model.identification_info['quality_metrics']
+response = model.frequency_response()  # omega in rad/s, frdata shape (l, m, F)
 # SISO correlation estimator: fr['omega'], fr['G_smooth'], fr['coherence'], ...
 # Welch/MIMO estimator: fr['freq_hz'], fr['G'] with shape (F, l, m),
 #                       fr['coherence'] (multiple coherence, shape (F, l))
 print(q['quality_label'], q['mean_coherence'])
 ```
+
+Every input-output identification result can use the Welch/H1 engine for
+validation-data uncertainty:
+
+```python
+uncertainty = model.get_model_uncertainty(
+    u_validation,
+    y_validation,
+    nperseg=256,
+    smoothing_bins=5,
+    confidence_levels=(0.68, 0.95),
+)
+lower95, upper95 = uncertainty.magnitude_confidence_interval(0.95)
+```
+
+The confidence bands use a delete-one-segment jackknife on non-overlapping
+Welch segments. Their degrees of freedom are `n_segments - 1`; they quantify
+the sampling uncertainty of the non-parametric FRF used to validate the model.
+They are not presented as algorithm-specific parameter covariance. The result
+also includes phase bands, residual spectra, multiple coherence, and SNR for
+SISO or MIMO data.
 
 Quality is assessed from coherence: values near 1 indicate a reliable
 linear, noise-free relationship at that frequency; use
@@ -1063,7 +1092,8 @@ y_sim, x trajectory = model.simulate(u_test)
 # Additional built-in analysis
 frequencies = model.get_natural_frequencies()
 dampings = model.get_damping_ratios()
-uncertainty = model.get_model_uncertainty(u_test, y_test, 'input', 'output')
+uncertainty = model.get_model_uncertainty(u_test, y_test, nperseg=256)
+lower95, upper95 = uncertainty.magnitude_confidence_interval(0.95)
 ```
 
 ---

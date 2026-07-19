@@ -5,7 +5,7 @@ System simulation and analysis utilities.
 import warnings
 
 import numpy as np
-from scipy import fftpack, signal, stats
+from scipy import signal
 from scipy.linalg import solve_discrete_are
 
 from sippy import systems as control
@@ -475,77 +475,57 @@ def K_calc(A, C, Q, R, S):
         return K, Calculated
 
 
-def get_model_uncertainty(u, y, model):
-    """
-    Returns the frequency response of a finite impulse response model and
-    frequency confidence intervals (95% and 68%).
+def get_model_uncertainty(
+    u,
+    y,
+    model,
+    *,
+    dt=1.0,
+    nperseg=None,
+    window="hann",
+    noverlap=0,
+    smoothing_bins=5,
+    confidence_levels=(0.68, 0.95),
+):
+    """Estimate generic frequency-response uncertainty for a model or FIR."""
+    if hasattr(model, "get_model_uncertainty"):
+        return model.get_model_uncertainty(
+            u,
+            y,
+            nperseg=nperseg,
+            window=window,
+            noverlap=noverlap,
+            smoothing_bins=smoothing_bins,
+            confidence_levels=confidence_levels,
+        )
 
-    Parameters:
-    -----------
-    u : array-like
-        Input signal
-    y : array-like
-        Output signal
-    model : ndarray
-        Finite impulse response of the IO pair
+    from ..identification.uncertainty import estimate_frequency_response_uncertainty
 
-    Returns:
-    --------
-    freqs : ndarray
-        Frequency range
-    model_bode_mag : ndarray
-        Gain portion of model frequency response
-    ci95 : ndarray
-        95% confidence interval
-    ci68 : ndarray
-        68% confidence interval
-    snr : ndarray
-        Signal to noise ratio
-    """
-    n = len(u)
-
-    confidence95 = 0.95
-    confidence68 = 0.68
-    nperseg = 1024
-
-    y_estimate = signal.convolve(u, model, mode="full")[: len(u)]
-    model_error = y - y_estimate
-
-    from .spectral_utils import (
-        compute_cross_spectrum_welch,
-        compute_power_spectrum_welch,
-        create_hamming_window,
+    result = estimate_frequency_response_uncertainty(
+        u,
+        y,
+        dt=dt,
+        nperseg=nperseg,
+        window=window,
+        noverlap=noverlap,
+        smoothing_bins=smoothing_bins,
+        confidence_levels=confidence_levels,
     )
+    coefficients = np.asarray(model, dtype=float)
+    if coefficients.ndim == 1:
+        coefficients = coefficients[None, None, :]
+    if coefficients.ndim != 3:
+        raise ValueError(
+            "FIR coefficients must have shape (lags,) or (outputs, inputs, lags)"
+        )
+    if coefficients.shape[0:2] != result.empirical_response.shape[1:3]:
+        raise ValueError("FIR channel dimensions must match the input/output data")
 
-    h = fftpack.fft(model, nperseg)[: nperseg // 2]
-    freqs, Pxx = compute_power_spectrum_welch(u, nperseg=nperseg)
-    freqs, Pyy = compute_power_spectrum_welch(y, nperseg=nperseg)
-    freqs, Pyy_err = compute_power_spectrum_welch(model_error, nperseg=nperseg)
-    freqs, Pxy = compute_cross_spectrum_welch(u, y, nperseg=nperseg)
-
-    snr = Pyy / Pyy_err
-    data_bode = Pxy / Pxx
-    data_bode_mag = np.abs(data_bode)
-
-    win = create_hamming_window(16, normalize=True)
-    data_bode_mag_filt_f = np.convolve(data_bode_mag, win, mode="full")[
-        : len(data_bode_mag)
-    ]
-    data_bode_mag_filt_b = np.convolve(data_bode_mag_filt_f[::-1], win, mode="full")[
-        : len(data_bode_mag_filt_f)
-    ][::-1]
-    snr_filt_f = np.convolve(np.abs(snr), win, mode="full")[: len(snr)]
-    snr_filt_b = np.convolve(snr_filt_f[::-1], win, mode="full")[: len(snr_filt_f)][
-        ::-1
-    ]
-
-    model_bode_mag = np.abs(h)
-    combined_bode = np.vstack((model_bode_mag, data_bode_mag_filt_b[:-1]))
-    se = stats.sem(combined_bode)
-    ci95 = se * stats.t.ppf((1 + confidence95) / 2.0, n - 1)
-    ci68 = se * stats.t.ppf((1 + confidence68) / 2.0, n - 1)
-
-    return freqs[:-1], model_bode_mag, ci95, ci68, snr_filt_b[:-1]
+    normalized_omega = result.omega * dt
+    delays = np.arange(coefficients.shape[2])
+    basis = np.exp(-1j * normalized_omega[:, None] * delays[None, :])
+    response = np.einsum("oil,fl->foi", coefficients, basis)
+    return result.with_model_response(response)
 
 
 def get_fir_coef(model, inds, deps, sampling, tss):

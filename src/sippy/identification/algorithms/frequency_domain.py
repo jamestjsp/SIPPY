@@ -51,9 +51,9 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
     Non-parametric frequency-domain identification (correlation / Welch H1).
 
     Because the result is a frequency response rather than a parametric
-    model, the returned StateSpaceModel carries a one-state zero placeholder
-    with matching input/output dimensions; the estimate lives in
-    ``model.identification_info``:
+    realization, the returned StateSpaceModel has no state-space system; the
+    estimate lives in ``model.identification_info`` and is available through
+    the same ``frequency_response`` and uncertainty methods as other results:
 
         info["frequency_response"]  frequency grid, complex FRF, magnitude,
                                     phase, coherence, and the raw spectra
@@ -128,7 +128,7 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
             **kwargs: Algorithm parameters (see class docstring)
 
         Returns:
-            StateSpaceModel with placeholder matrices and the frequency
+            StateSpaceModel with no parametric realization and the frequency
             response estimate in ``identification_info``.
         """
         self.validate_parameters(**kwargs)
@@ -172,20 +172,19 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
         results["n_inputs"] = n_inputs
         results["n_outputs"] = n_outputs
 
-        # Non-parametric methods do not produce state-space matrices;
-        # placeholders keep the factory return contract.
         return StateSpaceModel(
-            A=np.eye(1),
-            B=np.zeros((1, n_inputs)),
-            C=np.zeros((n_outputs, 1)),
+            A=np.empty((0, 0)),
+            B=np.empty((0, n_inputs)),
+            C=np.empty((n_outputs, 0)),
             D=np.zeros((n_outputs, n_inputs)),
-            K=np.zeros((1, n_outputs)),
-            Q=np.eye(1),
+            K=np.empty((0, n_outputs)),
+            Q=np.empty((0, 0)),
             R=np.eye(n_outputs),
-            S=np.zeros((1, n_outputs)),
+            S=np.empty((0, n_outputs)),
             ts=dt,
             Vn=0.0,
             identification_info=results,
+            is_parametric=False,
         )
 
     def _identify_correlation(
@@ -315,6 +314,8 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
                 "magnitude_db": magnitude_db,
                 "phase_deg": phase_deg,
                 "coherence": frf["coherence"],
+                "residual_spectrum": frf["residual_spectrum"],
+                "signal_to_noise_ratio": frf["signal_to_noise_ratio"],
                 "S_uu": frf["S_uu"],
                 "S_uy": frf["S_uy"],
                 "S_yy": frf["S_yy"],
