@@ -312,6 +312,30 @@ default `max(32, min(N // 10, 512))`), `nperseg` (Welch segment length,
 default `max(64, min(1024, N // 8))`), and `smoothing_window`
 (frequency-smoothing width in bins, default 11).
 
+To convert the non-parametric estimate into a parametric model, fit a
+rational transfer function to the FRF with `fit_frf_model` (coherence-
+weighted least squares with Sanathanan-Koerner iterations, applied per
+input/output channel for MIMO data):
+
+```python
+from sippy.identification.frf_fit import fit_frf_model
+
+fd_model = ident.identify(y=y, u=u)                 # method='FD'
+par_model = fit_frf_model(fd_model, na=2, nb=2, nk=1)
+
+par_model.A, par_model.B, par_model.C, par_model.D  # real state-space
+par_model.G_tf                                       # harold Transfer
+par_model.identification_info["frf_fit"]             # per-channel b, a,
+                                                     # poles, fit errors
+```
+
+`nk` follows the repository convention (delay of the first B coefficient;
+`nk=1` means the response starts at `u[k-1]`). Frequency bins below
+`min_coherence` (default 0.1) are excluded and the rest are weighted by
+their estimated reliability, so the fit degrades gracefully at low SNR. A
+warning is raised if a fitted channel has poles on or outside the unit
+circle (often a sign of over-parameterization).
+
 ### Algorithm Selection
 
 Use the factory to check available algorithms:

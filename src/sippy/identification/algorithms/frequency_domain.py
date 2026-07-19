@@ -132,7 +132,9 @@ class FrequencyDomainAlgorithm(IdentificationAlgorithm):
         """
         self.validate_parameters(**kwargs)
 
-        dt = float(kwargs.get("dt") or kwargs.get("tsample") or 1.0)
+        dt = float(kwargs.pop("dt", None) or kwargs.pop("tsample", None) or 1.0)
+        kwargs.pop("dt", None)
+        kwargs.pop("tsample", None)
         y_arr, u_arr, dt = resolve_identification_data(y, u, iddata, tsample=dt)
         if dt <= 0:
             raise ValueError(f"Sampling interval must be positive, got {dt}")
