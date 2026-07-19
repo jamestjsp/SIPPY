@@ -8,10 +8,12 @@ from sippy.systems import (
     forced_response,
     frequency_response,
     impulse_response,
+    poles,
     ss,
     ss2tf,
     tf,
     tf2ss,
+    tfdata,
 )
 
 
@@ -141,3 +143,15 @@ def test_impulse_response_matches_unit_area_convention():
     response = impulse_response(system, T=np.arange(4) * 0.2, squeeze=False)
 
     np.testing.assert_allclose(response.outputs, [[[0.0, 5.0, 2.5, 1.25]]])
+
+
+def test_transfer_function_reference_operations():
+    first = tf([1.0, 0.5], [1.0, -0.4], dt=1.0)
+    second = tf([2.0], [1.0, -0.2], dt=1.0)
+
+    product = first * second
+    numerator, denominator = tfdata(product)
+
+    np.testing.assert_allclose(numerator[0][0], [2.0, 1.0])
+    np.testing.assert_allclose(denominator[0][0], [1.0, -0.6, 0.08])
+    np.testing.assert_allclose(np.sort(poles(product)), [0.2, 0.4])

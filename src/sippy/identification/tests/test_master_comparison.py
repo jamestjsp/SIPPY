@@ -36,8 +36,13 @@ from sippy.identification import (  # noqa: E402
     SystemIdentification,
     SystemIdentificationConfig,
 )
+from sippy.identification.tests.reference_control_compat import (  # noqa: E402
+    install_reference_control_compat,
+)
 from sippy.utils.signal_utils import GBN_seq, white_noise_var  # noqa: E402
 from sippy.utils.simulation_utils import simulate_ss_system  # noqa: E402
+
+install_reference_control_compat()
 
 # ============================================================================
 # FIXTURES: TEST DATA GENERATION
@@ -562,7 +567,7 @@ class TestInputOutputMethodsComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from control (if available)
+            # Extract the maintained transfer function when available
             if model_control.G_tf is not None:
                 control_num = model_control.G_tf.num[0][0]
                 control_den = model_control.G_tf.den[0][0]
@@ -585,9 +590,9 @@ class TestInputOutputMethodsComparison:
 
                 print("\nTransfer Function Comparison:")
                 print(f"Master numerator:  {master_num_stripped}")
-                print(f"python-control numerator:  {control_num_stripped}")
+                print(f"sippy.systems numerator:  {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"python-control denominator: {control_den_stripped}")
+                print(f"sippy.systems denominator: {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -597,7 +602,7 @@ class TestInputOutputMethodsComparison:
 
                 print("\nARX (SISO): PASS - Transfer functions match")
             else:
-                pytest.skip("python-control G_tf not available for comparison")
+                pytest.skip("SIPPY G_tf not available for comparison")
 
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
@@ -671,7 +676,7 @@ class TestInputOutputMethodsComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from control (if available)
+            # Extract the maintained transfer function when available
             if model_control.G_tf is not None:
                 control_num = model_control.G_tf.num[0][0]
                 control_den = model_control.G_tf.den[0][0]
@@ -694,9 +699,9 @@ class TestInputOutputMethodsComparison:
 
                 print("\nTransfer Function Comparison:")
                 print(f"Master numerator:  {master_num_stripped}")
-                print(f"python-control numerator:  {control_num_stripped}")
+                print(f"sippy.systems numerator:  {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"python-control denominator: {control_den_stripped}")
+                print(f"sippy.systems denominator: {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -725,7 +730,7 @@ class TestInputOutputMethodsComparison:
                         f"num_error={num_error:.2e}, den_error={den_error:.2e}"
                     )
             else:
-                pytest.skip("python-control G_tf not available for comparison")
+                pytest.skip("SIPPY G_tf not available for comparison")
 
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
@@ -752,7 +757,7 @@ class TestConditionalMethodsComparison:
         Test ARARX on SISO system with basic orders (na=1, nb=1, nd=1).
 
         ARARX model: A(q) y(k) = B(q)/D(q) * u(k-theta) + e(k)
-        python-control uses 10-iteration auxiliary variable method.
+        The maintained implementation uses a 10-iteration auxiliary variable method.
         Master uses optimization-based approach.
 
         Acceptable tolerance: 1e-4 relative error (iterative vs optimization)
@@ -788,21 +793,16 @@ class TestConditionalMethodsComparison:
         # Master returns GEN_MIMO_model object with attributes
         # Need to convert transfer functions to state-space for comparison
         # For ARARX, G is available as model_master.G
-        try:
-            import control.matlab as cnt
+        from sippy import systems
 
-            # Convert master's transfer function to state-space
-            G_master = model_master.G
-            # Get state-space realization from control.matlab
-            ss_master = cnt.ss(G_master)
-            A_master, B_master, C_master, D_master = (
-                ss_master.A,
-                ss_master.B,
-                ss_master.C,
-                ss_master.D,
-            )
-        except Exception as e:
-            pytest.skip(f"Could not extract state-space from master: {e}")
+        G_master = model_master.G
+        ss_master = systems.tf2ss(systems.tf(G_master.num, G_master.den, dt=data["ts"]))
+        A_master, B_master, C_master, D_master = (
+            ss_master.A,
+            ss_master.B,
+            ss_master.C,
+            ss_master.D,
+        )
 
         validation_input = np.random.default_rng(810).standard_normal((1, 500))
         _, output_control = model_control.simulate(validation_input)
@@ -846,19 +846,16 @@ class TestConditionalMethodsComparison:
         )
 
         # Extract state-space matrices from master transfer function
-        try:
-            import control.matlab as cnt
+        from sippy import systems
 
-            G_master = model_master.G
-            ss_master = cnt.ss(G_master)
-            A_master, B_master, C_master, D_master = (
-                ss_master.A,
-                ss_master.B,
-                ss_master.C,
-                ss_master.D,
-            )
-        except Exception as e:
-            pytest.skip(f"Could not extract state-space from master: {e}")
+        G_master = model_master.G
+        ss_master = systems.tf2ss(systems.tf(G_master.num, G_master.den, dt=data["ts"]))
+        A_master, B_master, C_master, D_master = (
+            ss_master.A,
+            ss_master.B,
+            ss_master.C,
+            ss_master.D,
+        )
 
         validation_input = np.random.default_rng(811).standard_normal((1, 500))
         _, output_control = model_control.simulate(validation_input)
@@ -929,9 +926,9 @@ class TestConditionalMethodsComparison:
 
                 print("\nARARX Transfer Function Comparison:")
                 print(f"Master numerator:   {master_num_stripped}")
-                print(f"python-control numerator:   {control_num_stripped}")
+                print(f"sippy.systems numerator:   {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"python-control denominator: {control_den_stripped}")
+                print(f"sippy.systems denominator: {control_den_stripped}")
 
                 # Compute errors (handle different lengths)
                 min_num_len = min(len(control_num_norm), len(master_num_norm))
@@ -1134,7 +1131,7 @@ class TestFormerKnownFailuresComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from control (if available)
+            # Extract the maintained transfer function when available
             if model_control.G_tf is not None:
                 control_num = model_control.G_tf.num[0][0]
                 control_den = model_control.G_tf.den[0][0]
@@ -1157,9 +1154,9 @@ class TestFormerKnownFailuresComparison:
 
                 print("\nOE Transfer Function Comparison:")
                 print(f"Master numerator:  {master_num_stripped}")
-                print(f"python-control numerator:  {control_num_stripped}")
+                print(f"sippy.systems numerator:  {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"python-control denominator: {control_den_stripped}")
+                print(f"sippy.systems denominator: {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -1173,7 +1170,7 @@ class TestFormerKnownFailuresComparison:
                     }
                 }
             else:
-                pytest.skip("python-control G_tf not available for comparison")
+                pytest.skip("SIPPY G_tf not available for comparison")
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
@@ -1212,7 +1209,7 @@ class TestFormerKnownFailuresComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from control (if available)
+            # Extract the maintained transfer function when available
             if model_control.G_tf is not None:
                 control_num = model_control.G_tf.num[0][0]
                 control_den = model_control.G_tf.den[0][0]
@@ -1235,9 +1232,9 @@ class TestFormerKnownFailuresComparison:
 
                 print("\nBJ Transfer Function Comparison:")
                 print(f"Master numerator:  {master_num_stripped}")
-                print(f"python-control numerator:  {control_num_stripped}")
+                print(f"sippy.systems numerator:  {control_num_stripped}")
                 print(f"Master denominator: {master_den_stripped}")
-                print(f"python-control denominator: {control_den_stripped}")
+                print(f"sippy.systems denominator: {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -1251,7 +1248,7 @@ class TestFormerKnownFailuresComparison:
                     }
                 }
             else:
-                pytest.skip("python-control G_tf not available for comparison")
+                pytest.skip("SIPPY G_tf not available for comparison")
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 
@@ -1290,7 +1287,7 @@ class TestFormerKnownFailuresComparison:
             master_num = model_master.G.num[0][0]  # SISO numerator coefficients
             master_den = model_master.G.den[0][0]  # SISO denominator coefficients
 
-            # Extract transfer function from control (if available)
+            # Extract the maintained transfer function when available
             if model_control.G_tf is not None:
                 control_num = model_control.G_tf.num[0][0]
                 control_den = model_control.G_tf.den[0][0]
@@ -1313,9 +1310,9 @@ class TestFormerKnownFailuresComparison:
 
                 print("\nARARMAX Transfer Function Comparison:")
                 print(f"Master numerator:    {master_num_stripped}")
-                print(f"python-control numerator:    {control_num_stripped}")
+                print(f"sippy.systems numerator:    {control_num_stripped}")
                 print(f"Master denominator:  {master_den_stripped}")
-                print(f"python-control denominator:  {control_den_stripped}")
+                print(f"sippy.systems denominator:  {control_den_stripped}")
                 print(f"\nNumerator error: {num_error:.2e}")
                 print(f"Denominator error: {den_error:.2e}")
 
@@ -1329,7 +1326,7 @@ class TestFormerKnownFailuresComparison:
                     }
                 }
             else:
-                pytest.skip("python-control G_tf not available for comparison")
+                pytest.skip("SIPPY G_tf not available for comparison")
         except Exception as e:
             pytest.skip(f"Could not compare transfer functions: {e}")
 

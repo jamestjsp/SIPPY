@@ -27,10 +27,12 @@ __all__ = [
     "freqresp",
     "impulse_response",
     "lsim",
+    "poles",
     "ss",
     "ss2tf",
     "tf",
     "tf2ss",
+    "tfdata",
 ]
 
 
@@ -190,3 +192,18 @@ def lsim(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     response = forced_response(system, T=T, U=U, X0=X0)
     return response.outputs, response.time, response.states
+
+
+def poles(system: InputOutputSystem) -> np.ndarray:
+    realized = tf2ss(system) if isinstance(system, TransferFunction) else system
+    if not isinstance(realized, StateSpace):
+        raise TypeError("poles expects a SIPPY input/output system")
+    return np.linalg.eigvals(realized.A)
+
+
+def tfdata(
+    system: TransferFunction,
+) -> tuple[list[list[np.ndarray]], list[list[np.ndarray]]]:
+    if not isinstance(system, TransferFunction):
+        raise TypeError("tfdata expects a TransferFunction")
+    return system.num, system.den

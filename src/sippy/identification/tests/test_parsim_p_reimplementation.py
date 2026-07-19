@@ -12,6 +12,11 @@ import numpy as np
 import pytest
 
 from sippy.identification.algorithms.parsim_core import ParsimCoreAlgorithm
+from sippy.identification.tests.reference_control_compat import (
+    install_reference_control_compat,
+)
+
+install_reference_control_compat()
 
 
 class TestParsimPReimplementation:
@@ -315,7 +320,7 @@ class TestParsimPVsMaster:
         p = 10
         threshold = 0.1
 
-        # python-control implementation
+        # Maintained SIPPY implementation
         A_K_h, C_h, B_K_h, D_h, K_h, A_h, B_h, x0_h, Vn_h = (
             ParsimCoreAlgorithm.parsim_p(y, u, f=f, p=p, threshold=threshold)
         )

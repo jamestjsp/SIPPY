@@ -104,6 +104,32 @@ class TransferFunction(InputOutputSystem):
         self.noutputs, self.ninputs = numerator_shape
         self.dt = _normalize_sample_time(dt)
 
+    def __getitem__(self, key: tuple[int, int]) -> "TransferFunction":
+        output, input_ = key
+        return TransferFunction(
+            self.num[output][input_], self.den[output][input_], dt=self.dt
+        )
+
+    def __mul__(self, other: object) -> "TransferFunction":
+        if np.isscalar(other):
+            numerator = [[cell * float(other) for cell in row] for row in self.num]
+            return TransferFunction(numerator, self.den, dt=self.dt)
+        if isinstance(other, TransferFunction):
+            if self.shape != (1, 1) or other.shape != (1, 1):
+                raise NotImplementedError(
+                    "Transfer-function multiplication currently supports SISO systems"
+                )
+            if self.dt != other.dt:
+                raise ValueError("Transfer functions must have the same sample time")
+            return TransferFunction(
+                np.polymul(self.num[0][0], other.num[0][0]),
+                np.polymul(self.den[0][0], other.den[0][0]),
+                dt=self.dt,
+            )
+        return NotImplemented
+
+    __rmul__ = __mul__
+
 
 class StateSpace(InputOutputSystem):
     def __init__(
