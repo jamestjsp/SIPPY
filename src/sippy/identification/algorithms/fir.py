@@ -205,63 +205,6 @@ class FIRAlgorithm(IdentificationAlgorithm):
 
         return model
 
-    def _create_regression_matrix(self, u, y, nb, nk, ny, nu, N):
-        """
-        Create regression matrix Phi and output matrix y for least squares.
-
-        This function automatically uses the Numba-compiled version when available
-        for improved performance.
-
-        Parameters:
-        -----------
-        u, y : ndarray
-            Input and output data
-        nb, nk : int
-            Model coefficients count and delay
-        ny, nu : int
-            Number of outputs and inputs
-        N : int
-            Number of data points
-
-        Returns:
-        --------
-        Phi : ndarray
-            Regression matrix
-        y_matrix : ndarray
-            Output matrix
-        """
-        if NUMBA_AVAILABLE and create_regression_matrix_fir_compiled is not None:
-            return create_regression_matrix_fir_compiled(u, y, nb, nk, ny, nu, N)
-        else:
-            # Fallback to original implementation
-            # Determine effective data length
-            max_lag = nb + nk - 1
-            N_eff = N - max_lag
-
-            if N_eff <= 0:
-                raise ValueError(
-                    f"Not enough data points. Need at least {max_lag + 1} samples, got {N}"
-                )
-
-            # Initialize regression matrix
-            n_params = nb * ny * nu
-            Phi = np.zeros((N_eff, n_params))
-
-            # Fill FIR part (lagged inputs)
-            for k in range(nb):
-                for i in range(nu):
-                    # For MIMO, each input affects all outputs
-                    for j in range(ny):
-                        col_idx = k * ny * nu + i * ny + j
-                        delay_idx = max_lag - 1 - k
-                        if delay_idx >= 0 and delay_idx + N_eff <= N:
-                            Phi[:, col_idx] = u[i, delay_idx : delay_idx + N_eff]
-
-            # Output matrix
-            y_matrix = y[:, max_lag:N]
-
-            return Phi, y_matrix
-
     def _create_transfer_functions_fir(self, fir_coeffs, nb, nk, ny, nu, Ts):
         """
         Create G_tf and H_tf transfer functions for FIR.

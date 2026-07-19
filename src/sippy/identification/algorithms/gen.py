@@ -25,7 +25,6 @@ GEN generalizes all other input-output methods:
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-from numpy.linalg import lstsq
 
 from sippy import systems as control
 
@@ -36,7 +35,12 @@ from ..base import (
     realize_transfer_function,
 )
 from .ararx import _state_space_from_results
-from .opt_support import apply_platform_ipopt_options, gen_mimo_id, nk_to_theta
+from .opt_support import (
+    _schur_reflection_coefficients,
+    apply_platform_ipopt_options,
+    gen_mimo_id,
+    nk_to_theta,
+)
 
 if TYPE_CHECKING:
     from ..iddata import IDData
@@ -554,40 +558,22 @@ class GENAlgorithm(IdentificationAlgorithm):
         g_lb.extend([-1e-7] * N)
         g_ub.extend([1e-7] * N)
 
-        # Optional stability constraints (follow master branch pattern)
+        # Optional stability constraints: every Schur reflection coefficient of
+        # a monic polynomial lies in (-1, 1) iff all roots are inside the unit
+        # circle; stability_margin scales the admissible root radius.
         if stability_constraint:
-            if na > 0:
-                compA = ca.SX.zeros(na, na)
-                if na > 1:
-                    diagA = ca.SX.eye(na - 1)
-                    compA[:-1, 1:] = diagA
-                compA[-1, :] = -a[::-1]
-                norm_CompA = ca.norm_inf(compA)
-                g.append(norm_CompA)
-                g_lb.append(-1e-7)
-                g_ub.append(stability_margin)
-
-            if nf > 0:
-                compF = ca.SX.zeros(nf, nf)
-                if nf > 1:
-                    diagF = ca.SX.eye(nf - 1)
-                    compF[:-1, 1:] = diagF
-                compF[-1, :] = -f[::-1]
-                norm_CompF = ca.norm_inf(compF)
-                g.append(norm_CompF)
-                g_lb.append(-1e-7)
-                g_ub.append(stability_margin)
-
-            if nd > 0:
-                compD = ca.SX.zeros(nd, nd)
-                if nd > 1:
-                    diagD = ca.SX.eye(nd - 1)
-                    compD[:-1, 1:] = diagD
-                compD[-1, :] = -d[::-1]
-                norm_CompD = ca.norm_inf(compD)
-                g.append(norm_CompD)
-                g_lb.append(-1e-7)
-                g_ub.append(stability_margin)
+            if not 0.0 < stability_margin <= 1.0:
+                raise ValueError("stability_margin must be in (0, 1]")
+            reflection_limit = 1.0 - 1e-8
+            for poly_coeffs, order in ((a, na), (f, nf), (d, nd)):
+                if order == 0:
+                    continue
+                for coefficient in _schur_reflection_coefficients(
+                    poly_coeffs, stability_margin
+                ):
+                    g.append(coefficient)
+                    g_lb.append(-reflection_limit)
+                    g_ub.append(reflection_limit)
 
         # Stack constraints
         g_vec = ca.vertcat(*g) if g else ca.SX.zeros(0)
@@ -647,183 +633,6 @@ class GENAlgorithm(IdentificationAlgorithm):
             "Yid": Yid_opt,
             "Vn": Vn,
         }
-
-    def _identify_ills(
-        self, y, u, na, nb, nc, nd, nf, nk, sample_time, **kwargs
-    ) -> StateSpaceModel:
-        """
-        Simplified GEN identification using iterative least squares.
-
-        This is the fallback method when CasADi is not available.
-        Uses combined single least squares solve (simplified approximation).
-
-        Parameters:
-        -----------
-        y, u : np.ndarray
-            Output and input data
-        na, nb, nc, nd, nf, nk : int
-            Model orders and delay
-        sample_time : float
-            Sampling time
-        **kwargs : dict
-            Additional parameters
-
-        Returns:
-        --------
-        model : StateSpaceModel
-            Identified model
-        """
-        # Get data dimensions
-        ny, N = y.shape
-        nu, _ = u.shape
-
-        # Calculate effective data length
-        max_lag = (
-            max(na, nb + nk, nc, nd, nf) if max(na, nb + nk, nc, nd, nf) > 0 else 1
-        )
-        N_eff = N - max_lag
-
-        # Check for sufficient data (need enough for regression matrix)
-        n_params = na + nb + nc + nd + nf
-        min_required = max_lag + max(
-            10, n_params * 2
-        )  # Need enough samples for estimation
-
-        if N_eff <= 0 or N < min_required:
-            raise ValueError(
-                f"Insufficient data: need at least {min_required} samples for GEN({na},{nb},{nc},{nd},{nf}), got {N}"
-            )
-
-        # Build regression matrix
-        n_params = na + nb + nc + nd + nf
-        if n_params == 0:
-            raise ValueError("At least one polynomial order must be positive")
-
-        Phi = np.zeros((N_eff, n_params))
-        y_target = np.zeros(N_eff)
-
-        for i in range(N_eff):
-            k = i + max_lag
-            col = 0
-
-            # AR terms: -y[k-1], -y[k-2], ...
-            if na > 0:
-                for lag in range(1, na + 1):
-                    if k - lag >= 0:
-                        Phi[i, col] = -y[0, k - lag]
-                    col += 1
-
-            # Input terms: u[k-nk], u[k-nk-1], ...
-            for lag in range(nb):
-                if k - nk - lag >= 0:
-                    Phi[i, col] = u[0, k - nk - lag]
-                col += 1
-
-            # Input denominator terms (F polynomial) - approximated
-            if nf > 0:
-                for lag in range(1, nf + 1):
-                    if k - lag >= 0:
-                        # Approximate with lagged outputs scaled
-                        Phi[i, col] = -0.1 * y[0, k - lag]
-                    col += 1
-
-            # Noise AR terms (C polynomial) - approximated with residuals
-            if nc > 0:
-                for lag in range(1, nc + 1):
-                    if k - lag >= 0:
-                        # Approximate residual
-                        resid = y[0, k - lag] * 0.1
-                        Phi[i, col] = resid
-                    col += 1
-
-            # Noise MA terms (D polynomial) - approximated
-            if nd > 0:
-                for lag in range(1, nd + 1):
-                    if k - lag >= 0:
-                        # Approximate with lagged residual differences
-                        Phi[i, col] = -0.1 * y[0, k - lag]
-                    col += 1
-
-            # Target
-            y_target[i] = y[0, k]
-
-        # Solve least squares
-        theta, residuals, rank, s = lstsq(Phi, y_target, rcond=None)
-
-        # Extract coefficients
-        idx = 0
-        A_coeffs = theta[idx : idx + na].reshape(1, -1) if na > 0 else np.zeros((1, 0))
-        idx += na
-        B_coeffs = theta[idx : idx + nb].reshape(1, -1)
-        idx += nb
-        F_coeffs = theta[idx : idx + nf].reshape(1, -1) if nf > 0 else np.zeros((1, 0))
-        idx += nf
-        C_coeffs = theta[idx : idx + nc].reshape(1, -1) if nc > 0 else np.zeros((1, 0))
-        idx += nc
-        D_coeffs = theta[idx : idx + nd].reshape(1, -1) if nd > 0 else np.zeros((1, 0))
-
-        # Compute one-step-ahead predictions (Yid)
-        Yid = np.zeros_like(y)
-        Yid[:, :max_lag] = y[:, :max_lag]
-
-        for k in range(max_lag, N):
-            y_pred = 0.0
-
-            # AR part
-            if na > 0:
-                for i in range(na):
-                    if k - i - 1 >= 0:
-                        y_pred += A_coeffs[0, i] * y[0, k - i - 1]
-
-            # Input part
-            for i in range(nb):
-                if k - nk - i >= 0:
-                    y_pred += B_coeffs[0, i] * u[0, k - nk - i]
-
-            Yid[0, k] = y_pred
-
-        # Create G_tf and H_tf transfer functions
-        G_tf, H_tf = self._create_transfer_functions_gen(
-            A_coeffs,
-            B_coeffs,
-            C_coeffs,
-            D_coeffs,
-            F_coeffs,
-            na,
-            nb,
-            nc,
-            nd,
-            nf,
-            nk,
-            ny,
-            nu,
-            sample_time,
-        )
-
-        model = self._create_state_space_from_gen(
-            A_coeffs,
-            B_coeffs,
-            C_coeffs,
-            D_coeffs,
-            F_coeffs,
-            na,
-            nb,
-            nc,
-            nd,
-            nf,
-            nk,
-            ny,
-            nu,
-            sample_time,
-        )
-
-        # Attach transfer functions and predictions to model
-        model.G_tf = G_tf
-        model.H_tf = H_tf
-        model.Yid = Yid
-        model.identification_info["fit_start"] = max_lag
-
-        return model
 
     def _create_transfer_functions_gen(
         self,
