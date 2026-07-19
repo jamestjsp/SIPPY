@@ -64,6 +64,12 @@ class TestAlgorithmFactory:
         with pytest.raises(ValueError, match="Unknown algorithm"):
             AlgorithmFactory.create("UNKNOWN")
 
+    def test_algorithm_options_do_not_flow_through_factory_construction(self):
+        AlgorithmFactory.register("N4SID", MockAlgorithm)
+
+        with pytest.raises(TypeError):
+            AlgorithmFactory.create("N4SID", ss_f=10)
+
     def test_list_algorithms(self):
         """Test listing registered algorithms."""
         AlgorithmFactory.register("N4SID", MockAlgorithm)

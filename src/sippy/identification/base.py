@@ -209,7 +209,7 @@ class IdentificationAlgorithm(ABC):
         )
 
 
-class StateSpaceModel:
+class IdentificationResult:
     """Enhanced state-space model container."""
 
     def __init__(
@@ -519,6 +519,11 @@ class StateSpaceModel:
         fir_model : dict
             Nested dictionary of FIR coefficients
         """
+        warnings.warn(
+            "get_fir_coefficients() is deprecated; use impulse_response()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from ..utils.simulation_utils import get_fir_coef
 
         if not self.is_parametric:
@@ -544,6 +549,11 @@ class StateSpaceModel:
         step_response : dict
             Nested dictionary of step responses
         """
+        warnings.warn(
+            "get_step_response() is deprecated; use step_response()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from ..utils.simulation_utils import get_step_response
 
         fir_model = self.get_fir_coefficients(inputs, outputs, 1.0, 60)
@@ -705,6 +715,12 @@ class StateSpaceModel:
         confidence_levels: tuple[float, ...] = (0.68, 0.95),
     ):
         """Compatibility alias for empirical frequency-response uncertainty."""
+        warnings.warn(
+            "get_model_uncertainty() is deprecated; use "
+            "get_frequency_response_uncertainty()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.get_frequency_response_uncertainty(
             input_data,
             output_data,
@@ -901,10 +917,15 @@ class StateSpaceModel:
         --------
         bool : True if optimization methods are supported
         """
+        warnings.warn(
+            "supports_optimization_methods() is deprecated; use supports('simulation')",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.supports("simulation")
 
 
-IdentificationResult = StateSpaceModel
+StateSpaceModel = IdentificationResult
 
 
 class SystemIdentificationConfig:

@@ -13,13 +13,14 @@ from ..utils import (
     simulate_ss_system,
     white_noise_var,
 )
-from .__main__ import SystemIdentification, system_identification
+from .__main__ import SystemIdentification, identify, system_identification
 from .base import IdentificationResult, StateSpaceModel, SystemIdentificationConfig
 from .iddata import IDData
 from .uncertainty import FrequencyResponseUncertainty
 
 __all__ = [
     "SystemIdentification",
+    "identify",
     "system_identification",
     "SystemIdentificationConfig",
     "IdentificationResult",

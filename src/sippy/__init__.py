@@ -15,6 +15,7 @@ from .identification import (
     get_frequency_response_uncertainty,
     get_model_uncertainty,
     get_step_response,
+    identify,
     simulate_ss_system,
     system_identification,
     white_noise_var,
@@ -22,6 +23,7 @@ from .identification import (
 
 __all__ = [
     "SystemIdentification",
+    "identify",
     "FrequencyResponseUncertainty",
     "system_identification",
     "SystemIdentificationConfig",
@@ -35,7 +37,3 @@ __all__ = [
     "get_model_uncertainty",
     "simulate_ss_system",
 ]
-
-
-def hello() -> str:
-    return "Hello from sippy!"

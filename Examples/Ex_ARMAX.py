@@ -164,7 +164,7 @@ def main():
 
                 # Create ARMAX algorithm with specific mode
                 mode = options.get("ARMAX_mod", "ILLS")
-                algo = ARMAXAlgorithm(mode=mode)
+                algo = ARMAXAlgorithm()
                 print(f"✅ {name} - ARMAXAlgorithm instance created")
                 print(f"  - Data samples: {len(iddata.get_input_array()[0])}")
                 print(
@@ -198,7 +198,15 @@ def main():
                 )
 
                 # Actually run identification
-                model = algo.identify(iddata, config)
+                model = algo.identify(
+                    iddata=iddata,
+                    mode=mode,
+                    na=config.na,
+                    nb=config.nb,
+                    nc=config.nc,
+                    nk=config.nk,
+                    max_iterations=config.max_iterations,
+                )
 
                 if model is not None:
                     print(f"  ✅ {name} - Identification successful!")

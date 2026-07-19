@@ -2,6 +2,7 @@
 Main system identification interface.
 """
 
+import warnings
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -63,7 +64,7 @@ class SystemIdentification:
         if (
             method_override is not None
             and id_method is not None
-            and method_override.upper() != id_method.upper()
+            and normalize_method(method_override) != normalize_method(id_method)
         ):
             raise ValueError("method and id_method select different algorithms")
         method = normalize_method(method_override or id_method or self.config.method)
@@ -137,6 +138,26 @@ class SystemIdentification:
         return y, u
 
 
+def identify(
+    y: Optional[np.ndarray] = None,
+    u: Optional[np.ndarray] = None,
+    *,
+    data: Optional["IDData"] = None,
+    iddata: Optional["IDData"] = None,
+    method: str = "N4SID",
+    centering: str = "None",
+    **options,
+) -> StateSpaceModel:
+    """Identify a model through SIPPY's canonical functional API."""
+    if data is not None and iddata is not None:
+        raise ValueError("Provide only one of data or iddata")
+    identifier = SystemIdentification(
+        SystemIdentificationConfig(method=method, centering=centering)
+    )
+    source = data if data is not None else iddata
+    return identifier.identify(y=y, u=u, iddata=source, **options)
+
+
 # Convenience function for backward compatibility
 def system_identification(
     y: Optional[np.ndarray] = None,
@@ -151,6 +172,12 @@ def system_identification(
     This function provides the same interface as the original system_identification
     function but uses the new class-based architecture internally.
     """
+    warnings.warn(
+        "system_identification() is deprecated; use identify(..., method=...) instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     # Map old parameter names to new ones
     param_mapping = {
         "SS_fixed_order": "ss_fixed_order",
@@ -171,6 +198,4 @@ def system_identification(
         if mapped_key != "method":
             mapped_kwargs[mapped_key] = value
 
-    config = SystemIdentificationConfig(method=id_method, **mapped_kwargs)
-    identifier = SystemIdentification(config)
-    return identifier.identify(y, u, iddata)
+    return identify(y, u, iddata=iddata, method=id_method, **mapped_kwargs)

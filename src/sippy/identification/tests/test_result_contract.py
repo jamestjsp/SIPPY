@@ -3,7 +3,7 @@ import pytest
 
 from sippy import systems as control
 from sippy.identification.algorithms.n4sid import N4SIDAlgorithm
-from sippy.identification.base import StateSpaceModel
+from sippy.identification.base import IdentificationResult, StateSpaceModel
 
 
 def _model(**kwargs):
@@ -21,6 +21,11 @@ def _model(**kwargs):
     }
     values.update(kwargs)
     return StateSpaceModel(**values)
+
+
+def test_identification_result_is_the_canonical_class_name():
+    assert StateSpaceModel is IdentificationResult
+    assert _model().__class__.__name__ == "IdentificationResult"
 
 
 def test_discrete_modal_properties_use_continuous_equivalent_poles():

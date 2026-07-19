@@ -35,8 +35,6 @@ ALGORITHM_NAMES = [
     "BJ",
     "GEN",
     "FD",
-    "FREQUENCY_DOMAIN",
-    "FREQ_DOMAIN",
 ]
 
 SUBSPACE_NAMES = ["N4SID", "MOESP", "CVA", "PARSIM-K", "PARSIM-S", "PARSIM-P"]
@@ -109,6 +107,11 @@ def mimo_data():
 
 def test_registered_algorithm_set_is_complete():
     assert set(AlgorithmFactory.list_algorithms()) == set(ALGORITHM_NAMES)
+
+
+@pytest.mark.parametrize("alias", ["FREQUENCY_DOMAIN", "FREQ_DOMAIN"])
+def test_frequency_domain_aliases_resolve_without_duplicate_registration(alias):
+    assert type(create_algorithm(alias)) is type(create_algorithm("FD"))
 
 
 @pytest.mark.parametrize("method", ALGORITHM_NAMES)

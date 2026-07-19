@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import sippy
 from sippy.identification import (
     IDData,
     SystemIdentification,
@@ -45,6 +46,23 @@ class TestSystemIdentification:
         assert model.A.shape[0] == model.A.shape[1]  # Square A matrix
         assert model.B.shape[0] == model.n
         assert model.C.shape[1] == model.n
+
+    def test_primary_identify_function(self, sample_data):
+        y, u = sample_data
+
+        model = sippy.identify(y, u[:1], method="arx", na=1, nb=1, nk=1)
+
+        assert isinstance(model, sippy.IdentificationResult)
+        assert model.method == "ARX"
+
+    def test_primary_identify_accepts_data_alias(self, sample_data):
+        y, u = sample_data
+        frame = pd.DataFrame({"u": u[0], "y": y[0]})
+        data = IDData(frame, inputs=["u"], outputs=["y"], tsample=0.25)
+
+        model = sippy.identify(data=data, method="n4sid", ss_fixed_order=1)
+
+        assert model.ts == pytest.approx(0.25)
 
     def test_custom_config(self, sample_data):
         """Test identification with custom configuration."""

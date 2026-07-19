@@ -28,9 +28,8 @@ if TYPE_CHECKING:  # pragma: no cover
 class ARMAXAlgorithm(IdentificationAlgorithm):
     """ARMAX identification with master-compatible solvers."""
 
-    def __init__(self, mode: str = "ILLS") -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.default_mode = mode.upper()
 
     def get_algorithm_name(self) -> str:
         return "ARMAX"
@@ -95,7 +94,7 @@ class ARMAXAlgorithm(IdentificationAlgorithm):
             theta = nk_to_theta(kwargs.get("nk", 1))
 
         max_iterations = kwargs.get("max_iterations", 200)
-        mode = kwargs.get("mode", kwargs.get("algorithm", self.default_mode)).upper()
+        mode = kwargs.get("mode", kwargs.get("algorithm", "ILLS")).upper()
         if mode == "RLLS":
             mode = "ILLS"
         if mode == "OPT":
