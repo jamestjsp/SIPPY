@@ -22,7 +22,7 @@ import numpy as np
 from sippy import systems as control
 
 try:  # pragma: no cover - CasADi is optional but required for NLP methods
-    from casadi import DM, SX, mtimes, nlpsol, norm_inf, vertcat
+    from casadi import DM, SX, mtimes, nlpsol, vertcat
 
     CASADI_AVAILABLE = True
 except ImportError:  # pragma: no cover
@@ -141,6 +141,32 @@ def apply_platform_ipopt_options(opts: dict) -> dict:
     if sys.platform == "darwin":
         opts["ipopt.mumps_pivot_order"] = 0
     return opts
+
+
+def _schur_reflection_coefficients(coefficients, radius: float = 1.0):
+    """Return reflection coefficients for a monic polynomial's scaled roots."""
+
+    coefficient_count = (
+        int(coefficients.numel())
+        if hasattr(coefficients, "numel")
+        else len(coefficients)
+    )
+    current = [
+        coefficients[index] / radius ** (index + 1)
+        for index in range(coefficient_count)
+    ]
+    reflection = []
+    while current:
+        coefficient = current[-1]
+        reflection.append(coefficient)
+        if len(current) == 1:
+            break
+        denominator = 1.0 - coefficient**2
+        current = [
+            (current[index] - coefficient * current[-2 - index]) / denominator
+            for index in range(len(current) - 1)
+        ]
+    return reflection
 
 
 def nk_to_theta(nk: Union[int, Sequence, np.ndarray]) -> Union[int, np.ndarray]:
@@ -322,37 +348,18 @@ def opt_id(
         g.append(W - Ww)
         g.append(V - Vw)
 
-    ng_norm = 0
+    stability_values = []
     if stability_cons:
         if Na != 0:
-            ng_norm += 1
-            compA = SX.zeros(Na, Na)
-            diagA = SX.eye(Na - 1) if Na > 1 else SX.zeros(0, 0)
-            if Na > 1:
-                compA[:-1, 1:] = diagA
-            compA[-1, :] = -a[::-1]
-            norm_comp_a = norm_inf(compA)
-            g.append(norm_comp_a)
+            stability_values.extend(_schur_reflection_coefficients(a, stab_marg))
 
         if Nf != 0:
-            ng_norm += 1
-            compF = SX.zeros(Nf, Nf)
-            diagF = SX.eye(Nf - 1) if Nf > 1 else SX.zeros(0, 0)
-            if Nf > 1:
-                compF[:-1, 1:] = diagF
-            compF[-1, :] = -f[::-1]
-            norm_comp_f = norm_inf(compF)
-            g.append(norm_comp_f)
+            stability_values.extend(_schur_reflection_coefficients(f, stab_marg))
 
         if Nd != 0:
-            ng_norm += 1
-            compD = SX.zeros(Nd, Nd)
-            diagD = SX.eye(Nd - 1) if Nd > 1 else SX.zeros(0, 0)
-            if Nd > 1:
-                compD[:-1, 1:] = diagD
-            compD[-1, :] = -d[::-1]
-            norm_comp_d = norm_inf(compD)
-            g.append(norm_comp_d)
+            stability_values.extend(_schur_reflection_coefficients(d, stab_marg))
+
+    g.extend(stability_values)
 
     g_vec = vertcat(*g)
 
@@ -360,8 +367,11 @@ def opt_id(
     g_lb = -1e-7 * DM.ones(ng_total, 1)
     g_ub = 1e-7 * DM.ones(ng_total, 1)
 
-    if ng_norm != 0:
-        g_ub[-ng_norm:] = stab_marg * DM.ones(ng_norm, 1)
+    if stability_values:
+        stability_count = len(stability_values)
+        reflection_limit = 1.0 - 1e-8
+        g_lb[-stability_count:] = -reflection_limit * DM.ones(stability_count, 1)
+        g_ub[-stability_count:] = reflection_limit * DM.ones(stability_count, 1)
 
     nlp = {"x": w_opt, "f": f_obj, "g": g_vec}
 
@@ -426,6 +436,9 @@ def gen_miso_id(
     enforce_stability: bool,
 ) -> MISOResult:
     """Solve the master NLP for a single output / multi-input structure."""
+
+    if enforce_stability and not 0.0 < stability_margin <= 1.0:
+        raise ValueError("stability_margin must be in (0, 1]")
 
     nb = np.array(nb, dtype=int)
     theta = np.array(theta, dtype=int)

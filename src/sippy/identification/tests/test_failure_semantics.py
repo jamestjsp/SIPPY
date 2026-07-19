@@ -5,6 +5,7 @@ from sippy.identification.algorithms.ararmax import ARARMAXAlgorithm
 from sippy.identification.algorithms.bj import BJAlgorithm
 from sippy.identification.algorithms.gen import GENAlgorithm
 from sippy.identification.algorithms.oe import OEAlgorithm
+from sippy.identification.algorithms.opt_support import _schur_reflection_coefficients
 from sippy.utils.compiled_utils import (
     create_regression_matrix_armax_compiled,
     matrix_operations_a_compiled,
@@ -83,3 +84,48 @@ def test_compiled_state_input_regression_is_deterministic_least_squares():
 
     np.testing.assert_allclose(actual_a, expected_a, atol=1e-12)
     np.testing.assert_allclose(actual_b, expected_b, atol=1e-12)
+
+
+def test_schur_reflection_coefficients_accept_stable_polynomial_above_unit_norm():
+    coefficients = np.array([-1.5, 0.56])
+
+    reflection = _schur_reflection_coefficients(coefficients, radius=0.95)
+
+    assert np.max(np.abs(reflection)) < 1.0
+    assert np.max(np.abs(np.roots(np.r_[1.0, coefficients]))) < 0.95
+
+
+def test_schur_reflection_coefficients_reject_pole_outside_requested_margin():
+    coefficients = np.poly([0.97, 0.7])[1:]
+
+    reflection = _schur_reflection_coefficients(coefficients, radius=0.95)
+
+    assert np.max(np.abs(reflection)) > 1.0
+
+
+def test_second_order_oe_stability_constraint_is_feasible_for_stable_model():
+    rng = np.random.default_rng(88)
+    sample_count = 120
+    u = rng.normal(size=(1, sample_count))
+    y = np.zeros((1, sample_count))
+    for sample in range(2, sample_count):
+        y[0, sample] = (
+            1.5 * y[0, sample - 1]
+            - 0.56 * y[0, sample - 2]
+            + 0.4 * u[0, sample - 1]
+        )
+
+    model = OEAlgorithm().identify(
+        y=y,
+        u=u,
+        nb=1,
+        nf=2,
+        nk=1,
+        max_iterations=100,
+        stability_constraint=True,
+        stability_margin=0.95,
+    )
+
+    poles = np.roots(model.G_tf.den[0][0])
+    assert np.max(np.abs(poles)) < 0.95
+    np.testing.assert_allclose(np.sort(poles), [0.7, 0.8], atol=1e-6)
