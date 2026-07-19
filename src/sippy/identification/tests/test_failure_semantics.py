@@ -110,9 +110,7 @@ def test_second_order_oe_stability_constraint_is_feasible_for_stable_model():
     y = np.zeros((1, sample_count))
     for sample in range(2, sample_count):
         y[0, sample] = (
-            1.5 * y[0, sample - 1]
-            - 0.56 * y[0, sample - 2]
-            + 0.4 * u[0, sample - 1]
+            1.5 * y[0, sample - 1] - 0.56 * y[0, sample - 2] + 0.4 * u[0, sample - 1]
         )
 
     model = OEAlgorithm().identify(

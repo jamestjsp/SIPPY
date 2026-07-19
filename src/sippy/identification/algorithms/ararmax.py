@@ -257,7 +257,9 @@ class ARARMAXAlgorithm(IdentificationAlgorithm):
                 )
                 return _state_space_from_results(results, nu, sample_time)
             except Exception as e:
-                raise RuntimeError("ARARMAX prediction-error optimization failed") from e
+                raise RuntimeError(
+                    "ARARMAX prediction-error optimization failed"
+                ) from e
         else:
             raise RuntimeError(
                 "CasADi is required for ARARMAX prediction-error identification"
