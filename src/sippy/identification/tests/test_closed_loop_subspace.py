@@ -1,3 +1,5 @@
+from itertools import permutations
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -58,6 +60,73 @@ def _assert_plant_recovery(
     assert frequency_error < maximum_frequency_error, (
         f"frequency-response error was {frequency_error:.4g}"
     )
+
+
+def _pole_set_error(reference, candidate):
+    reference_poles = np.asarray(control.poles(reference), dtype=complex)
+    candidate_poles = np.asarray(control.poles(candidate), dtype=complex)
+    if reference_poles.shape != candidate_poles.shape:
+        raise ValueError("pole sets must have matching dimensions")
+    errors = [
+        np.linalg.norm(reference_poles - candidate_poles[list(order)])
+        for order in permutations(range(candidate_poles.size))
+    ]
+    return float(
+        min(errors) / max(np.linalg.norm(reference_poles), np.finfo(float).tiny)
+    )
+
+
+def _markov_parameter_error(reference, candidate, count=12):
+    def parameters(system):
+        blocks = [np.asarray(system.D, dtype=float)]
+        state_power = np.eye(system.nstates)
+        for _ in range(1, count):
+            blocks.append(system.C @ state_power @ system.B)
+            state_power = state_power @ system.A
+        return np.stack(blocks)
+
+    expected = parameters(reference)
+    actual = parameters(candidate)
+    return float(
+        np.linalg.norm(expected - actual)
+        / max(np.linalg.norm(expected), np.finfo(float).tiny)
+    )
+
+
+def _closed_loop_monte_carlo_errors(
+    plant,
+    controller,
+    sample_count,
+    seeds,
+    **scenario_options,
+):
+    errors = []
+    for seed in seeds:
+        scenario = simulate_closed_loop_scenario(
+            plant,
+            controller,
+            n_train=sample_count,
+            n_validation=120,
+            seed=seed,
+            **scenario_options,
+        )
+        model = sippy.identify(
+            scenario.output,
+            scenario.plant_input,
+            ss_f=10,
+            ss_fixed_order=plant.nstates,
+            ss_d_required=bool(np.any(plant.D)),
+            tsample=plant.dt,
+        )
+        identified = control.ss(model.A, model.B, model.C, model.D, dt=model.ts)
+        errors.append(
+            (
+                frequency_response_error(plant, identified),
+                _pole_set_error(plant, identified),
+                _markov_parameter_error(plant, identified),
+            )
+        )
+    return np.mean(errors, axis=0)
 
 
 def test_closed_loop_simulator_satisfies_plant_and_controller_equations():
@@ -195,6 +264,62 @@ def test_mimo_dynamic_feedback_supports_correlated_colored_data():
     np.testing.assert_allclose(
         scenario.plant_states[:, 1:],
         plant.A @ scenario.plant_states[:, :-1] + plant.B @ scenario.plant_input,
+    )
+
+
+@pytest.mark.parametrize("system_kind", ["siso", "mimo"])
+def test_canonical_closed_loop_bias_decreases_with_sample_count(system_kind):
+    if system_kind == "siso":
+        plant = stable_siso_plant(direct_feedthrough=0.0)
+        controller = static_output_feedback_controller([[1.1]], dt=plant.dt)
+        sample_counts = (600, 2400)
+        scenario_options = {
+            "noise_scale": 0.08,
+            "noise_color": 0.65,
+            "dither_scale": 0.04,
+        }
+    else:
+        plant = stable_mimo_plant(direct_feedthrough=False)
+        controller = control.ss(
+            np.diag([0.45, 0.6]),
+            0.25 * np.eye(2),
+            0.2 * np.eye(2),
+            np.array([[0.35, 0.04], [-0.03, 0.3]]),
+            dt=plant.dt,
+        )
+        sample_counts = (500, 4000)
+        scenario_options = {
+            "reference_correlation": 0.45,
+            "noise_scale": 0.04,
+            "noise_correlation": 0.35,
+            "noise_color": 0.55,
+            "dither_scale": 0.05,
+        }
+
+    short_record = _closed_loop_monte_carlo_errors(
+        plant,
+        controller,
+        sample_counts[0],
+        seeds=(121, 122, 123),
+        **scenario_options,
+    )
+    long_record = _closed_loop_monte_carlo_errors(
+        plant,
+        controller,
+        sample_counts[1],
+        seeds=(121, 122, 123),
+        **scenario_options,
+    )
+
+    assert long_record[0] < short_record[0], (
+        f"FRF bias did not decrease: {short_record[0]:.4g} -> {long_record[0]:.4g}"
+    )
+    assert long_record[1] < short_record[1], (
+        f"pole bias did not decrease: {short_record[1]:.4g} -> {long_record[1]:.4g}"
+    )
+    assert long_record[2] < short_record[2], (
+        "Markov-parameter bias did not decrease: "
+        f"{short_record[2]:.4g} -> {long_record[2]:.4g}"
     )
 
 

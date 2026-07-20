@@ -13,6 +13,7 @@ import pytest
 
 from sippy.identification.algorithms import parsim_core as parsim_core_module
 from sippy.identification.algorithms.parsim_core import ParsimCoreAlgorithm
+from sippy.identification.algorithms.parsim_p import PARSIMPAlgorithm
 from sippy.identification.tests.reference_control_compat import (
     install_reference_control_compat,
 )
@@ -342,59 +343,25 @@ class TestParsimPReimplementation:
         assert np.allclose(B, B_reconstructed, rtol=1e-6), "B should equal B_K + K*D"
 
 
-class TestParsimPVsMaster:
-    """Integration tests comparing PARSIM-P with master branch implementation."""
-
-    @pytest.fixture
-    def master_parsim_methods_path(self):
-        """Path to master branch PARSIM methods file."""
-        return "/Users/josephj/Workspace/SIPPY-master/sippy_unipi/Parsim_methods.py"
-
-    def test_parsim_p_vs_master_siso(self, master_parsim_methods_path):
-        """Compare PARSIM-P results with master branch on SISO system."""
-        # This test requires the master branch to be available via git worktree
-        import os
-        import sys
-
-        if not os.path.exists(master_parsim_methods_path):
-            pytest.skip("Master branch not available for comparison")
-
-        # Add master branch to path
-        master_root = os.path.dirname(os.path.dirname(master_parsim_methods_path))
-        sys.path.append(master_root)
-
-        from sippy_unipi.Parsim_methods import PARSIM_P as PARSIM_P_master
-
-        # Create test data
-        np.random.seed(42)
-        n_points = 200
-        u = np.random.randn(1, n_points)
-        y = np.zeros((1, n_points))
-        for i in range(1, n_points):
-            y[0, i] = 0.8 * y[0, i - 1] + 0.5 * u[0, i - 1] + 0.05 * np.random.randn()
-
-        # Run both implementations
-        f = 10
-        p = 10
-        threshold = 0.1
-
-        # Maintained SIPPY implementation
-        A_K_h, C_h, B_K_h, D_h, K_h, A_h, B_h, x0_h, Vn_h = (
-            ParsimCoreAlgorithm.parsim_p(y, u, f=f, p=p, threshold=threshold)
+def test_parsim_p_recovers_reference_siso_pole_and_markov_parameter():
+    rng = np.random.default_rng(42)
+    sample_count = 700
+    u = rng.normal(size=(1, sample_count))
+    y = np.zeros((1, sample_count))
+    for sample in range(1, sample_count):
+        y[0, sample] = (
+            0.8 * y[0, sample - 1] + 0.5 * u[0, sample - 1] + 0.02 * rng.normal()
         )
 
-        # Master implementation
-        A_K_m, C_m, B_K_m, D_m, K_m, A_m, B_m, x0_m, Vn_m = PARSIM_P_master(
-            y, u, f=f, p=p, threshold=threshold
-        )
+    model = PARSIMPAlgorithm().identify(
+        y=y,
+        u=u,
+        ss_f=10,
+        ss_p=10,
+        ss_fixed_order=1,
+    )
 
-        # Compare results (allowing for some numerical tolerance)
-        # Note: May need larger tolerance due to different numerical approaches
-        assert A_h.shape == A_m.shape, "A matrices should have same shape"
-        assert B_h.shape == B_m.shape, "B matrices should have same shape"
-
-        for actual, expected in zip(
-            (A_K_h, C_h, B_K_h, D_h, K_h, A_h, B_h, x0_h, Vn_h),
-            (A_K_m, C_m, B_K_m, D_m, K_m, A_m, B_m, x0_m, Vn_m),
-        ):
-            np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
+    pole = np.linalg.eigvals(model.A)[0]
+    first_markov_parameter = (model.C @ model.B)[0, 0]
+    assert pole == pytest.approx(0.8, abs=0.04)
+    assert first_markov_parameter == pytest.approx(0.5, abs=0.04)
