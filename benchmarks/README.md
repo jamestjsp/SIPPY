@@ -1,5 +1,56 @@
 # SIPPY benchmarks
 
+## Closed-loop identification
+
+Run the closed-loop capability benchmark:
+
+```bash
+uv run python benchmarks/benchmark_closed_loop.py
+```
+
+The benchmark evaluates canonical `SUBSPACE` both without a measured reference
+(predictor route) and with one (two-stage ORT route). It uses two complementary
+records:
+
+- the ground-truth closed-loop example from the
+  [MathWorks `n4sid` SSARX documentation](https://www.mathworks.com/help/ident/ref/n4sid.html),
+  plus a two-independent-excitation variant that can exercise SIPPY's
+  two-stage ORT route, with held-out open-loop simulation, frequency-response,
+  pole, stability, route-selection, and timing metrics;
+- the CC BY 4.0 OpenMCT DC-motor controller-validation data published by Von
+  Chong and Cardenas, using measured reference, PWM actuation, and motor speed.
+
+The experimental archive is downloaded from Mendeley Data and checksum-checked.
+To reuse a local copy, pass `--archive path/to/archive.zip`; to run only the
+network-independent ground-truth workload, pass `--skip-motor`.
+
+Dataset citation: A. Von Chong and D. Cardenas, *Dataset for an end-to-end
+open-source DC motor control workflow: current calibration, system
+identification, and controller validation*, Mendeley Data, version 1, 2026,
+[doi:10.17632/5xvg43r9r8.1](https://doi.org/10.17632/5xvg43r9r8.1).
+
+A reference arm64 macOS run used 3,000 synthetic training samples and three
+post-warmup repetitions. NRMSE is measured on held-out data; FRF and pole
+columns are relative errors against known ground truth or, for the motor, the
+published open-loop fit.
+
+| Dataset | Reference | Route | Median | NRMSE | FRF error | Pole error |
+|---|---|---|---:|---:|---:|---:|
+| MathWorks SSARX | unavailable | predictor | 14.0 ms | 1.588 | 1.367 | 1.194 |
+| MathWorks SSARX | measured | predictor fallback | 25.3 ms | 1.588 | 1.367 | 1.194 |
+| Two excitations | unavailable | predictor | 14.4 ms | 0.0188 | 0.0187 | 0.107 |
+| Two excitations | measured | two-stage ORT | 15.0 ms | 0.0334 | 0.0332 | 0.395 |
+| OpenMCT motor | unavailable | predictor | 5.6 ms | 0.0312 | 0.151 | 0.0938 |
+| OpenMCT motor | measured | predictor fallback | 10.0 ms | 0.0312 | 0.151 | 0.0938 |
+
+The single-excitation MathWorks record and the motor's step-reference record
+both trigger `reference_deterministic_regressor_rank_deficient`, so measured
+references fall back to the predictor estimator. The two-independent-
+excitation case proves that the ORT path is reachable and accurately recovers
+the plant response. The motor NRMSE is evaluated on a held-out closed-loop
+segment; its FRF and pole errors against the separately published open-loop fit
+are the stronger plant-recovery checks.
+
 ## Subspace identification
 
 Run the loop-agnostic estimator comparison:
