@@ -7,6 +7,7 @@ from scipy.linalg import solve_discrete_are
 
 from sippy.identification.algorithms import subspace_core as subspace_core_module
 from sippy.identification.algorithms.subspace_core import SubspaceCoreAlgorithm
+from sippy.identification.algorithms.subspace_weighting import cva_weighted_svd
 from sippy.identification.factory import create_algorithm
 from sippy.utils.signal_utils import rescale
 from sippy.utils.simulation_utils import K_calc
@@ -116,6 +117,58 @@ def test_cva_handles_rank_deficient_output_covariance():
     np.testing.assert_allclose(model.C[0], model.C[1], rtol=1e-10, atol=1e-10)
 
 
+def test_cva_whitens_the_conditional_consistent_subspace():
+    rng = np.random.default_rng(82)
+    consistent = rng.normal(size=(6, 30))
+    conditional_outputs = rng.normal(size=(6, 90))
+
+    U, singular_values, Vh, square_root, diagnostics = cva_weighted_svd(
+        consistent,
+        conditional_outputs,
+    )
+
+    whitened_outputs = np.linalg.solve(square_root, conditional_outputs)
+    np.testing.assert_allclose(
+        whitened_outputs @ whitened_outputs.T,
+        np.eye(6),
+        rtol=2e-10,
+        atol=2e-10,
+    )
+    np.testing.assert_allclose(
+        U @ np.diag(singular_values) @ Vh,
+        np.linalg.solve(square_root, consistent),
+        rtol=2e-10,
+        atol=2e-10,
+    )
+    assert diagnostics.applied == "CVA"
+    assert diagnostics.fallback_reason is None
+
+
+def test_singular_cva_falls_back_to_the_same_unweighted_consistent_subspace():
+    rng = np.random.default_rng(83)
+    consistent = rng.normal(size=(4, 20))
+    conditional_base = rng.normal(size=(2, 60))
+    conditional_outputs = np.vstack(
+        (conditional_base, conditional_base[0:1], conditional_base[1:2])
+    )
+
+    U, singular_values, Vh, square_root, diagnostics = cva_weighted_svd(
+        consistent,
+        conditional_outputs,
+    )
+
+    assert square_root is None
+    np.testing.assert_allclose(
+        U @ np.diag(singular_values) @ Vh,
+        consistent,
+        rtol=2e-10,
+        atol=2e-10,
+    )
+    assert diagnostics.applied == "unweighted"
+    assert diagnostics.covariance_rank == 2
+    assert diagnostics.fallback_reason == "conditional_covariance_rank_deficient"
+
+
 def test_subspace_order_selection_uses_causal_innovation_likelihood():
     rng = np.random.default_rng(44)
     sample_count = 60
@@ -161,6 +214,112 @@ def test_innovation_information_criterion_uses_mimo_log_determinant():
     )
 
     assert actual == pytest.approx(expected)
+
+
+def test_automatic_horizon_and_order_candidates_respect_data_constraints():
+    horizons = subspace_core_module._default_horizon_candidates(
+        500,
+        2,
+        2,
+        reference_count=4,
+    )
+
+    assert len(horizons) >= 2
+    for horizon in horizons:
+        usable_columns = 500 - 2 * horizon + 1
+        assert usable_columns >= (2 + 2) * (horizon + 1)
+        assert usable_columns >= 2 * 4 * horizon
+
+    assert subspace_core_module._default_horizon_candidates(
+        500,
+        2,
+        2,
+        reference_count=4,
+        explicit_horizon=7,
+    ) == (7,)
+
+    orders, effective_rank = (
+        subspace_core_module._candidate_orders_from_singular_values(
+            np.array([10.0, 4.0, 0.3, 0.02, 1e-8]),
+            horizon=5,
+        )
+    )
+    assert all(1 <= order < 5 for order in orders)
+    assert effective_rank == 4
+    assert subspace_core_module._candidate_orders_from_singular_values(
+        np.array([10.0, 4.0, 0.3]),
+        horizon=5,
+        explicit_order=2,
+    )[0] == (2,)
+
+
+def test_dimension_selection_reuses_causal_innovation_scoring_on_fixed_tail(
+    monkeypatch,
+):
+    rng = np.random.default_rng(45)
+    samples = 300
+    u = rng.normal(size=(1, samples))
+    y = np.zeros((1, samples))
+    for sample in range(1, samples):
+        y[0, sample] = (
+            0.7 * y[0, sample - 1] + 0.4 * u[0, sample - 1] + 0.03 * rng.normal()
+        )
+
+    candidates = (
+        subspace_core_module.DimensionCandidate(
+            horizon=8,
+            order=1,
+            singular_values=np.array([5.0, 0.1]),
+            effective_rank=2,
+            singular_gap=50.0,
+            A=np.array([[0.7]]),
+            B=np.array([[0.4]]),
+            C=np.array([[1.0]]),
+            D=np.zeros((1, 1)),
+            K=np.array([[0.7]]),
+            parameter_count=4,
+            initial_state=np.zeros(1),
+        ),
+        subspace_core_module.DimensionCandidate(
+            horizon=12,
+            order=2,
+            singular_values=np.array([5.0, 2.0, 0.1]),
+            effective_rank=3,
+            singular_gap=20.0,
+            A=np.diag([0.2, 0.1]),
+            B=np.zeros((2, 1)),
+            C=np.array([[1.0, 0.0]]),
+            D=np.zeros((1, 1)),
+            K=np.zeros((2, 1)),
+            parameter_count=12,
+            initial_state=np.zeros(2),
+        ),
+    )
+    calls = 0
+    original = subspace_core_module._innovation_information_criterion
+
+    def tracked_criterion(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        subspace_core_module,
+        "_innovation_information_criterion",
+        tracked_criterion,
+    )
+
+    selection = subspace_core_module._select_dimension_candidate(
+        candidates,
+        y,
+        u,
+        method="BIC",
+        validation_fraction=0.2,
+    )
+
+    assert calls == len(candidates)
+    assert selection.candidate.order == 1
+    assert selection.validation_start == 240
 
 
 def test_subspace_order_selection_honors_parallel_n_jobs(monkeypatch):

@@ -23,6 +23,10 @@ from ...utils.simulation_utils import (
     ss_lsim_predictor_form,
 )
 from .subspace_data import SubspaceData, prepare_subspace_data
+from .subspace_weighting import (
+    SubspaceWeightingDiagnostics,
+    cva_weighted_svd,
+)
 
 # Import compiled utilities for performance
 try:
@@ -97,6 +101,171 @@ def _innovation_information_criterion(errors, parameter_count, method):
 
 
 @dataclass(frozen=True)
+class DimensionCandidate:
+    horizon: int
+    order: int
+    singular_values: np.ndarray
+    effective_rank: int
+    singular_gap: float
+    A: np.ndarray
+    B: np.ndarray
+    C: np.ndarray
+    D: np.ndarray
+    K: np.ndarray
+    parameter_count: int
+    initial_state: np.ndarray
+
+
+@dataclass(frozen=True)
+class DimensionSelection:
+    candidate: DimensionCandidate
+    scores: tuple[tuple[int, int, float], ...]
+    validation_start: int
+    criterion: str
+
+
+@dataclass(frozen=True)
+class PreparedORTSubspace:
+    data: SubspaceData
+    ort: object
+    U: np.ndarray
+    singular_values: np.ndarray
+    Vh: np.ndarray
+    output_weighting: np.ndarray | None
+    deterministic_inputs: np.ndarray
+    deterministic_outputs: np.ndarray
+
+
+def _default_horizon_candidates(
+    sample_count,
+    input_count,
+    output_count,
+    *,
+    reference_count=0,
+    explicit_horizon=None,
+):
+    channel_count = input_count + output_count
+    if sample_count < 1 or input_count < 1 or output_count < 1:
+        raise ValueError("sample and channel counts must be positive")
+    maximum = (sample_count + 1 - channel_count) // (channel_count + 2)
+    if reference_count:
+        maximum = min(maximum, (sample_count + 1) // (2 * (reference_count + 1)))
+    maximum = min(int(maximum), 40)
+    if maximum < 2:
+        raise ValueError("record is too short for automatic subspace horizons")
+
+    if explicit_horizon is not None:
+        if (
+            isinstance(explicit_horizon, bool)
+            or not isinstance(explicit_horizon, (int, np.integer))
+            or not 2 <= int(explicit_horizon) <= maximum
+        ):
+            raise ValueError(
+                f"explicit horizon must be between 2 and {maximum} for this record"
+            )
+        return (int(explicit_horizon),)
+
+    target = int(np.sqrt(sample_count / channel_count))
+    target = min(max(target, 2), maximum)
+    candidates = {
+        max(2, target // 2),
+        target,
+        min(maximum, max(target + 1, 3 * target // 2)),
+        maximum,
+    }
+    return tuple(sorted(candidates))
+
+
+def _candidate_orders_from_singular_values(
+    singular_values,
+    horizon,
+    *,
+    explicit_order=None,
+):
+    values = np.asarray(singular_values, dtype=float)
+    if values.ndim != 1 or values.size == 0 or not np.all(np.isfinite(values)):
+        raise ValueError("singular values must be a finite nonempty vector")
+    maximum = min(values.size, int(horizon) - 1)
+    if maximum < 1:
+        raise ValueError("future horizon must exceed the candidate model order")
+    if explicit_order is not None:
+        if (
+            isinstance(explicit_order, bool)
+            or not isinstance(explicit_order, (int, np.integer))
+            or not 1 <= int(explicit_order) <= maximum
+        ):
+            raise ValueError(
+                f"explicit order must be between 1 and {maximum} for horizon {horizon}"
+            )
+        return (int(explicit_order),), maximum
+
+    scale = max(float(values[0]), np.finfo(np.float64).tiny)
+    numerical_tolerance = max(values.size, horizon) * np.finfo(np.float64).eps * scale
+    effective_rank = min(int(np.count_nonzero(values > numerical_tolerance)), maximum)
+    if effective_rank < 1:
+        return (1,), 1
+
+    bounded = values[:effective_rank]
+    next_values = np.maximum(
+        np.concatenate((values[1:effective_rank], [numerical_tolerance])),
+        numerical_tolerance,
+    )
+    gaps = bounded / next_values
+    strongest_gaps = np.argsort(gaps)[-min(3, gaps.size) :] + 1
+    relative_order = int(np.count_nonzero(bounded >= 0.01 * scale))
+    energy = np.cumsum(bounded**2) / np.sum(bounded**2)
+    energy_order = int(np.searchsorted(energy, 0.99) + 1)
+    candidates = {
+        int(order)
+        for order in (*strongest_gaps, relative_order, energy_order)
+        if 1 <= int(order) <= maximum
+    }
+    return tuple(sorted(candidates)), effective_rank
+
+
+def _select_dimension_candidate(
+    candidates,
+    y,
+    u,
+    *,
+    method="BIC",
+    validation_fraction=0.2,
+):
+    candidates = tuple(candidates)
+    if not candidates:
+        raise ValueError("at least one dimension candidate is required")
+    sample_count = y.shape[1]
+    validation_count = max(1, int(np.ceil(validation_fraction * sample_count)))
+    validation_start = sample_count - validation_count
+    scores = []
+    for candidate in candidates:
+        start = max(validation_start, 2 * candidate.horizon)
+        errors = _causal_prediction_errors(
+            candidate.A,
+            candidate.B,
+            candidate.C,
+            candidate.D,
+            candidate.K,
+            y,
+            u,
+            candidate.initial_state,
+        )[:, start:]
+        score = _innovation_information_criterion(
+            errors,
+            candidate.parameter_count,
+            method,
+        )
+        scores.append((candidate.horizon, candidate.order, score))
+    selected_index = int(np.argmin([score for _, _, score in scores]))
+    return DimensionSelection(
+        candidate=candidates[selected_index],
+        scores=tuple(scores),
+        validation_start=validation_start,
+        criterion=method,
+    )
+
+
+@dataclass(frozen=True)
 class _LQProjection:
     projector: np.ndarray
     past_data: np.ndarray
@@ -152,6 +321,7 @@ class _TwoStageORTProjection:
     compact_projection: np.ndarray | None
     compact_moesp: np.ndarray | None
     compact_projected_outputs: np.ndarray | None
+    weighting: SubspaceWeightingDiagnostics | None = None
 
 
 def _warn_for_unusable_reference(diagnostics):
@@ -369,37 +539,132 @@ def _weighted_projection_svd(
     if weights == "MOESP":
         weighting = None
         U_n, S_n, V_n = np.linalg.svd(compact_moesp, full_matrices=False)
-    elif weights == "CVA":
-        covariance_product = compact_projected_outputs @ compact_projected_outputs.T
-        covariance = 0.5 * (covariance_product + covariance_product.T)
-        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-        largest_eigenvalue = max(float(eigenvalues[-1]), 0.0)
-        tolerance = (
-            max(covariance.shape) * np.finfo(np.float64).eps * largest_eigenvalue
+        diagnostics = SubspaceWeightingDiagnostics(
+            requested="MOESP",
+            applied="MOESP",
+            covariance_rank=0,
+            covariance_rows=compact_projected_outputs.shape[0],
         )
-        retained = eigenvalues > tolerance
-        if not np.any(retained):
-            warnings.warn("CVA weighting failed, falling back to N4SID")
-            weighting = None
-            U_n, S_n, V_n = np.linalg.svd(compact_projection, full_matrices=False)
-        else:
-            retained_vectors = eigenvectors[:, retained]
-            retained_eigenvalues = eigenvalues[retained]
-            square_roots = np.sqrt(retained_eigenvalues)
-            weighting = (retained_vectors * square_roots) @ retained_vectors.T
-            inverse_square_root = (
-                retained_vectors * (1.0 / square_roots)
-            ) @ retained_vectors.T
-            U_n, S_n, V_n = np.linalg.svd(
-                inverse_square_root @ compact_moesp,
-                full_matrices=False,
-            )
+    elif weights == "CVA":
+        U_n, S_n, V_n, weighting, diagnostics = cva_weighted_svd(
+            compact_moesp,
+            compact_projected_outputs,
+        )
     elif weights == "N4SID":
         weighting = None
         U_n, S_n, V_n = np.linalg.svd(compact_projection, full_matrices=False)
+        diagnostics = SubspaceWeightingDiagnostics(
+            requested="N4SID",
+            applied="N4SID",
+            covariance_rank=0,
+            covariance_rows=compact_projected_outputs.shape[0],
+        )
     else:
         raise ValueError(f"Unknown weighting method: {weights}")
-    return U_n, S_n, V_n, weighting
+    return U_n, S_n, V_n, weighting, diagnostics
+
+
+def _prepare_ort_subspace(
+    data: SubspaceData,
+    *,
+    weights="CVA",
+    warn_on_fallback=True,
+):
+    decomposition, ort = SubspaceCoreAlgorithm.svd_weighted_ort(
+        data,
+        weights,
+        warn_on_fallback=warn_on_fallback,
+    )
+    if decomposition is None:
+        return None, ort.diagnostics
+    U_n, S_n, V_n, W1, _ = decomposition
+    deterministic = ort.reference_projection.materialize()
+    future_input_rows = data.future_inputs.shape[0]
+    past_rows = data.past_data.shape[0]
+    output_start = future_input_rows + past_rows
+    return (
+        PreparedORTSubspace(
+            data=data,
+            ort=ort,
+            U=U_n,
+            singular_values=S_n,
+            Vh=V_n,
+            output_weighting=W1,
+            deterministic_inputs=deterministic[: data.inputs.shape[0]],
+            deterministic_outputs=deterministic[
+                output_start : output_start + data.outputs.shape[0]
+            ],
+        ),
+        ort.diagnostics,
+    )
+
+
+def _realize_ort_dimension_candidate(prepared, order):
+    data = prepared.data
+    output_count = data.outputs.shape[0]
+    input_count = data.inputs.shape[0]
+    _, _, M, selected_order, residuals = SubspaceCoreAlgorithm.algorithm_1(
+        data.outputs,
+        data.inputs,
+        output_count,
+        input_count,
+        data.future_horizon,
+        data.usable_columns,
+        prepared.U,
+        prepared.singular_values,
+        prepared.Vh,
+        prepared.output_weighting,
+        prepared.ort.projection,
+        0.0,
+        order,
+        False,
+        regression_y=prepared.deterministic_outputs,
+        regression_u=prepared.deterministic_inputs,
+    )
+    A, B, C, D = SubspaceCoreAlgorithm.extract_matrices(M, selected_order)
+    covariance = residuals @ residuals.T / residuals.shape[1]
+    Q = covariance[:selected_order, :selected_order]
+    R = covariance[selected_order:, selected_order:]
+    S = covariance[:selected_order, selected_order:]
+    K, gain_calculated = K_calc(A, C, Q, R, S)
+
+    for channel in range(input_count):
+        B[:, channel] /= data.input_scale[channel]
+        D[:, channel] /= data.input_scale[channel]
+    for channel in range(output_count):
+        C[channel, :] *= data.output_scale[channel]
+        D[channel, :] *= data.output_scale[channel]
+        if gain_calculated:
+            K[:, channel] /= data.output_scale[channel]
+
+    _, effective_rank = _candidate_orders_from_singular_values(
+        prepared.singular_values,
+        data.future_horizon,
+    )
+    if selected_order < prepared.singular_values.size:
+        denominator = max(
+            float(prepared.singular_values[selected_order]),
+            np.finfo(np.float64).tiny,
+        )
+        singular_gap = float(prepared.singular_values[selected_order - 1] / denominator)
+    else:
+        singular_gap = np.inf
+    parameter_count = selected_order * (input_count + 2 * output_count)
+    parameter_count += output_count * (output_count + 1) // 2
+    return DimensionCandidate(
+        horizon=data.future_horizon,
+        order=selected_order,
+        singular_values=prepared.singular_values.copy(),
+        effective_rank=effective_rank,
+        singular_gap=singular_gap,
+        A=A,
+        B=B,
+        C=C,
+        D=D,
+        K=K,
+        parameter_count=parameter_count,
+        initial_state=np.zeros(selected_order),
+    )
 
 
 class SubspaceCoreAlgorithm:
@@ -449,7 +714,7 @@ class SubspaceCoreAlgorithm:
             _lq_compress_subspace_data(Uf, Zp, Yf)
         )
 
-        U_n, S_n, V_n, W1 = _weighted_projection_svd(
+        U_n, S_n, V_n, W1, _ = _weighted_projection_svd(
             compact_projection,
             compact_moesp,
             compact_projected_outputs,
@@ -459,18 +724,25 @@ class SubspaceCoreAlgorithm:
         return U_n, S_n, V_n, W1, projection
 
     @staticmethod
-    def svd_weighted_ort(data: SubspaceData, weights="N4SID"):
+    def svd_weighted_ort(
+        data: SubspaceData,
+        weights="N4SID",
+        *,
+        warn_on_fallback=True,
+    ):
         ort = _two_stage_ort_projection(data)
         if not ort.diagnostics.usable:
-            _warn_for_unusable_reference(ort.diagnostics)
+            if warn_on_fallback:
+                _warn_for_unusable_reference(ort.diagnostics)
             return None, ort
-        decomposition = _weighted_projection_svd(
+        U_n, S_n, V_n, W1, weighting = _weighted_projection_svd(
             ort.compact_projection,
             ort.compact_moesp,
             ort.compact_projected_outputs,
             weights,
         )
-        return (*decomposition, ort.projection), ort
+        ort = replace(ort, weighting=weighting)
+        return (U_n, S_n, V_n, W1, ort.projection), ort
 
     @staticmethod
     def algorithm_1(

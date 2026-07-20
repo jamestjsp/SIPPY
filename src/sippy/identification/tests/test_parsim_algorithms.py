@@ -66,6 +66,24 @@ class TestPARSIMKAlgorithm:
         assert model.D.shape[0] == y.shape[0]  # D rows match outputs
         assert model.D.shape[1] == u.shape[0]  # D columns match inputs
 
+    def test_parsim_k_preserves_optional_process_form_b_recalculation(
+        self, sample_data
+    ):
+        from sippy.identification.algorithms.parsim_k import PARSIMKAlgorithm
+
+        y, u = sample_data
+        model = PARSIMKAlgorithm().identify(
+            y,
+            u,
+            ss_f=10,
+            ss_p=10,
+            ss_fixed_order=2,
+            ss_pk_b_reval=True,
+        )
+
+        assert np.all(np.isfinite(model.B))
+        assert model.B.shape == (2, 2)
+
     def test_parsim_k_parameter_validation(self):
         """Test PARSIM-K parameter validation."""
         from sippy.identification.algorithms.parsim_k import PARSIMKAlgorithm

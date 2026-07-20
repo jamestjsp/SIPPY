@@ -23,6 +23,10 @@ from ...utils.simulation_utils import (
     simulate_ss_system,
 )
 from .subspace_data import prepare_subspace_data
+from .subspace_weighting import (
+    SubspaceWeightingDiagnostics,
+    cva_weighted_svd,
+)
 
 # Import compiled utilities for performance
 try:
@@ -91,6 +95,7 @@ class PredictorMarkovEstimate:
     gamma_blocks: np.ndarray
     input_blocks: np.ndarray
     output_blocks: np.ndarray
+    conditional_outputs: np.ndarray
     used_compatibility_fallback: bool
 
     @property
@@ -123,6 +128,7 @@ def _estimate_predictor_markov_blocks(
     gamma_blocks = np.empty((future_horizon, output_count, Zp.shape[0]), dtype=float)
     input_blocks = np.zeros((future_horizon, output_count, input_count), dtype=float)
     output_blocks = np.zeros((future_horizon, output_count, output_count), dtype=float)
+    conditional_outputs = np.empty_like(Yf)
 
     initial_regressor = np.vstack((Zp, Uf[:input_count])) if direct_feedthrough else Zp
     initial_solver = _ReusableRightLeastSquares.factor(initial_regressor)
@@ -130,6 +136,9 @@ def _estimate_predictor_markov_blocks(
     gamma_blocks[0] = initial_coefficients[:, : Zp.shape[0]]
     if direct_feedthrough:
         input_blocks[0] = initial_coefficients[:, Zp.shape[0] :]
+    conditional_outputs[:output_count] = (
+        Yf[:output_count] - input_blocks[0] @ Uf[:input_count]
+    )
 
     iteration_solver = None
     if future_horizon > 1:
@@ -157,6 +166,11 @@ def _estimate_predictor_markov_blocks(
                 :, markov_start : markov_start + input_count
             ]
             output_blocks[row] = coefficients[:, markov_start + input_count :]
+            conditional_outputs[output_count * row : output_count * (row + 1)] = (
+                adjusted_output
+                - input_blocks[row] @ Uf[:input_count]
+                - output_blocks[row] @ Yf[:output_count]
+            )
 
     used_fallback = not initial_solver.full_rank or (
         iteration_solver is not None and not iteration_solver.full_rank
@@ -169,6 +183,7 @@ def _estimate_predictor_markov_blocks(
         gamma_blocks=gamma_blocks,
         input_blocks=input_blocks,
         output_blocks=output_blocks,
+        conditional_outputs=conditional_outputs,
         used_compatibility_fallback=used_fallback,
     )
 
@@ -185,6 +200,199 @@ def _solve_predictor_parameters(design, outputs, *, strict=False):
             "predictor parameter regression is not identifiable from the supplied data"
         )
     return solver.solve(target).T, not solver.full_rank
+
+
+@dataclass(frozen=True)
+class PreparedPredictorSubspace:
+    data: object
+    output_count: int
+    input_count: int
+    sample_count: int
+    future_horizon: int
+    direct_feedthrough: bool
+    strict_identifiability: bool
+    U: np.ndarray
+    singular_values: np.ndarray
+    Vh: np.ndarray
+    output_weighting: np.ndarray | None
+    weighting_diagnostics: SubspaceWeightingDiagnostics
+    markov_estimate: PredictorMarkovEstimate
+
+
+def _prepare_predictor_subspace(
+    y,
+    u,
+    *,
+    future_horizon,
+    past_horizon,
+    direct_feedthrough,
+    strict_identifiability,
+    weighting,
+):
+    outputs = np.atleast_2d(np.asarray(y, dtype=float))
+    inputs = np.atleast_2d(np.asarray(u, dtype=float))
+    output_count, sample_count = outputs.shape
+    input_count = inputs.shape[0]
+    data = prepare_subspace_data(
+        outputs,
+        inputs,
+        future_horizon=future_horizon,
+        past_offset=past_horizon,
+        past_block_rows=past_horizon,
+    )
+    markov_estimate = _estimate_predictor_markov_blocks(
+        data.future_outputs,
+        data.future_inputs,
+        data.past_data,
+        output_count=output_count,
+        input_count=input_count,
+        future_horizon=future_horizon,
+        direct_feedthrough=direct_feedthrough,
+        strict=strict_identifiability,
+    )
+    U, singular_values, Vh, output_weighting, diagnostics = (
+        ParsimCoreAlgorithm.svd_weighted_k(
+            data.future_inputs,
+            data.past_data,
+            markov_estimate.gamma_matrix,
+            conditional_outputs=markov_estimate.conditional_outputs,
+            weights=weighting,
+            return_diagnostics=True,
+        )
+    )
+    return PreparedPredictorSubspace(
+        data=data,
+        output_count=output_count,
+        input_count=input_count,
+        sample_count=sample_count,
+        future_horizon=future_horizon,
+        direct_feedthrough=direct_feedthrough,
+        strict_identifiability=strict_identifiability,
+        U=U,
+        singular_values=singular_values,
+        Vh=Vh,
+        output_weighting=output_weighting,
+        weighting_diagnostics=diagnostics,
+        markov_estimate=markov_estimate,
+    )
+
+
+def _realize_predictor_subspace(
+    prepared,
+    *,
+    threshold,
+    max_order,
+    recalculate_b=False,
+):
+    data = prepared.data
+    y = data.outputs
+    u = data.inputs
+    output_count = prepared.output_count
+    input_count = prepared.input_count
+    sample_count = prepared.sample_count
+    horizon = prepared.future_horizon
+    U_n, S_n, V_n = reducingOrder(
+        prepared.U.copy(),
+        prepared.singular_values.copy(),
+        prepared.Vh.copy(),
+        threshold,
+        max_order,
+    )
+    order = S_n.size
+    observability = U_n @ np.diag(np.sqrt(S_n))
+    if prepared.output_weighting is not None:
+        observability = prepared.output_weighting @ observability
+    if output_count * (horizon - 1) < order or order == 0:
+        raise ValueError(
+            "PARSIM-K future horizon is too short for the identified order"
+        )
+    A_K = (
+        np.linalg.pinv(observability[: output_count * (horizon - 1)])
+        @ (observability[output_count:])
+    )
+    C = observability[:output_count].copy()
+
+    parameter_design = ParsimCoreAlgorithm.simulations_sequence_k(
+        A_K,
+        C,
+        sample_count,
+        y,
+        u,
+        output_count,
+        input_count,
+        order,
+        np.zeros((order, output_count)),
+        np.zeros((output_count, input_count)),
+        prepared.direct_feedthrough,
+    )
+    parameters, _ = _solve_predictor_parameters(
+        parameter_design,
+        y,
+        strict=prepared.strict_identifiability,
+    )
+    output_estimate = parameter_design @ parameters
+    variance = Vn_mat(y.reshape((sample_count * output_count, 1)), output_estimate)
+
+    B_K = parameters[: order * input_count].reshape((order, input_count))
+    if prepared.direct_feedthrough:
+        d_start = order * input_count
+        k_start = d_start + output_count * input_count
+        x_start = k_start + order * output_count
+        D = parameters[d_start:k_start].reshape((output_count, input_count))
+        K = parameters[k_start:x_start].reshape((order, output_count))
+        x0 = parameters[x_start:].reshape((order, 1))
+    else:
+        k_start = order * input_count
+        x_start = k_start + order * output_count
+        D = np.zeros((output_count, input_count))
+        K = parameters[k_start:x_start].reshape((order, output_count))
+        x0 = parameters[x_start:].reshape((order, 1))
+
+    A = A_K + K @ C
+    if recalculate_b:
+        simulation_count = order * input_count + order
+        simulation_rows = []
+        basis = np.zeros((simulation_count, 1))
+        for index in range(simulation_count):
+            basis[index, 0] = 1.0
+            trial_b = basis[: order * input_count].reshape((order, input_count))
+            trial_x0 = basis[order * input_count :].reshape((order, 1))
+            _, trial_output = simulate_ss_system(
+                A,
+                trial_b,
+                C,
+                D,
+                u,
+                x0=trial_x0,
+            )
+            simulation_rows.append(trial_output.reshape(1, sample_count * output_count))
+            basis[index, 0] = 0.0
+        process_design = np.vstack(simulation_rows).T
+        process_parameters, _ = _solve_predictor_parameters(
+            process_design,
+            y,
+            strict=prepared.strict_identifiability,
+        )
+        output_estimate = process_design @ process_parameters
+        variance = Vn_mat(
+            y.reshape((sample_count * output_count, 1)),
+            output_estimate,
+        )
+        B = process_parameters[: order * input_count].reshape((order, input_count))
+        x0 = process_parameters[order * input_count :].reshape((order, 1))
+        B_K = B - K @ D
+    else:
+        B = B_K + K @ D
+
+    for channel in range(input_count):
+        B_K[:, channel] /= data.input_scale[channel]
+        D[:, channel] /= data.input_scale[channel]
+    for channel in range(output_count):
+        K[:, channel] /= data.output_scale[channel]
+        C[channel, :] *= data.output_scale[channel]
+        D[channel, :] *= data.output_scale[channel]
+    B = B_K + K @ D
+    return A_K, C, B_K, D, K, A, B, x0, variance
 
 
 def _build_parsim_p_gamma_l(Yf, Uf, Zp, f, l_, m):
@@ -235,6 +443,7 @@ class ParsimCoreAlgorithm:
         D_required=False,
         B_recalc=False,
         strict_identifiability=False,
+        weighting="N4SID",
     ):
         """
         PARSIM-K algorithm implementation.
@@ -262,6 +471,8 @@ class ParsimCoreAlgorithm:
         strict_identifiability : bool
             Raise instead of using the explicit PARSIM-K compatibility fallback
             when a required regression is rank deficient
+        weighting : str
+            Predictor subspace weighting (``N4SID`` or ``CVA``)
 
         Returns:
         --------
@@ -270,8 +481,6 @@ class ParsimCoreAlgorithm:
         """
         y = 1.0 * np.atleast_2d(y)
         u = 1.0 * np.atleast_2d(u)
-        l_, L = y.shape
-        m = u[:, 0].size
 
         if not check_types(threshold, max_order, fixed_order, f, p):
             return (
@@ -288,140 +497,21 @@ class ParsimCoreAlgorithm:
 
         threshold, max_order = check_inputs(threshold, max_order, fixed_order, f)
 
-        data = prepare_subspace_data(
+        prepared = _prepare_predictor_subspace(
             y,
             u,
             future_horizon=f,
-            past_offset=p,
-            past_block_rows=p,
-        )
-        y = data.outputs
-        u = data.inputs
-        Ustd = data.input_scale
-        Ystd = data.output_scale
-        Yf = data.future_outputs
-        Uf = data.future_inputs
-        Zp = data.past_data
-        markov_estimate = _estimate_predictor_markov_blocks(
-            Yf,
-            Uf,
-            Zp,
-            output_count=l_,
-            input_count=m,
-            future_horizon=f,
+            past_horizon=p,
             direct_feedthrough=D_required,
-            strict=strict_identifiability,
+            strict_identifiability=strict_identifiability,
+            weighting=weighting,
         )
-        Gamma_L = markov_estimate.gamma_matrix
-
-        # CRITICAL FIX: Use PARSIM-K specific SVD with Gamma_L (not N4SID's svd_weighted)
-        # Reference: master/sippy_unipi/Parsim_methods.py line 233
-        U_n, S_n, V_n = ParsimCoreAlgorithm.svd_weighted_k(Uf, Zp, Gamma_L)
-        U_n, S_n, V_n = reducingOrder(U_n, S_n, V_n, threshold, max_order)
-
-        n = S_n.size
-        S_n_diag = np.diag(S_n)
-        Ob_K = np.dot(U_n, np.sqrt(S_n_diag))
-
-        # Estimate A_K carefully
-        if l_ * (f - 1) >= n and n > 0:
-            try:
-                A_K = np.dot(
-                    pinv_compiled_svd(Ob_K[0 : l_ * (f - 1), :])
-                    if NUMBA_AVAILABLE
-                    else np.linalg.pinv(Ob_K[0 : l_ * (f - 1), :]),
-                    Ob_K[l_:, :],
-                )
-            except (np.linalg.LinAlgError, ValueError):
-                A_K = np.linalg.pinv(Ob_K[0 : l_ * (f - 1), :]) @ Ob_K[l_:, :]
-        else:
-            raise ValueError(
-                "PARSIM-K future horizon is too short for the identified order"
-            )
-
-        C = Ob_K[0:l_, :]
-
-        # CRITICAL FIX: Use simulations_sequence_k for parameter estimation
-        # This uses predictor form simulation
-        # Reference: master/sippy_unipi/Parsim_methods.py line 240
-        K_placeholder = np.zeros((n, l_))
-        D_placeholder = np.zeros((l_, m))
-        y_sim = ParsimCoreAlgorithm.simulations_sequence_k(
-            A_K, C, L, y, u, l_, m, n, K_placeholder, D_placeholder, D_required
+        return _realize_predictor_subspace(
+            prepared,
+            threshold=threshold,
+            max_order=max_order,
+            recalculate_b=B_recalc,
         )
-
-        # Solve for parameters using least squares
-        vect, _ = _solve_predictor_parameters(
-            y_sim,
-            y,
-            strict=strict_identifiability,
-        )
-        Y_estimate = np.dot(y_sim, vect)
-        Vn = Vn_mat(y.reshape((L * l_, 1)), Y_estimate)
-
-        # Extract parameters from vect
-        B_K = vect[0 : n * m, :].reshape((n, m))
-        if D_required:
-            D = vect[n * m : n * m + l_ * m, :].reshape((l_, m))
-            K = vect[n * m + l_ * m : n * m + l_ * m + n * l_, :].reshape((n, l_))
-            x0 = vect[n * m + l_ * m + n * l_ : :, :].reshape((n, 1))
-        else:
-            D = np.zeros((l_, m))
-            K = vect[n * m : n * m + n * l_, :].reshape((n, l_))
-            x0 = vect[n * m + n * l_ : :, :].reshape((n, 1))
-
-        # Calculate A matrix
-        A = A_K + np.dot(K, C)
-
-        # Optional B recalculation using process form
-        # Reference: master/sippy_unipi/Parsim_methods.py lines 256-263
-        if B_recalc:
-            # Helper function to create simulation matrix for B recalc
-            def recalc_K(A, C, D, u):
-                y_sim = []
-                n_ord = A[:, 0].size
-                m_input, L_u = u.shape
-                l_out = C[:, 0].size
-                n_simulations = n_ord + n_ord * m_input
-                vect = np.zeros((n_simulations, 1))
-                for i in range(n_simulations):
-                    vect[i, 0] = 1.0
-                    B_i = vect[0 : n_ord * m_input, :].reshape((n_ord, m_input))
-                    x0_i = vect[n_ord * m_input : :, :].reshape((n_ord, 1))
-                    _, y_i = simulate_ss_system(A, B_i, C, D, u, x0=x0_i)
-                    y_sim.append(y_i.reshape((1, L_u * l_out)))
-                    vect[i, 0] = 0.0
-                y_matrix = 1.0 * y_sim[0]
-                for j in range(n_simulations - 1):
-                    y_matrix = impile(y_matrix, y_sim[j + 1])
-                y_matrix = y_matrix.T
-                return y_matrix
-
-            y_sim = recalc_K(A, C, D, u)
-            vect, _ = _solve_predictor_parameters(
-                y_sim,
-                y,
-                strict=strict_identifiability,
-            )
-            Y_estimate = np.dot(y_sim, vect)
-            Vn = Vn_mat(y.reshape((L * l_, 1)), Y_estimate)
-            B = vect[0 : n * m, :].reshape((n, m))
-            x0 = vect[n * m : :, :].reshape((n, 1))
-            B_K = B - np.dot(K, D)
-        else:
-            B = B_K + np.dot(K, D)
-
-        # Rescale back to original units
-        for j in range(m):
-            B_K[:, j] = B_K[:, j] / Ustd[j]
-            D[:, j] = D[:, j] / Ustd[j]
-        for j in range(l_):
-            K[:, j] = K[:, j] / Ystd[j]
-            C[j, :] = C[j, :] * Ystd[j]
-            D[j, :] = D[j, :] * Ystd[j]
-        B = B_K + np.dot(K, D)
-
-        return A_K, C, B_K, D, K, A, B, x0, Vn
 
     @staticmethod
     def parsim_s(
@@ -692,7 +782,15 @@ class ParsimCoreAlgorithm:
         return A_K, C, B_K, D, K, A, B, x0, Vn
 
     @staticmethod
-    def svd_weighted_k(Uf, Zp, Gamma_L):
+    def svd_weighted_k(
+        Uf,
+        Zp,
+        Gamma_L,
+        *,
+        conditional_outputs=None,
+        weights="N4SID",
+        return_diagnostics=False,
+    ):
         """
         PARSIM-K specific weighted SVD.
 
@@ -723,38 +821,58 @@ class ParsimCoreAlgorithm:
 
         # Edge case: Check for empty or degenerate matrices
         if Gamma_L.size == 0 or Gamma_L.shape[0] == 0 or Gamma_L.shape[1] == 0:
-            # Return empty SVD components with consistent shapes
-            return (
+            decomposition = (
                 np.zeros((Gamma_L.shape[0], 0)),
                 np.array([]),
                 np.zeros((0, Gamma_L.shape[1])),
             )
+            if return_diagnostics:
+                diagnostics = SubspaceWeightingDiagnostics(
+                    requested=weights,
+                    applied="unweighted",
+                    covariance_rank=0,
+                    covariance_rows=Gamma_L.shape[0],
+                    fallback_reason="empty_consistent_subspace",
+                )
+                return (*decomposition, None, diagnostics)
+            return decomposition
 
         try:
-            # PARSIM-K weighting: W2 = sqrtm((Zp - Zp*Uf^T*pinv(Uf^T)) * Zp^T)
-            W2 = sc.linalg.sqrtm(np.dot(Z_dot_PIort(Zp, Uf), Zp.T)).real
-
-            # Check for NaN or Inf in W2
-            if not np.all(np.isfinite(W2)):
-                # Fallback to unweighted SVD
-                U_n, S_n, V_n = np.linalg.svd(Gamma_L, full_matrices=False)
-                return U_n, S_n, V_n
-
-            # Weighted SVD: svd(Gamma_L * W2)
-            weighted_matrix = np.dot(Gamma_L, W2)
-
-            # Check for numerical issues
-            if not np.all(np.isfinite(weighted_matrix)):
-                # Fallback to unweighted SVD
-                U_n, S_n, V_n = np.linalg.svd(Gamma_L, full_matrices=False)
-                return U_n, S_n, V_n
-
-            U_n, S_n, V_n = np.linalg.svd(weighted_matrix, full_matrices=False)
-
+            covariance_product = Z_dot_PIort(Zp, Uf) @ Zp.T
+            covariance = 0.5 * (covariance_product + covariance_product.T)
+            eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+            eigenvalues = np.maximum(eigenvalues, 0.0)
+            right_square_root = (eigenvectors * np.sqrt(eigenvalues)) @ eigenvectors.T
+            consistent_subspace = Gamma_L @ right_square_root
+            if not np.all(np.isfinite(consistent_subspace)):
+                consistent_subspace = Gamma_L
         except (np.linalg.LinAlgError, ValueError):
-            # Fallback to unweighted SVD on any linear algebra errors
-            U_n, S_n, V_n = np.linalg.svd(Gamma_L, full_matrices=False)
+            consistent_subspace = Gamma_L
 
+        if weights == "CVA":
+            if conditional_outputs is None:
+                raise ValueError("CVA requires conditional predictor outputs")
+            U_n, S_n, V_n, W1, diagnostics = cva_weighted_svd(
+                consistent_subspace,
+                conditional_outputs,
+            )
+        elif weights == "N4SID":
+            U_n, S_n, V_n = np.linalg.svd(
+                consistent_subspace,
+                full_matrices=False,
+            )
+            W1 = None
+            diagnostics = SubspaceWeightingDiagnostics(
+                requested="N4SID",
+                applied="predictor-right-weighted",
+                covariance_rank=0,
+                covariance_rows=Gamma_L.shape[0],
+            )
+        else:
+            raise ValueError(f"Unknown predictor weighting method: {weights}")
+
+        if return_diagnostics:
+            return U_n, S_n, V_n, W1, diagnostics
         return U_n, S_n, V_n
 
     @staticmethod

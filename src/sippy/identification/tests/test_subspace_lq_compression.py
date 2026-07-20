@@ -4,7 +4,9 @@ import pytest
 from sippy.identification.algorithms import subspace_core as subspace_core_module
 from sippy.identification.algorithms.subspace_core import (
     SubspaceCoreAlgorithm,
+    _prepare_ort_subspace,
     _project_onto_reference_row_space,
+    _realize_ort_dimension_candidate,
     _two_stage_ort_projection,
 )
 from sippy.identification.algorithms.subspace_data import prepare_subspace_data
@@ -271,3 +273,29 @@ def test_two_stage_ort_factors_stay_bounded_by_hankel_rows():
     assert result.reference_projection.coefficient_map.shape[1] == reference_rows
     assert max(result.compact_projection.shape) <= reference_rows
     assert max(result.projection.projector.shape) <= reference_rows
+
+
+def test_ort_order_candidates_share_both_lq_stages(monkeypatch):
+    data = _reference_projection_fixture()
+    calls = 0
+    original = subspace_core_module._two_stage_ort_projection
+
+    def tracked_projection(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        subspace_core_module,
+        "_two_stage_ort_projection",
+        tracked_projection,
+    )
+    prepared, diagnostics = _prepare_ort_subspace(data, weights="CVA")
+    first = _realize_ort_dimension_candidate(prepared, 1)
+    second = _realize_ort_dimension_candidate(prepared, 2)
+
+    assert diagnostics.usable
+    assert calls == 1
+    assert first.A.shape == (1, 1)
+    assert second.A.shape == (2, 2)
+    assert prepared.ort.weighting.requested == "CVA"

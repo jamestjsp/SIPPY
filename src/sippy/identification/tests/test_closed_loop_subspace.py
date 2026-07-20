@@ -2,6 +2,9 @@ import numpy as np
 import pytest
 
 from sippy import systems as control
+from sippy.identification.algorithms.automatic_subspace import (
+    select_automatic_dimensions,
+)
 from sippy.identification.algorithms.parsim_k import PARSIMKAlgorithm
 from sippy.identification.algorithms.subspace_core import SubspaceCoreAlgorithm
 from sippy.identification.algorithms.subspace_data import prepare_subspace_data
@@ -460,3 +463,133 @@ def test_unusable_measured_reference_records_predictor_fallback_reason():
 
     assert decomposition is None
     assert ort.diagnostics.reason == "reference_rank_deficient"
+
+
+def test_automatic_dimensions_select_consistent_predictor_model_without_loop_flag():
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=3000,
+        n_validation=300,
+        noise_scale=0.035,
+        noise_color=0.45,
+        dither_scale=0.04,
+        seed=91,
+    )
+
+    estimate = select_automatic_dimensions(
+        scenario.output,
+        scenario.plant_input,
+        explicit_horizon=12,
+    )
+
+    assert estimate.route == "predictor"
+    assert estimate.selection.candidate.order == 2
+    candidate = estimate.selection.candidate
+    identified = control.ss(
+        candidate.A,
+        candidate.B,
+        candidate.C,
+        candidate.D,
+        dt=plant.dt,
+    )
+    _assert_plant_recovery(
+        plant,
+        identified,
+        scenario.u_validation,
+        scenario.y_validation_clean,
+        maximum_nrmse=0.3,
+        maximum_frequency_error=0.3,
+    )
+
+
+def test_automatic_dimensions_use_valid_reference_and_honor_expert_overrides():
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=3000,
+        n_validation=300,
+        noise_scale=0.06,
+        noise_color=0.7,
+        dither_scale=0.1,
+        seed=92,
+    )
+
+    estimate = select_automatic_dimensions(
+        scenario.output,
+        scenario.plant_input,
+        reference=np.vstack((scenario.reference, scenario.dither)),
+        explicit_horizon=12,
+        explicit_order=2,
+    )
+
+    assert estimate.route == "two-stage-ort"
+    assert estimate.horizon_candidates == (12,)
+    assert estimate.selection.candidate.order == 2
+    assert estimate.reference_projection_reason is None
+    assert estimate.weighting.requested == "CVA"
+
+    with pytest.warns(UserWarning, match="using the predictor-form estimator"):
+        fallback = select_automatic_dimensions(
+            scenario.output,
+            scenario.plant_input,
+            reference=np.vstack((scenario.reference, scenario.reference)),
+            explicit_horizon=12,
+            explicit_order=2,
+        )
+    assert fallback.route == "predictor"
+    assert fallback.reference_projection_reason == "reference_rank_deficient"
+
+
+def test_projected_cva_preserves_variance_and_closed_loop_bias_trend():
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+
+    def identification_error(sample_count, seed, weighting):
+        scenario = simulate_closed_loop_scenario(
+            plant,
+            static_output_feedback_controller([[1.1]], dt=plant.dt),
+            n_train=sample_count,
+            n_validation=120,
+            noise_scale=0.07,
+            noise_color=0.65,
+            dither_scale=0.05,
+            seed=seed,
+        )
+        estimate = select_automatic_dimensions(
+            scenario.output,
+            scenario.plant_input,
+            explicit_horizon=10,
+            explicit_order=2,
+            weighting=weighting,
+        )
+        candidate = estimate.selection.candidate
+        identified = control.ss(
+            candidate.A,
+            candidate.B,
+            candidate.C,
+            candidate.D,
+            dt=plant.dt,
+        )
+        return frequency_response_error(plant, identified)
+
+    unweighted = np.array(
+        [identification_error(1200, seed, "N4SID") for seed in range(101, 106)]
+    )
+    cva = np.array(
+        [identification_error(1200, seed, "CVA") for seed in range(101, 106)]
+    )
+    assert np.mean(cva) <= 1.15 * np.mean(unweighted)
+    assert np.var(cva) <= 1.25 * np.var(unweighted)
+
+    sample_counts = (700, 1400, 2800)
+    unweighted_trend = np.array(
+        [identification_error(count, 111, "N4SID") for count in sample_counts]
+    )
+    cva_trend = np.array(
+        [identification_error(count, 111, "CVA") for count in sample_counts]
+    )
+    assert unweighted_trend[-1] < unweighted_trend[0]
+    assert cva_trend[-1] < cva_trend[0]
+    assert cva_trend[-1] <= 1.2 * unweighted_trend[-1]

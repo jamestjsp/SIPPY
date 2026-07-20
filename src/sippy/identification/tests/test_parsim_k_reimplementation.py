@@ -11,6 +11,8 @@ import pytest
 from sippy.identification.algorithms.parsim_core import (
     ParsimCoreAlgorithm,
     _estimate_predictor_markov_blocks,
+    _prepare_predictor_subspace,
+    _realize_predictor_subspace,
     _solve_predictor_parameters,
 )
 
@@ -178,6 +180,52 @@ def test_predictor_parameter_regression_has_strict_identifiability_semantics():
     coefficients, used_fallback = _solve_predictor_parameters(design, outputs)
     assert coefficients.shape == (2, 1)
     assert used_fallback
+
+
+def test_predictor_order_candidates_share_one_markov_decomposition(monkeypatch):
+    import sippy.identification.algorithms.parsim_core as parsim_core_module
+
+    rng = np.random.default_rng(411)
+    samples = 1200
+    u = rng.normal(size=(1, samples))
+    y = np.zeros((1, samples))
+    for sample in range(2, samples):
+        y[0, sample] = (
+            1.25 * y[0, sample - 1]
+            - 0.36 * y[0, sample - 2]
+            + 0.4 * u[0, sample - 1]
+            + 0.02 * rng.normal()
+        )
+
+    calls = 0
+    original = parsim_core_module._estimate_predictor_markov_blocks
+
+    def tracked_markov(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        parsim_core_module,
+        "_estimate_predictor_markov_blocks",
+        tracked_markov,
+    )
+    prepared = _prepare_predictor_subspace(
+        y,
+        u,
+        future_horizon=10,
+        past_horizon=20,
+        direct_feedthrough=False,
+        strict_identifiability=True,
+        weighting="CVA",
+    )
+    first = _realize_predictor_subspace(prepared, threshold=0.0, max_order=1)
+    second = _realize_predictor_subspace(prepared, threshold=0.0, max_order=2)
+
+    assert calls == 1
+    assert first[5].shape == (1, 1)
+    assert second[5].shape == (2, 2)
+    assert prepared.weighting_diagnostics.requested == "CVA"
 
 
 class TestParsimKReimplementation:
