@@ -6,20 +6,66 @@ This script shows how the new class-based architecture with factory pattern
 works compared to the original function-based approach.
 """
 
-import os
-import sys
-
 import numpy as np
 
-# Add the source directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
-
+import sippy
 from sippy.identification import (
     SystemIdentification,
     SystemIdentificationConfig,
     system_identification,
 )
 from sippy.identification.factory import AlgorithmFactory
+
+
+def generate_open_and_closed_loop_data():
+    """Generate records from one plant under open- and closed-loop operation."""
+    rng = np.random.default_rng(20260720)
+    sample_count = 800
+    plant_a = 0.72
+    plant_b = 0.35
+
+    open_input = rng.normal(size=(1, sample_count))
+    open_output = np.zeros((1, sample_count))
+    for sample in range(sample_count - 1):
+        open_output[0, sample + 1] = (
+            plant_a * open_output[0, sample]
+            + plant_b * open_input[0, sample]
+            + 0.02 * rng.normal()
+        )
+
+    reference = rng.normal(size=(1, sample_count))
+    closed_input = np.zeros((1, sample_count))
+    closed_output = np.zeros((1, sample_count))
+    state = 0.0
+    for sample in range(sample_count):
+        closed_output[0, sample] = state + 0.03 * rng.normal()
+        closed_input[0, sample] = reference[0, sample] - 0.9 * closed_output[0, sample]
+        state = plant_a * state + plant_b * closed_input[0, sample]
+
+    return (open_output, open_input), (closed_output, closed_input)
+
+
+def demo_loop_agnostic_subspace():
+    """Identify one plant without selecting an open- or closed-loop algorithm."""
+    print("=== LOOP-AGNOSTIC SUBSPACE IDENTIFICATION ===\n")
+    open_loop, closed_loop = generate_open_and_closed_loop_data()
+    identification_options = {}
+
+    open_model = sippy.identify(*open_loop, **identification_options)
+    closed_model = sippy.identify(*closed_loop, **identification_options)
+
+    print(
+        "Open loop:  "
+        f"{open_model.method}, route={open_model.identification_info['estimator_route']}, "
+        f"order={open_model.n}"
+    )
+    print(
+        "Closed loop: "
+        f"{closed_model.method}, "
+        f"route={closed_model.identification_info['estimator_route']}, "
+        f"order={closed_model.n}"
+    )
+    return open_model, closed_model
 
 
 def generate_sample_data():
@@ -166,6 +212,7 @@ if __name__ == "__main__":
 
     try:
         # Run demonstrations
+        demo_loop_agnostic_subspace()
         model1 = demo_new_class_based_approach()
         model2 = demo_backward_compatibility()
         models = demo_different_algorithms()

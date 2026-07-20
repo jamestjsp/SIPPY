@@ -12,12 +12,13 @@ distributed under the LGPL license.
 
 ## Algorithms
 
-- State space: N4SID, MOESP, CVA, PARSIM-K, PARSIM-S, PARSIM-P
+- State space: canonical SUBSPACE, N4SID, MOESP, CVA, PARSIM-K, PARSIM-S,
+  PARSIM-P
 - Input/output: ARX, ARMAX, ARARX, ARARMAX, FIR, OE, ARMA, BJ
 - Generalized polynomial model: GEN
 - Nonparametric frequency response: FD
 
-All 16 algorithms share the same parameterless factory and
+All 17 registered algorithm entries share the same parameterless factory and
 `identify(y=None, u=None, iddata=None, **options)` algorithm interface. The
 primary `sippy.identify(...)` function accepts raw arrays or `IDData` and
 returns an `IdentificationResult` (`StateSpaceModel` remains its compatibility
@@ -57,13 +58,7 @@ rng = np.random.default_rng(42)
 u = rng.standard_normal((2, 1000))
 y = rng.standard_normal((1, 1000))
 
-model = sippy.identify(
-    y,
-    u,
-    method="n4sid",
-    ss_f=20,
-    ss_fixed_order=2,
-)
+model = sippy.identify(y, u)
 
 print(model.n)
 print(model.is_stable())
@@ -72,6 +67,47 @@ print(model.fit())
 print(model.residual_covariance)
 print(model.capabilities)
 ```
+
+`sippy.identify(y, u)` is the canonical state-space workflow for both open-
+and closed-loop records. It chooses feasible block horizons and model order,
+uses a predictor-form estimator that remains consistent when feedback
+correlates plant inputs with output innovations, and applies CVA weighting to
+the resulting subspace. The caller does not classify the experiment or select
+a closed-loop algorithm:
+
+```python
+options = {}
+open_loop_model = sippy.identify(y_open, u_open, **options)
+closed_loop_model = sippy.identify(y_closed, u_closed, **options)
+```
+
+When measured exogenous excitation is available, declare it as reference data
+and the same call automatically uses compact two-stage ORT projection:
+
+```python
+from sippy.identification.iddata import IDData
+
+data = IDData(
+    frame,
+    inputs=["plant_input"],
+    outputs=["plant_output"],
+    references=["setpoint", "input_dither"],
+    tsample=0.1,
+)
+model = sippy.identify(data=data)
+print(model.identification_info["estimator_route"])
+```
+
+Feedback correlation and MIMO input collinearity are different problems.
+Feedback makes plant inputs statistically dependent on innovations and can
+bias ordinary open-loop projections. Collinearity is correlation among input
+channels and primarily reduces numerical rank and excitation; neither ORT nor
+CVA can restore directions that were never excited. Informative measured
+references can reduce closed-loop variance, while absent or rank-deficient
+references safely leave the canonical estimator on its predictor route. See
+the predictor-form [PARSIM analysis](https://skoge.folk.ntnu.no/prost/proceedings/dycops-2010/Papers_DYCOPS2010/MoAT4-03.pdf)
+and Katayama and Tanaka's
+[two-stage ORT method](https://doi.org/10.1016/j.automatica.2007.02.011).
 
 The deterministic process model is available as `model.deterministic_model`;
 the innovations model, when identified, is `model.innovations_model`.
@@ -82,7 +118,8 @@ mean squared identification residual after the model warm-up interval;
 `residual_covariance` retains the full output covariance matrix. `K`, `Q`, `R`,
 and `S` are `None` unless the selected estimator actually identifies them.
 
-Algorithms can also be created directly:
+Named algorithms remain available as advanced compatibility entry points and
+can also be created directly:
 
 ```python
 from sippy.identification.factory import create_algorithm

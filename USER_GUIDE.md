@@ -58,6 +58,7 @@ SIPPY supports both input-output and state-space structures:
 - GEN (Generalized model)
 
 **State-Space Models:**
+- SUBSPACE (canonical loop-agnostic estimator with automatic dimensions)
 - N4SID (Numerical algorithms for Subspace State Space System IDentification)
 - MOESP (Multivariable Output-Error State Space)
 - CVA (Canonical Variate Analysis)
@@ -106,15 +107,8 @@ y = np.zeros((1, n_samples))
 for i in range(1, n_samples):
     y[0, i] = 0.7 * y[0, i-1] + 0.3 * u[0, i-1] + 0.2 * u[1, i-1] + 0.05 * np.random.randn()
 
-# Identify with one method-specific option vocabulary
-model = sippy.identify(
-    y,
-    u,
-    method='n4sid',
-    ss_f=15,
-    ss_fixed_order=1,
-    ss_threshold=0.1
-)
+# Identify without classifying the experiment or selecting an estimator
+model = sippy.identify(y, u)
 
 print(f"✓ Identified model with {model.n} states")
 print(f"✓ System stable: {model.is_stable()}")
@@ -144,8 +138,58 @@ iddata = IDData(
 )
 
 # Use IDData through the same entry point
-model = sippy.identify(data=iddata, method='n4sid', ss_fixed_order=1)
+model = sippy.identify(data=iddata)
 ```
+
+### Open- and Closed-Loop Data
+
+The primary state-space operation is identical for open- and closed-loop
+records:
+
+```python
+options = {}
+open_model = sippy.identify(y_open, u_open, **options)
+closed_model = sippy.identify(y_closed, u_closed, **options)
+```
+
+With raw arrays, canonical `SUBSPACE` uses a predictor-form realization. This
+handles the closed-loop identification problem in which feedback makes future
+plant inputs correlated with output innovations. It also works naturally for
+open-loop records, so no loop-mode flag is needed.
+
+If setpoints, external excitation, or independently injected dither were
+measured, declare those channels on `IDData`:
+
+```python
+frame = pd.DataFrame({
+    "u": plant_input,
+    "y": plant_output,
+    "r": setpoint,
+    "dither": input_dither,
+})
+data = IDData(
+    frame,
+    inputs=["u"],
+    outputs=["y"],
+    references=["r", "dither"],
+    tsample=0.1,
+)
+model = sippy.identify(data=data)
+```
+
+Informative references automatically enable compact two-stage ORT projection;
+unusable references produce one warning and a recorded predictor fallback.
+Inspect `model.identification_info` for the estimator route, projection status,
+selected dimensions, numerical ranks, and weighting.
+
+This is separate from MIMO input collinearity. Feedback correlation is between
+plant inputs and innovations and creates estimator bias. Collinearity is
+correlation between input channels and creates a rank/conditioning problem.
+The latter requires persistently exciting independent directions; CVA
+weighting or measured-reference projection cannot reconstruct missing input
+directions. The underlying methods follow predictor-form
+[PARSIM](https://skoge.folk.ntnu.no/prost/proceedings/dycops-2010/Papers_DYCOPS2010/MoAT4-03.pdf)
+and [two-stage ORT](https://doi.org/10.1016/j.automatica.2007.02.011).
 
 ### Legacy API (Deprecated but Supported)
 
@@ -171,19 +215,17 @@ model = system_identification(
 
 ### Primary identify Function
 
-The main entry point selects a method and accepts only that method's declared
-options:
+The main entry point owns the ordinary state-space workflow. Named methods are
+advanced compatibility choices and accept only their declared options:
 
 ```python
 import sippy
 
-model = sippy.identify(
-    y,
-    u,
-    method='n4sid',
-    ss_f=20,
-    ss_fixed_order=2,
-    centering='MeanVal'
+model = sippy.identify(y, u, centering='MeanVal')
+
+# Expert compatibility selection
+n4sid_model = sippy.identify(
+    y, u, method='n4sid', ss_f=20, ss_fixed_order=2
 )
 ```
 
@@ -296,6 +338,7 @@ oscillation angle of a discrete pole.
 
 | Algorithm | Category | Key Parameters | Best For |
 |-----------|----------|----------------|----------|
+| **SUBSPACE** | Canonical subspace | automatic; optional `ss_f`, `ss_fixed_order` | Open- and closed-loop records without estimator selection |
 | **N4SID** | Subspace | `ss_f`, `ss_fixed_order` | General purpose, robust |
 | **MOESP** | Subspace | `ss_f`, `ss_fixed_order` | MIMO systems |
 | **CVA** | Subspace | `ss_f`, `ss_fixed_order` | Optimal prediction |
