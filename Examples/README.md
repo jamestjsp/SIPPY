@@ -9,15 +9,15 @@ uv sync
 Run an example through that environment:
 
 ```bash
-uv run python Examples/example_new_architecture.py
+uv run Examples/Ex_SS.py
 ```
 
 Replace the filename with any other script in this directory, for example:
 
 ```bash
-uv run python Examples/example_parsim_demo.py
-uv run python Examples/example_gen.py
-uv run python Examples/Ex_SS.py
+uv run Examples/example_new_architecture.py
+uv run Examples/example_parsim_demo.py
+uv run Examples/example_gen.py
 ```
 
 Some examples create Matplotlib figures and keep a window open until it is
