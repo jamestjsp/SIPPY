@@ -8,7 +8,8 @@ import pytest
 
 from sippy import systems as control
 from sippy.identification import IDData, SystemIdentificationConfig
-from sippy.identification.algorithms.fir import FIRAlgorithm
+from sippy.identification.algorithms import fir as fir_module
+from sippy.identification.algorithms.fir import FIRAlgorithm, _kernel_matrix
 from sippy.identification.base import IdentificationAlgorithm, StateSpaceModel
 
 
@@ -81,6 +82,137 @@ class TestFIRAlgorithm:
             result = algorithm.identify(iddata=self.data, nb=nb, nk=1)
             assert isinstance(result.G_tf, control.TransferFunction)
 
+    def test_plain_least_squares_is_the_backward_compatible_default(self):
+        default = FIRAlgorithm().identify(iddata=self.data, nb=8, nk=1)
+        explicit = FIRAlgorithm().identify(
+            iddata=self.data,
+            nb=8,
+            nk=1,
+            regularization="none",
+        )
+
+        np.testing.assert_allclose(
+            default.identification_info["fir_coefficients"],
+            explicit.identification_info["fir_coefficients"],
+            rtol=0.0,
+            atol=0.0,
+        )
+        assert explicit.identification_info["regularization"] == "none"
+
+    @pytest.mark.parametrize("kernel", ["tc", "dc"])
+    def test_kernel_regularization_supports_mimo(self, kernel):
+        rng = np.random.default_rng(58)
+        u = rng.normal(size=(2, 180))
+        y = np.vstack(
+            (
+                np.convolve(u[0], [0.7, 0.3], mode="full")[:180],
+                np.convolve(u[1], [0.5, -0.2], mode="full")[:180],
+            )
+        )
+        y += 0.25 * rng.normal(size=y.shape)
+
+        result = FIRAlgorithm().identify(
+            y=y,
+            u=u,
+            nb=16,
+            nk=0,
+            regularization=kernel,
+        )
+
+        assert result.G.shape == (2, 2)
+        hyperparameters = result.identification_info["kernel_hyperparameters"]
+        assert len(hyperparameters) == 2
+        assert all(parameters["kernel"] == kernel for parameters in hyperparameters)
+        assert all(0.0 < parameters["decay"] < 1.0 for parameters in hyperparameters)
+        assert all(parameters["scale"] > 0.0 for parameters in hyperparameters)
+        assert all(parameters["noise_variance"] > 0.0 for parameters in hyperparameters)
+
+    def test_tc_regularization_improves_noisy_long_fir_estimation(self):
+        rng = np.random.default_rng(912)
+        coefficient_count = 40
+        lags = np.arange(coefficient_count)
+        true_coefficients = 0.9**lags * (
+            0.65 * np.cos(0.22 * lags) + 0.25 * np.sin(0.08 * lags)
+        )
+        u = rng.normal(size=150)
+        clean = np.convolve(u, true_coefficients, mode="full")[: u.size]
+        y = clean + 0.8 * rng.normal(size=u.size)
+
+        least_squares = FIRAlgorithm().identify(
+            y=y,
+            u=u,
+            nb=coefficient_count,
+            nk=0,
+            regularization="none",
+        )
+        regularized = FIRAlgorithm().identify(
+            y=y,
+            u=u,
+            nb=coefficient_count,
+            nk=0,
+            regularization="tc",
+        )
+        least_squares_error = np.linalg.norm(
+            least_squares.identification_info["fir_coefficients"][0] - true_coefficients
+        )
+        regularized_error = np.linalg.norm(
+            regularized.identification_info["fir_coefficients"][0] - true_coefficients
+        )
+
+        assert regularized_error < 0.75 * least_squares_error
+
+    def test_kernel_tuning_factorizes_only_parameter_sized_matrices(self, monkeypatch):
+        rng = np.random.default_rng(913)
+        sample_count = 2_000
+        coefficient_count = 24
+        u = rng.normal(size=sample_count)
+        y = np.convolve(u, 0.85 ** np.arange(coefficient_count), mode="full")[
+            :sample_count
+        ]
+        factor_shapes = []
+        original = fir_module.scipy.linalg.cho_factor
+
+        def tracked_factor(matrix, *args, **kwargs):
+            factor_shapes.append(matrix.shape)
+            return original(matrix, *args, **kwargs)
+
+        monkeypatch.setattr(fir_module.scipy.linalg, "cho_factor", tracked_factor)
+
+        FIRAlgorithm().identify(
+            y=y,
+            u=u,
+            nb=coefficient_count,
+            nk=0,
+            regularization="tc",
+        )
+
+        assert factor_shapes
+        assert all(max(shape) <= coefficient_count for shape in factor_shapes)
+
+    def test_tc_and_dc_kernel_definitions(self):
+        tc = _kernel_matrix("tc", coefficient_count=3, decay=0.8)
+        expected_tc = np.array(
+            [
+                [0.8, 0.8**2, 0.8**3],
+                [0.8**2, 0.8**2, 0.8**3],
+                [0.8**3, 0.8**3, 0.8**3],
+            ]
+        )
+        np.testing.assert_allclose(tc, expected_tc)
+
+        dc = _kernel_matrix(
+            "dc",
+            coefficient_count=3,
+            decay=0.8,
+            correlation=0.6,
+        )
+        indices = np.arange(1, 4)
+        expected_dc = 0.8 ** (
+            (indices[:, None] + indices[None, :]) / 2
+        ) * 0.6 ** np.abs(indices[:, None] - indices[None, :])
+        np.testing.assert_allclose(dc, expected_dc)
+        assert np.all(np.linalg.eigvalsh(dc) > 0.0)
+
     def test_fir_mimo_system(self):
         """Test FIR with MIMO system."""
         # Create 2-input, 2-output test data
@@ -130,6 +262,14 @@ class TestFIRAlgorithm:
         ):
             # Use new signature
             algorithm.identify(iddata=self.data, nb=0, nk=1)
+
+        with pytest.raises(ValueError, match="regularization"):
+            algorithm.identify(
+                iddata=self.data,
+                nb=3,
+                nk=1,
+                regularization="stable-spline-3",
+            )
 
     def test_fir_data_validation(self):
         """Test FIR algorithm validates input data."""

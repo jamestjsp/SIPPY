@@ -44,7 +44,7 @@ ALGORITHM_OPTIONS = {
     "PARSIM-S": {"ss_f", "ss_p", "ss_threshold", "ss_fixed_order", "ss_d_required"},
     "PARSIM-P": {"ss_f", "ss_p", "ss_threshold", "ss_fixed_order", "ss_d_required"},
     "ARX": {"na", "nb", "nk"},
-    "FIR": {"nb", "nk"},
+    "FIR": {"nb", "nk", "regularization"},
     "ARMAX": {
         "na",
         "nb",
