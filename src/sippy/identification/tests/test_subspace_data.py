@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 
-from sippy.identification.algorithms.subspace_data import prepare_subspace_data
+from sippy.identification.algorithms.subspace_data import (
+    _numerical_rank,
+    prepare_subspace_data,
+)
 from sippy.utils.simulation_utils import ordinate_sequence
 
 
@@ -115,6 +118,16 @@ def test_prepare_subspace_data_reports_rank_without_rejecting_legacy_path():
             scale=False,
             require_persistent_excitation=True,
         )
+
+
+def test_numerical_rank_matches_direct_svd_near_the_rank_boundary():
+    base = np.linspace(0.5, 1.5, 64)
+    matrix = np.vstack((base, base + 1e-16 * np.arange(base.size)))
+
+    expected = int(np.linalg.matrix_rank(matrix))
+
+    assert expected == 1
+    assert _numerical_rank(matrix) == expected
 
 
 def test_prepare_subspace_data_distinguishes_short_and_unexciting_records():

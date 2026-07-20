@@ -77,14 +77,20 @@ def _scale_channels(signal: np.ndarray, enabled: bool) -> tuple[np.ndarray, np.n
 def _numerical_rank(matrix: np.ndarray) -> int:
     if matrix.size == 0:
         return 0
-    gram = matrix @ matrix.T
+    gram = matrix @ matrix.T if matrix.shape[0] <= matrix.shape[1] else matrix.T @ matrix
     gram = 0.5 * (gram + gram.T)
-    eigenvalues = np.maximum(np.linalg.eigvalsh(gram), 0.0)
-    largest_singular = np.sqrt(float(eigenvalues[-1]))
-    tolerance = (
-        max(matrix.shape) * np.finfo(np.float64).eps * max(largest_singular, 1.0)
+    eigenvalues = np.linalg.eigvalsh(gram)
+    largest_eigenvalue = max(float(eigenvalues[-1]), 0.0)
+    uncertainty = (
+        max(matrix.shape) * np.finfo(np.float64).eps * largest_eigenvalue
     )
-    return int(np.count_nonzero(eigenvalues > tolerance**2))
+    if largest_eigenvalue > 0.0 and float(eigenvalues[0]) > uncertainty:
+        return min(matrix.shape)
+
+    singular_values = np.linalg.svd(matrix, compute_uv=False, full_matrices=False)
+    largest = float(singular_values[0])
+    tolerance = max(matrix.shape) * np.finfo(np.float64).eps * largest
+    return int(np.count_nonzero(singular_values > tolerance))
 
 
 def prepare_subspace_data(
