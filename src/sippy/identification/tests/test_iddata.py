@@ -32,6 +32,7 @@ class TestIDData:
 
         self.inputs = ["FIC-2001", "FIC-2002", "TIC-2003", "FI-2005"]
         self.outputs = ["FIC-2101", "FIC-2102"]
+        self.references = ["TIC-2003"]
 
     def test_iddata_creation(self):
         """Test basic IDData object creation."""
@@ -71,6 +72,50 @@ class TestIDData:
         np.testing.assert_array_equal(
             output_array, self.sample_data[self.outputs].to_numpy().T
         )
+
+    def test_named_exogenous_references_are_preserved_as_aligned_data(self):
+        inputs = [name for name in self.inputs if name not in self.references]
+        iddata = IDData(
+            self.sample_data,
+            inputs,
+            self.outputs,
+            references=self.references,
+        )
+
+        assert iddata.reference_names == self.references
+        assert iddata.n_references == 1
+        np.testing.assert_array_equal(
+            iddata.get_reference_array(),
+            self.sample_data[self.references].to_numpy().T,
+        )
+
+        train, test = iddata.split_data(train_ratio=0.8)
+        assert train.reference_names == self.references
+        assert test.reference_names == self.references
+        np.testing.assert_array_equal(
+            train.get_reference_array(),
+            self.sample_data[self.references].iloc[:80].to_numpy().T,
+        )
+
+        centered = iddata.remove_mean()
+        np.testing.assert_allclose(centered.reference_data.mean(), 0.0, atol=1e-10)
+
+    def test_reference_channels_must_exist_and_be_distinct_from_io_channels(self):
+        with pytest.raises(ValueError, match="Missing columns"):
+            IDData(
+                self.sample_data,
+                self.inputs,
+                self.outputs,
+                references=["missing-reference"],
+            )
+
+        with pytest.raises(ValueError, match="Reference columns must be distinct"):
+            IDData(
+                self.sample_data,
+                self.inputs,
+                self.outputs,
+                references=[self.inputs[0]],
+            )
 
     def test_remove_mean(self):
         """Test mean removal functionality."""

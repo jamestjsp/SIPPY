@@ -3,6 +3,8 @@ import pytest
 
 from sippy import systems as control
 from sippy.identification.algorithms.parsim_k import PARSIMKAlgorithm
+from sippy.identification.algorithms.subspace_core import SubspaceCoreAlgorithm
+from sippy.identification.algorithms.subspace_data import prepare_subspace_data
 
 from .simulation_scenarios import (
     frequency_response_error,
@@ -359,3 +361,102 @@ def test_parsim_k_recovers_mimo_plant_under_dynamic_feedback():
         maximum_nrmse=0.35,
         maximum_frequency_error=0.3,
     )
+
+
+def test_two_stage_ort_removes_reference_uncorrelated_feedback_disturbance():
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=4000,
+        n_validation=300,
+        noise_scale=0.12,
+        noise_color=0.75,
+        dither_scale=0.12,
+        seed=81,
+    )
+    references = np.vstack((scenario.reference, scenario.dither))
+    noisy_data = prepare_subspace_data(
+        scenario.output,
+        scenario.plant_input,
+        future_horizon=12,
+        past_offset=12,
+        reference=references,
+        scale=False,
+    )
+    clean_data = prepare_subspace_data(
+        scenario.plant_output,
+        scenario.plant_input,
+        future_horizon=12,
+        past_offset=12,
+        reference=references,
+        scale=False,
+    )
+
+    _, ort = SubspaceCoreAlgorithm.svd_weighted_ort(noisy_data)
+    assert ort.diagnostics.usable
+    deterministic = ort.reference_projection.materialize()
+    output_start = noisy_data.future_inputs.shape[0] + noisy_data.past_data.shape[0]
+    projected_noisy_output = deterministic[output_start:]
+    reference_hankel = ort.reference_projection.reference_hankel
+    projected_clean_output = (
+        clean_data.future_outputs @ np.linalg.pinv(reference_hankel) @ reference_hankel
+    )
+
+    raw_error = np.linalg.norm(noisy_data.future_outputs - clean_data.future_outputs)
+    projected_error = np.linalg.norm(projected_noisy_output - projected_clean_output)
+    assert projected_error < 0.35 * raw_error
+
+
+def test_two_stage_ort_recovers_closed_loop_plant_from_measured_references():
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=4000,
+        n_validation=300,
+        noise_scale=0.06,
+        noise_color=0.7,
+        dither_scale=0.1,
+        seed=82,
+    )
+
+    result, diagnostics = SubspaceCoreAlgorithm.olsims_ort(
+        scenario.output,
+        scenario.plant_input,
+        np.vstack((scenario.reference, scenario.dither)),
+        f=12,
+        fixed_order=2,
+    )
+
+    assert diagnostics.usable
+    A, B, C, D, *_ = result
+    identified = control.ss(A, B, C, D, dt=plant.dt)
+    _assert_plant_recovery(
+        plant,
+        identified,
+        scenario.u_validation,
+        scenario.y_validation_clean,
+        maximum_nrmse=0.3,
+        maximum_frequency_error=0.3,
+    )
+
+
+def test_unusable_measured_reference_records_predictor_fallback_reason():
+    rng = np.random.default_rng(83)
+    y = rng.normal(size=(1, 300))
+    u = rng.normal(size=(1, 300))
+    duplicate = np.vstack((u, u))
+    data = prepare_subspace_data(
+        y,
+        u,
+        future_horizon=8,
+        past_offset=8,
+        reference=duplicate,
+    )
+
+    with pytest.warns(UserWarning, match="using the predictor-form estimator"):
+        decomposition, ort = SubspaceCoreAlgorithm.svd_weighted_ort(data)
+
+    assert decomposition is None
+    assert ort.diagnostics.reason == "reference_rank_deficient"

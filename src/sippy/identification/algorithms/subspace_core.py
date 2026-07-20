@@ -5,7 +5,7 @@ Core subspace identification algorithms implementation.
 import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.linalg import pinv
@@ -111,6 +111,60 @@ class _LQProjection:
         return (observability_inverse @ self.projector) @ self.past_data
 
 
+@dataclass(frozen=True)
+class ORTProjectionDiagnostics:
+    usable: bool
+    reason: str | None
+    reference_rank: int
+    reference_rows: int
+    projected_input_rank: int
+    projected_input_rows: int
+    deterministic_regressor_rank: int
+    deterministic_regressor_rows: int
+
+
+@dataclass(frozen=True)
+class _ReferenceRowProjection:
+    diagnostics: ORTProjectionDiagnostics
+    reference_hankel: np.ndarray
+    reference_factor: np.ndarray
+    coefficient_map: np.ndarray
+    compact_future_inputs: np.ndarray
+    compact_past_data: np.ndarray
+    compact_future_outputs: np.ndarray
+
+    def materialize(self):
+        return self.coefficient_map @ self.reference_hankel
+
+    def expand_compact(self, compact):
+        reference_coordinates = np.linalg.solve(
+            self.reference_factor,
+            self.reference_hankel,
+        )
+        return compact @ reference_coordinates
+
+
+@dataclass(frozen=True)
+class _TwoStageORTProjection:
+    diagnostics: ORTProjectionDiagnostics
+    reference_projection: _ReferenceRowProjection | None
+    projection: _LQProjection | None
+    compact_projection: np.ndarray | None
+    compact_moesp: np.ndarray | None
+    compact_projected_outputs: np.ndarray | None
+
+
+def _warn_for_unusable_reference(diagnostics):
+    if diagnostics.reason == "reference_missing":
+        return
+    warnings.warn(
+        "Measured exogenous reference is unusable for two-stage ORT "
+        f"({diagnostics.reason}); using the predictor-form estimator",
+        UserWarning,
+        stacklevel=2,
+    )
+
+
 def _numerically_full_rank(triangular, sample_count):
     diagonal = np.abs(np.diag(triangular))
     if diagonal.size == 0:
@@ -175,6 +229,179 @@ def _lq_compress_subspace_data(Uf, Zp, Yf):
     )
 
 
+def _unusable_ort_projection(data, reason):
+    return _TwoStageORTProjection(
+        diagnostics=ORTProjectionDiagnostics(
+            usable=False,
+            reason=reason,
+            reference_rank=data.ranks.reference_rank,
+            reference_rows=data.ranks.reference_rows,
+            projected_input_rank=0,
+            projected_input_rows=(
+                data.past_inputs.shape[0] + data.future_inputs.shape[0]
+            ),
+            deterministic_regressor_rank=0,
+            deterministic_regressor_rows=(
+                data.future_inputs.shape[0] + data.past_data.shape[0]
+            ),
+        ),
+        reference_projection=None,
+        projection=None,
+        compact_projection=None,
+        compact_moesp=None,
+        compact_projected_outputs=None,
+    )
+
+
+def _project_onto_reference_row_space(data: SubspaceData):
+    if data.past_references is None or data.future_references is None:
+        return _unusable_ort_projection(data, "reference_missing")
+    if not data.ranks.reference_informative:
+        return _unusable_ort_projection(data, "reference_rank_deficient")
+
+    reference_hankel = np.vstack((data.past_references, data.future_references))
+    signals = np.vstack((data.future_inputs, data.past_data, data.future_outputs))
+    stacked = np.vstack((reference_hankel, signals))
+    factor = np.linalg.qr(stacked.T, mode="r").T
+    reference_rows = reference_hankel.shape[0]
+    if factor.shape[1] < reference_rows:
+        return _unusable_ort_projection(data, "reference_sample_count_insufficient")
+
+    reference_factor = factor[:reference_rows, :reference_rows]
+    if not _numerically_full_rank(reference_factor, data.usable_columns):
+        return _unusable_ort_projection(data, "reference_rank_deficient")
+
+    compact = factor[reference_rows:, :reference_rows]
+    future_input_rows = data.future_inputs.shape[0]
+    past_rows = data.past_data.shape[0]
+    compact_future_inputs = compact[:future_input_rows]
+    compact_past_data = compact[future_input_rows : future_input_rows + past_rows]
+    compact_future_outputs = compact[future_input_rows + past_rows :]
+
+    past_input_rows = data.past_inputs.shape[0]
+    projected_input = np.vstack(
+        (compact_past_data[:past_input_rows], compact_future_inputs)
+    )
+    projected_input_rank = int(np.linalg.matrix_rank(projected_input))
+    projected_input_rows = projected_input.shape[0]
+    deterministic_regressor = np.vstack((compact_future_inputs, compact_past_data))
+    deterministic_regressor_rank = int(np.linalg.matrix_rank(deterministic_regressor))
+    deterministic_regressor_rows = deterministic_regressor.shape[0]
+    diagnostics = ORTProjectionDiagnostics(
+        usable=(
+            projected_input_rank == projected_input_rows
+            and deterministic_regressor_rank == deterministic_regressor_rows
+        ),
+        reason=None,
+        reference_rank=data.ranks.reference_rank,
+        reference_rows=reference_rows,
+        projected_input_rank=projected_input_rank,
+        projected_input_rows=projected_input_rows,
+        deterministic_regressor_rank=deterministic_regressor_rank,
+        deterministic_regressor_rows=deterministic_regressor_rows,
+    )
+    if projected_input_rank < projected_input_rows:
+        diagnostics = replace(
+            diagnostics,
+            reason="projected_input_rank_deficient",
+        )
+    elif deterministic_regressor_rank < deterministic_regressor_rows:
+        diagnostics = replace(
+            diagnostics,
+            reason="reference_deterministic_regressor_rank_deficient",
+        )
+
+    coefficient_map = np.linalg.solve(reference_factor.T, compact.T).T
+    return _ReferenceRowProjection(
+        diagnostics=diagnostics,
+        reference_hankel=reference_hankel,
+        reference_factor=reference_factor,
+        coefficient_map=coefficient_map,
+        compact_future_inputs=compact_future_inputs,
+        compact_past_data=compact_past_data,
+        compact_future_outputs=compact_future_outputs,
+    )
+
+
+def _two_stage_ort_projection(data: SubspaceData):
+    first_stage = _project_onto_reference_row_space(data)
+    if isinstance(first_stage, _TwoStageORTProjection):
+        return first_stage
+    if not first_stage.diagnostics.usable:
+        return _TwoStageORTProjection(
+            diagnostics=first_stage.diagnostics,
+            reference_projection=first_stage,
+            projection=None,
+            compact_projection=None,
+            compact_moesp=None,
+            compact_projected_outputs=None,
+        )
+
+    second_stage = _lq_compress_subspace_data(
+        first_stage.compact_future_inputs,
+        first_stage.compact_past_data,
+        first_stage.compact_future_outputs,
+    )
+    compact_state_projection = second_stage[0].materialize()
+    full_projection = _LQProjection(
+        np.linalg.solve(
+            first_stage.reference_factor.T,
+            compact_state_projection.T,
+        ).T,
+        first_stage.reference_hankel,
+    )
+    return _TwoStageORTProjection(
+        diagnostics=first_stage.diagnostics,
+        reference_projection=first_stage,
+        projection=full_projection,
+        compact_projection=second_stage[1],
+        compact_moesp=second_stage[2],
+        compact_projected_outputs=second_stage[3],
+    )
+
+
+def _weighted_projection_svd(
+    compact_projection,
+    compact_moesp,
+    compact_projected_outputs,
+    weights,
+):
+    if weights == "MOESP":
+        weighting = None
+        U_n, S_n, V_n = np.linalg.svd(compact_moesp, full_matrices=False)
+    elif weights == "CVA":
+        covariance_product = compact_projected_outputs @ compact_projected_outputs.T
+        covariance = 0.5 * (covariance_product + covariance_product.T)
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        largest_eigenvalue = max(float(eigenvalues[-1]), 0.0)
+        tolerance = (
+            max(covariance.shape) * np.finfo(np.float64).eps * largest_eigenvalue
+        )
+        retained = eigenvalues > tolerance
+        if not np.any(retained):
+            warnings.warn("CVA weighting failed, falling back to N4SID")
+            weighting = None
+            U_n, S_n, V_n = np.linalg.svd(compact_projection, full_matrices=False)
+        else:
+            retained_vectors = eigenvectors[:, retained]
+            retained_eigenvalues = eigenvalues[retained]
+            square_roots = np.sqrt(retained_eigenvalues)
+            weighting = (retained_vectors * square_roots) @ retained_vectors.T
+            inverse_square_root = (
+                retained_vectors * (1.0 / square_roots)
+            ) @ retained_vectors.T
+            U_n, S_n, V_n = np.linalg.svd(
+                inverse_square_root @ compact_moesp,
+                full_matrices=False,
+            )
+    elif weights == "N4SID":
+        weighting = None
+        U_n, S_n, V_n = np.linalg.svd(compact_projection, full_matrices=False)
+    else:
+        raise ValueError(f"Unknown weighting method: {weights}")
+    return U_n, S_n, V_n, weighting
+
+
 class SubspaceCoreAlgorithm:
     """Core subspace identification algorithms implementation."""
 
@@ -222,48 +449,28 @@ class SubspaceCoreAlgorithm:
             _lq_compress_subspace_data(Uf, Zp, Yf)
         )
 
-        if weights == "MOESP":
-            W1 = None
-            U_n, S_n, V_n = np.linalg.svd(compact_moesp, full_matrices=False)
-
-        elif weights == "CVA":
-            YfdotPIort_Uf_YfdotPIort_Uf_T = np.dot(
-                compact_projected_outputs,
-                compact_projected_outputs.T,
-            )
-            covariance = 0.5 * (
-                YfdotPIort_Uf_YfdotPIort_Uf_T + YfdotPIort_Uf_YfdotPIort_Uf_T.T
-            )
-            eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-            largest_eigenvalue = max(float(eigenvalues[-1]), 0.0)
-            tolerance = (
-                max(covariance.shape) * np.finfo(np.float64).eps * largest_eigenvalue
-            )
-            retained = eigenvalues > tolerance
-            if not np.any(retained):
-                warnings.warn("CVA weighting failed, falling back to N4SID")
-                W1 = None
-                U_n, S_n, V_n = np.linalg.svd(compact_projection, full_matrices=False)
-            else:
-                retained_vectors = eigenvectors[:, retained]
-                retained_eigenvalues = eigenvalues[retained]
-                square_roots = np.sqrt(retained_eigenvalues)
-                W1 = (retained_vectors * square_roots) @ retained_vectors.T
-                inverse_square_root = (
-                    retained_vectors * (1.0 / square_roots)
-                ) @ retained_vectors.T
-                W1_dot_Oi_dot_PIort_Uf = inverse_square_root @ compact_moesp
-                U_n, S_n, V_n = np.linalg.svd(
-                    W1_dot_Oi_dot_PIort_Uf, full_matrices=False
-                )
-
-        elif weights == "N4SID":
-            W1 = None  # is identity
-            U_n, S_n, V_n = np.linalg.svd(compact_projection, full_matrices=False)
-        else:
-            raise ValueError(f"Unknown weighting method: {weights}")
+        U_n, S_n, V_n, W1 = _weighted_projection_svd(
+            compact_projection,
+            compact_moesp,
+            compact_projected_outputs,
+            weights,
+        )
 
         return U_n, S_n, V_n, W1, projection
+
+    @staticmethod
+    def svd_weighted_ort(data: SubspaceData, weights="N4SID"):
+        ort = _two_stage_ort_projection(data)
+        if not ort.diagnostics.usable:
+            _warn_for_unusable_reference(ort.diagnostics)
+            return None, ort
+        decomposition = _weighted_projection_svd(
+            ort.compact_projection,
+            ort.compact_moesp,
+            ort.compact_projected_outputs,
+            weights,
+        )
+        return (*decomposition, ort.projection), ort
 
     @staticmethod
     def algorithm_1(
@@ -281,6 +488,8 @@ class SubspaceCoreAlgorithm:
         threshold,
         max_order,
         D_required,
+        regression_y=None,
+        regression_u=None,
     ):
         """
         Algorithm 1 from subspace identification literature.
@@ -343,11 +552,15 @@ class SubspaceCoreAlgorithm:
         X_fd = projection.state_sequence(Ob_pinv)
         # Ensure contiguous memory for optimal performance with compiled functions
         X_fd_slice1 = np.ascontiguousarray(X_fd[:, 1:N])
-        y_slice = np.ascontiguousarray(y[:, f : f + N - 1])
+        y_slice = np.ascontiguousarray(
+            y[:, f : f + N - 1] if regression_y is None else regression_y[:, : N - 1]
+        )
         Sxterm = impile(X_fd_slice1, y_slice)
 
         X_fd_slice2 = np.ascontiguousarray(X_fd[:, 0 : N - 1])
-        u_slice = np.ascontiguousarray(u[:, f : f + N - 1])
+        u_slice = np.ascontiguousarray(
+            u[:, f : f + N - 1] if regression_u is None else regression_u[:, : N - 1]
+        )
         Dxterm = impile(X_fd_slice2, u_slice)
 
         if D_required:
@@ -603,6 +816,90 @@ class SubspaceCoreAlgorithm:
         S = S @ output_scale
 
         return A, B, C, D, Vn, Q, R, S, K
+
+    @staticmethod
+    def olsims_ort(
+        y,
+        u,
+        reference,
+        f,
+        weights="N4SID",
+        threshold=0.1,
+        max_order=np.nan,
+        fixed_order=np.nan,
+        D_required=False,
+    ):
+        if not check_types(threshold, max_order, fixed_order, f):
+            raise ValueError("Invalid parameters for subspace identification")
+
+        threshold, max_order = check_inputs(threshold, max_order, fixed_order, f)
+        data = prepare_subspace_data(
+            y,
+            u,
+            future_horizon=f,
+            past_offset=f,
+            reference=reference,
+        )
+        y = data.outputs
+        u = data.inputs
+        output_count, _ = y.shape
+        input_count = u.shape[0]
+        usable_columns = data.usable_columns
+
+        decomposition, ort = SubspaceCoreAlgorithm.svd_weighted_ort(data, weights)
+        if decomposition is None:
+            return None, ort.diagnostics
+        U_n, S_n, V_n, W1, projection = decomposition
+
+        deterministic = ort.reference_projection.materialize()
+        future_input_rows = data.future_inputs.shape[0]
+        past_rows = data.past_data.shape[0]
+        deterministic_inputs = deterministic[:input_count]
+        output_start = future_input_rows + past_rows
+        deterministic_outputs = deterministic[
+            output_start : output_start + output_count
+        ]
+
+        Ob, X_fd, M, order, residuals = SubspaceCoreAlgorithm.algorithm_1(
+            y,
+            u,
+            output_count,
+            input_count,
+            f,
+            usable_columns,
+            U_n,
+            S_n,
+            V_n,
+            W1,
+            projection,
+            threshold,
+            max_order,
+            D_required,
+            regression_y=deterministic_outputs,
+            regression_u=deterministic_inputs,
+        )
+        A, B, C, D = SubspaceCoreAlgorithm.extract_matrices(M, order)
+        covariance = residuals @ residuals.T / (usable_columns - 1)
+        Q = covariance[:order, :order]
+        R = covariance[order:, order:]
+        S = covariance[:order, order:]
+        _, output_estimate = simulate_ss_system(A, B, C, D, u)
+        Vn = Vn_mat(y, output_estimate)
+        K, kalman_gain_calculated = K_calc(A, C, Q, R, S)
+
+        for channel in range(input_count):
+            B[:, channel] /= data.input_scale[channel]
+            D[:, channel] /= data.input_scale[channel]
+        for channel in range(output_count):
+            C[channel, :] *= data.output_scale[channel]
+            D[channel, :] *= data.output_scale[channel]
+            if kalman_gain_calculated:
+                K[:, channel] /= data.output_scale[channel]
+
+        output_scale = np.diag(data.output_scale)
+        R = output_scale @ R @ output_scale
+        S = S @ output_scale
+        return (A, B, C, D, Vn, Q, R, S, K), ort.diagnostics
 
     @staticmethod
     def select_order(

@@ -33,6 +33,8 @@ class IDData:
         Sample time in seconds. If None, inferred from DataFrame index
     time_index : str, optional
         Name of time column if DataFrame doesn't have datetime index
+    references : List[str], optional
+        Named exogenous excitation channels aligned with inputs and outputs
 
     Attributes:
     -----------
@@ -40,12 +42,16 @@ class IDData:
         Input data subset
     output_data : pd.DataFrame
         Output data subset
+    reference_data : pd.DataFrame
+        Optional exogenous reference data subset
     sample_time : float
         Sample time in seconds
     input_names : List[str]
         Input variable names
     output_names : List[str]
         Output variable names
+    reference_names : List[str]
+        Exogenous reference variable names
     n_samples : int
         Number of data points
     n_inputs : int
@@ -67,6 +73,7 @@ class IDData:
         bad_strategy: str = "ffill",
         interpolate_method: str = "linear",
         store_mask: bool = True,
+        references: Optional[List[str]] = None,
     ):
         """
         Initialize IDData object.
@@ -77,18 +84,26 @@ class IDData:
             outputs: List of output variable column names
             tsample: Sample time in seconds (auto-detected if None)
             time_index: Name of time column for non-datetime indexed DataFrames
+            references: Exogenous reference channels aligned with inputs and outputs
         """
+        references = [] if references is None else list(references)
+        overlapping_references = set(references) & set(inputs + outputs)
+        if overlapping_references:
+            raise ValueError(
+                "Reference columns must be distinct from input and output columns: "
+                f"{overlapping_references}"
+            )
         # Validate input DataFrame
         if not isinstance(data, pd.DataFrame):
             raise TypeError("Data must be a pandas DataFrame")
 
         # Ensure all requested columns exist
-        missing_cols = set(inputs + outputs) - set(data.columns)
+        missing_cols = set(inputs + outputs + references) - set(data.columns)
         if missing_cols:
             raise ValueError(f"Missing columns in DataFrame: {missing_cols}")
 
         # Optionally apply slice processing on a combined view to keep alignment
-        combined = data[inputs + outputs].copy()
+        combined = data[inputs + outputs + references].copy()
         self.bad_mask = None
         if slices:
             try:
@@ -110,8 +125,10 @@ class IDData:
         # Store input and output data
         self.input_data = combined[inputs]
         self.output_data = combined[outputs]
+        self.reference_data = combined[references]
         self.input_names = inputs
         self.output_names = outputs
+        self.reference_names = references
 
         # Handle time information
         if tsample is not None:
@@ -127,6 +144,7 @@ class IDData:
         self.n_samples = len(data)
         self.n_inputs = len(inputs)
         self.n_outputs = len(outputs)
+        self.n_references = len(references)
 
         # Validate data consistency
         self._validate_data()
@@ -196,6 +214,8 @@ class IDData:
             print("Warning: Input data contains NaN values")
         if self.output_data.isnull().any().any():
             print("Warning: Output data contains NaN values")
+        if self.reference_data.isnull().any().any():
+            print("Warning: Reference data contains NaN values")
 
     def get_input_array(self) -> np.ndarray:
         """
@@ -218,6 +238,12 @@ class IDData:
             Output array with shape (n_outputs, n_samples)
         """
         return self.output_data.to_numpy().T
+
+    def get_reference_array(self) -> Optional[np.ndarray]:
+        """Return aligned exogenous references, or ``None`` when absent."""
+        if not self.reference_names:
+            return None
+        return self.reference_data.to_numpy().T
 
     def get_time_stamps_array(self) -> np.ndarray:
         """
@@ -251,16 +277,26 @@ class IDData:
         n_train = int(self.n_samples * train_ratio)
 
         # Split the data
-        combined = pd.concat([self.input_data, self.output_data], axis=1)
+        combined = pd.concat(
+            [self.input_data, self.output_data, self.reference_data], axis=1
+        )
         train_data = combined.iloc[:n_train]
         test_data = combined.iloc[n_train:]
 
         # Create new IDData objects
         train_iddata = IDData(
-            train_data, self.input_names, self.output_names, self.sample_time
+            train_data,
+            self.input_names,
+            self.output_names,
+            self.sample_time,
+            references=self.reference_names,
         )
         test_iddata = IDData(
-            test_data, self.input_names, self.output_names, self.sample_time
+            test_data,
+            self.input_names,
+            self.output_names,
+            self.sample_time,
+            references=self.reference_names,
         )
 
         # Propagate mask if available
@@ -286,7 +322,9 @@ class IDData:
             raise ValueError("Cannot resample non-datetime indexed data")
 
         # Combine data for resampling
-        combined_data = pd.concat([self.input_data, self.output_data], axis=1)
+        combined_data = pd.concat(
+            [self.input_data, self.output_data, self.reference_data], axis=1
+        )
 
         # Resample
         resampled_data = combined_data.resample(new_period).mean()
@@ -295,7 +333,11 @@ class IDData:
         new_tsample = pd.Timedelta(new_period).total_seconds()
 
         resampled_id = IDData(
-            resampled_data, self.input_names, self.output_names, new_tsample
+            resampled_data,
+            self.input_names,
+            self.output_names,
+            new_tsample,
+            references=self.reference_names,
         )
 
         # Resample mask with max (any affected in bin)
@@ -321,17 +363,25 @@ class IDData:
         # Calculate means
         input_means = self.input_data.mean()
         output_means = self.output_data.mean()
+        reference_means = self.reference_data.mean()
 
         # Remove means
         input_centered = self.input_data - input_means
         output_centered = self.output_data - output_means
+        reference_centered = self.reference_data - reference_means
 
         # Combine data
-        combined_data = pd.concat([input_centered, output_centered], axis=1)
+        combined_data = pd.concat(
+            [input_centered, output_centered, reference_centered], axis=1
+        )
 
         # Create new IDData object
         centered_iddata = IDData(
-            combined_data, self.input_names, self.output_names, self.sample_time
+            combined_data,
+            self.input_names,
+            self.output_names,
+            self.sample_time,
+            references=self.reference_names,
         )
         if self.bad_mask is not None:
             centered_iddata.bad_mask = self.bad_mask.copy()
@@ -373,6 +423,7 @@ class IDData:
         return (
             f"IDData object with {self.n_samples} samples, "
             f"{self.n_inputs} inputs, {self.n_outputs} outputs, "
+            f"{self.n_references} references, "
             f"sample time = {self.sample_time} seconds"
         )
 
@@ -383,6 +434,8 @@ class IDData:
             f"  Number of samples: {self.n_samples}",
             f"  Number of inputs: {self.n_inputs} ({', '.join(self.input_names)})",
             f"  Number of outputs: {self.n_outputs} ({', '.join(self.output_names)})",
+            "  Number of references: "
+            f"{self.n_references} ({', '.join(self.reference_names)})",
             f"  Sample time: {self.sample_time} seconds",
         ]
         return "\n".join(info)
@@ -397,10 +450,16 @@ class IDData:
         """
         Return a new IDData with slices applied.
         """
-        combined = pd.concat([self.input_data, self.output_data], axis=1)
+        combined = pd.concat(
+            [self.input_data, self.output_data, self.reference_data], axis=1
+        )
         if not slices:
             return IDData(
-                combined, self.input_names, self.output_names, self.sample_time
+                combined,
+                self.input_names,
+                self.output_names,
+                self.sample_time,
+                references=self.reference_names,
             )
 
         from sippy.utils.slices import process_slices
@@ -412,7 +471,11 @@ class IDData:
             interpolate_method=interpolate_method,
         )
         new_obj = IDData(
-            processed, self.input_names, self.output_names, self.sample_time
+            processed,
+            self.input_names,
+            self.output_names,
+            self.sample_time,
+            references=self.reference_names,
         )
         new_obj.bad_mask = mask
         return new_obj
@@ -424,7 +487,7 @@ class IDData:
         return pd.DataFrame(
             False,
             index=self.input_data.index,
-            columns=self.input_names + self.output_names,
+            columns=self.input_names + self.output_names + self.reference_names,
         )
 
     def drop_masked(self, any_col: bool = True) -> "IDData":
@@ -434,18 +497,28 @@ class IDData:
         """
         if self.bad_mask is None:
             return IDData(
-                pd.concat([self.input_data, self.output_data], axis=1),
+                pd.concat(
+                    [self.input_data, self.output_data, self.reference_data], axis=1
+                ),
                 self.input_names,
                 self.output_names,
                 self.sample_time,
+                references=self.reference_names,
             )
 
-        mask_subset = self.bad_mask[self.input_names + self.output_names]
+        selected_names = self.input_names + self.output_names + self.reference_names
+        mask_subset = self.bad_mask[selected_names]
         selector = mask_subset.any(axis=1) if any_col else mask_subset.all(axis=1)
         kept = ~selector
-        combined = pd.concat([self.input_data, self.output_data], axis=1)[kept]
+        combined = pd.concat(
+            [self.input_data, self.output_data, self.reference_data], axis=1
+        )[kept]
         new_obj = IDData(
-            combined, self.input_names, self.output_names, self.sample_time
+            combined,
+            self.input_names,
+            self.output_names,
+            self.sample_time,
+            references=self.reference_names,
         )
         new_obj.bad_mask = mask_subset[kept]
         return new_obj
@@ -457,6 +530,7 @@ class IDData:
         dataset: str = "output",
         inputs: Optional[List[str]] = None,
         outputs: Optional[List[str]] = None,
+        references: Optional[List[str]] = None,
         tsample: Optional[float] = None,
         slices: Optional[Dict[str, Any]] = None,
         bad_strategy: str = "ffill",
@@ -491,4 +565,5 @@ class IDData:
             slices=slices,
             bad_strategy=bad_strategy,
             interpolate_method=interpolate_method,
+            references=references,
         )
