@@ -23,6 +23,30 @@ class IdentificationScenario:
     snr_db: float
 
 
+@dataclass(frozen=True)
+class ClosedLoopTrajectory:
+    plant: control.StateSpace
+    controller: control.StateSpace
+    sample_time: float
+    reference: np.ndarray
+    dither: np.ndarray
+    disturbance: np.ndarray
+    plant_input: np.ndarray
+    plant_output: np.ndarray
+    output: np.ndarray
+    plant_states: np.ndarray
+    controller_states: np.ndarray
+
+
+@dataclass(frozen=True)
+class ClosedLoopIdentificationScenario(ClosedLoopTrajectory):
+    innovations: np.ndarray
+    u_validation: np.ndarray
+    y_validation_clean: np.ndarray
+    excitation_order: int
+    excitation_rank: int
+
+
 def stable_siso_plant(
     dt: float = 1.0, direct_feedthrough: float = 0.08
 ) -> control.StateSpace:
@@ -169,6 +193,350 @@ def generate_excitation(
     if np.any(scale == 0):
         raise ValueError("excitation has zero variance")
     return excitation / scale
+
+
+def static_output_feedback_controller(
+    gain: object, *, dt: float = 1.0
+) -> control.StateSpace:
+    matrix = np.atleast_2d(np.asarray(gain, dtype=float))
+    if matrix.ndim != 2 or matrix.size == 0:
+        raise ValueError("controller gain must be a nonempty matrix")
+    n_inputs = matrix.shape[1]
+    n_outputs = matrix.shape[0]
+    return control.ss(
+        np.empty((0, 0)),
+        np.empty((0, n_inputs)),
+        np.empty((n_outputs, 0)),
+        matrix,
+        dt=dt,
+    )
+
+
+def _discrete_sample_time(system: control.StateSpace, name: str) -> float:
+    if system.dt is None or system.dt == 0:
+        raise ValueError(f"{name} must be discrete-time")
+    return 1.0 if system.dt is True else float(system.dt)
+
+
+def _signal_matrix(
+    value: object,
+    *,
+    channels: int,
+    samples: int | None,
+    name: str,
+) -> np.ndarray:
+    signal = np.asarray(value, dtype=float)
+    if signal.ndim == 1:
+        if channels != 1:
+            raise ValueError(f"{name} must have {channels} channels")
+        signal = signal.reshape(1, -1)
+    elif signal.ndim != 2:
+        raise ValueError(f"{name} must be one- or two-dimensional")
+    if signal.shape[0] != channels:
+        if signal.shape[1] == channels and (
+            samples is None or signal.shape[0] == samples
+        ):
+            signal = signal.T
+        else:
+            raise ValueError(f"{name} must have {channels} channels")
+    if samples is not None and signal.shape[1] != samples:
+        raise ValueError(f"{name} must have {samples} samples")
+    if not np.all(np.isfinite(signal)):
+        raise ValueError(f"{name} must contain only finite values")
+    return np.array(signal, dtype=float, order="F", copy=True)
+
+
+def _initial_state(value: object | None, size: int, name: str) -> np.ndarray:
+    if value is None:
+        return np.zeros(size)
+    state = np.asarray(value, dtype=float).reshape(-1)
+    if state.size != size:
+        raise ValueError(f"{name} dimension does not match the system")
+    if not np.all(np.isfinite(state)):
+        raise ValueError(f"{name} must contain only finite values")
+    return state.copy()
+
+
+def simulate_closed_loop(
+    plant: control.StateSpace,
+    controller: control.StateSpace,
+    reference: object,
+    *,
+    dither: object | None = None,
+    disturbance: object | None = None,
+    initial_plant_state: object | None = None,
+    initial_controller_state: object | None = None,
+) -> ClosedLoopTrajectory:
+    if controller.ninputs != plant.noutputs:
+        raise ValueError("controller input count must match plant outputs")
+    if controller.noutputs != plant.ninputs:
+        raise ValueError("controller output count must match plant inputs")
+
+    sample_time = _discrete_sample_time(plant, "plant")
+    controller_sample_time = _discrete_sample_time(controller, "controller")
+    if not np.isclose(sample_time, controller_sample_time):
+        raise ValueError("plant and controller sample times must match")
+
+    reference_array = _signal_matrix(
+        reference,
+        channels=plant.noutputs,
+        samples=None,
+        name="reference",
+    )
+    n_samples = reference_array.shape[1]
+    dither_array = (
+        np.zeros((plant.ninputs, n_samples), order="F")
+        if dither is None
+        else _signal_matrix(
+            dither,
+            channels=plant.ninputs,
+            samples=n_samples,
+            name="dither",
+        )
+    )
+    disturbance_array = (
+        np.zeros((plant.noutputs, n_samples), order="F")
+        if disturbance is None
+        else _signal_matrix(
+            disturbance,
+            channels=plant.noutputs,
+            samples=n_samples,
+            name="disturbance",
+        )
+    )
+
+    loop_matrix = np.eye(plant.noutputs) + plant.D @ controller.D
+    singular_values = np.linalg.svd(loop_matrix, compute_uv=False)
+    tolerance = (
+        max(loop_matrix.shape)
+        * np.finfo(float).eps
+        * max(float(singular_values[0]), 1.0)
+    )
+    if singular_values[-1] <= tolerance:
+        raise ValueError(
+            "plant and controller direct feedthrough form an algebraic loop"
+        )
+
+    plant_states = np.empty((plant.nstates, n_samples + 1), order="F")
+    controller_states = np.empty((controller.nstates, n_samples + 1), order="F")
+    plant_states[:, 0] = _initial_state(
+        initial_plant_state, plant.nstates, "initial plant state"
+    )
+    controller_states[:, 0] = _initial_state(
+        initial_controller_state, controller.nstates, "initial controller state"
+    )
+    plant_input = np.empty((plant.ninputs, n_samples), order="F")
+    plant_output = np.empty((plant.noutputs, n_samples), order="F")
+    output = np.empty((plant.noutputs, n_samples), order="F")
+
+    for sample in range(n_samples):
+        controller_feedforward = (
+            controller.C @ controller_states[:, sample]
+            + controller.D @ reference_array[:, sample]
+            + dither_array[:, sample]
+        )
+        right_hand_side = (
+            plant.C @ plant_states[:, sample]
+            + plant.D @ controller_feedforward
+            + disturbance_array[:, sample]
+        )
+        output[:, sample] = np.linalg.solve(loop_matrix, right_hand_side)
+        error = reference_array[:, sample] - output[:, sample]
+        plant_input[:, sample] = (
+            controller.C @ controller_states[:, sample]
+            + controller.D @ error
+            + dither_array[:, sample]
+        )
+        plant_output[:, sample] = (
+            plant.C @ plant_states[:, sample] + plant.D @ plant_input[:, sample]
+        )
+        plant_states[:, sample + 1] = (
+            plant.A @ plant_states[:, sample] + plant.B @ plant_input[:, sample]
+        )
+        controller_states[:, sample + 1] = (
+            controller.A @ controller_states[:, sample] + controller.B @ error
+        )
+
+    return ClosedLoopTrajectory(
+        plant=plant,
+        controller=controller,
+        sample_time=sample_time,
+        reference=reference_array,
+        dither=dither_array,
+        disturbance=disturbance_array,
+        plant_input=plant_input,
+        plant_output=plant_output,
+        output=output,
+        plant_states=plant_states,
+        controller_states=controller_states,
+    )
+
+
+def _closed_loop_noise(
+    n_outputs: int,
+    n_samples: int,
+    *,
+    scale: float,
+    temporal_correlation: float,
+    channel_correlation: float,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if scale < 0:
+        raise ValueError("noise_scale must be nonnegative")
+    if not -1 < temporal_correlation < 1:
+        raise ValueError("noise_color must be between -1 and 1")
+    rng = np.random.default_rng(seed)
+    innovations = scale * (
+        _correlation_factor(n_outputs, channel_correlation)
+        @ rng.standard_normal((n_outputs, n_samples))
+    )
+    disturbance = np.empty_like(innovations)
+    if n_samples == 0:
+        return innovations, disturbance
+    disturbance[:, 0] = innovations[:, 0]
+    innovation_scale = np.sqrt(1 - temporal_correlation**2)
+    for sample in range(1, n_samples):
+        disturbance[:, sample] = (
+            temporal_correlation * disturbance[:, sample - 1]
+            + innovation_scale * innovations[:, sample]
+        )
+    return innovations, disturbance
+
+
+def _block_hankel_rank(signal: np.ndarray, block_rows: int) -> int:
+    if block_rows < 1:
+        raise ValueError("excitation order must be positive")
+    column_count = signal.shape[1] - block_rows + 1
+    if column_count < 1:
+        return 0
+    hankel = np.vstack(
+        [signal[:, offset : offset + column_count] for offset in range(block_rows)]
+    )
+    singular_values = np.linalg.svd(hankel, compute_uv=False)
+    if singular_values.size == 0:
+        return 0
+    tolerance = (
+        max(hankel.shape) * np.finfo(float).eps * max(float(singular_values[0]), 1.0)
+    )
+    return int(np.count_nonzero(singular_values > tolerance))
+
+
+def simulate_closed_loop_scenario(
+    plant: control.StateSpace,
+    controller: control.StateSpace,
+    *,
+    n_train: int,
+    n_validation: int,
+    reference_kind: ExcitationKind = "white",
+    reference_correlation: float = 0.0,
+    reference_scale: float = 1.0,
+    noise_scale: float = 0.05,
+    noise_correlation: float = 0.0,
+    noise_color: float = 0.0,
+    dither_scale: float = 0.0,
+    dither_correlation: float = 0.0,
+    excitation_order: int | None = None,
+    seed: int = 0,
+) -> ClosedLoopIdentificationScenario:
+    if n_train < 2 or n_validation < 2:
+        raise ValueError("training and validation records need at least two samples")
+    if reference_scale < 0 or dither_scale < 0:
+        raise ValueError("excitation scales must be nonnegative")
+
+    reference = reference_scale * generate_excitation(
+        plant.noutputs,
+        n_train,
+        kind=reference_kind,
+        correlation=reference_correlation,
+        seed=seed,
+    )
+    dither = (
+        np.zeros((plant.ninputs, n_train))
+        if dither_scale == 0
+        else dither_scale
+        * generate_excitation(
+            plant.ninputs,
+            n_train,
+            kind=reference_kind,
+            correlation=dither_correlation,
+            seed=seed + 1,
+        )
+    )
+    innovations, disturbance = _closed_loop_noise(
+        plant.noutputs,
+        n_train,
+        scale=noise_scale,
+        temporal_correlation=noise_color,
+        channel_correlation=noise_correlation,
+        seed=seed + 2,
+    )
+    trajectory = simulate_closed_loop(
+        plant,
+        controller,
+        reference,
+        dither=dither,
+        disturbance=disturbance,
+    )
+
+    centered_external = np.vstack((reference, dither))
+    centered_external -= np.mean(centered_external, axis=1, keepdims=True)
+    if np.linalg.norm(centered_external) <= np.finfo(float).eps:
+        raise ValueError("closed-loop experiment is not persistently exciting")
+
+    selected_order = (
+        min(max(2, plant.nstates + 1), 8)
+        if excitation_order is None
+        else int(excitation_order)
+    )
+    excitation_rank = _block_hankel_rank(trajectory.plant_input, selected_order)
+    required_rank = plant.ninputs * selected_order
+    if excitation_rank < required_rank:
+        raise ValueError(
+            "closed-loop plant input is not persistently exciting; "
+            f"rank {excitation_rank}, need {required_rank}"
+        )
+
+    u_validation = generate_excitation(
+        plant.ninputs,
+        n_validation,
+        kind="white",
+        seed=seed + 3,
+    )
+    y_validation_clean = _simulate(plant, u_validation)
+    return ClosedLoopIdentificationScenario(
+        plant=trajectory.plant,
+        controller=trajectory.controller,
+        sample_time=trajectory.sample_time,
+        reference=trajectory.reference,
+        dither=trajectory.dither,
+        disturbance=trajectory.disturbance,
+        plant_input=trajectory.plant_input,
+        plant_output=trajectory.plant_output,
+        output=trajectory.output,
+        plant_states=trajectory.plant_states,
+        controller_states=trajectory.controller_states,
+        innovations=innovations,
+        u_validation=u_validation,
+        y_validation_clean=y_validation_clean,
+        excitation_order=selected_order,
+        excitation_rank=excitation_rank,
+    )
+
+
+def frequency_response_error(
+    reference: control.InputOutputSystem,
+    candidate: control.InputOutputSystem,
+    frequencies: object | None = None,
+) -> float:
+    if reference.shape != candidate.shape:
+        raise ValueError("frequency-response models must have matching dimensions")
+    if frequencies is None:
+        sample_time = 1.0 if reference.dt is True else float(reference.dt)
+        frequencies = np.linspace(0.0, 0.95 * np.pi / sample_time, 128)
+    reference_response = control.frequency_response(reference, frequencies).frdata
+    candidate_response = control.frequency_response(candidate, frequencies).frdata
+    denominator = max(np.linalg.norm(reference_response), np.finfo(float).tiny)
+    return float(np.linalg.norm(reference_response - candidate_response) / denominator)
 
 
 def _simulate(plant: control.StateSpace, inputs: np.ndarray) -> np.ndarray:
