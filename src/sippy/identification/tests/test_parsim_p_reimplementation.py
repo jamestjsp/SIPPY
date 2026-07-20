@@ -11,10 +11,12 @@ Lines 597-670 (PARSIM_P function)
 import numpy as np
 import pytest
 
+from sippy.identification.algorithms import parsim_core as parsim_core_module
 from sippy.identification.algorithms.parsim_core import ParsimCoreAlgorithm
 from sippy.identification.tests.reference_control_compat import (
     install_reference_control_compat,
 )
+from sippy.utils.simulation_utils import impile, ordinate_sequence
 
 install_reference_control_compat()
 
@@ -60,20 +62,76 @@ class TestParsimPReimplementation:
         # Should NOT contain a direct call to parsim_s
         assert "parsim_s" not in source, "PARSIM-P should not be a wrapper to parsim_s"
 
-        # Should contain its own algorithm logic
-        assert "for i in range" in source, "PARSIM-P should have iteration logic"
+        assert "_build_parsim_p_gamma_l" in source
 
     def test_parsim_p_has_expanding_window_logic(self):
         """Test that PARSIM-P contains expanding window logic."""
         import inspect
 
-        source = inspect.getsource(ParsimCoreAlgorithm.parsim_p)
+        source = inspect.getsource(parsim_core_module._build_parsim_p_gamma_l)
 
         # Key feature: Uf window should expand with iteration
         # Looking for pattern like: Uf[0 : m * (i + 1), :]
         assert "i + 1" in source or "(i+1)" in source, (
             "PARSIM-P should have expanding window logic with (i+1)"
         )
+
+    def test_expanding_regressions_match_explicit_pseudoinverses(
+        self, stable_mimo_system
+    ):
+        y, u = stable_mimo_system
+        horizon = 8
+        Yf, Yp = ordinate_sequence(y, horizon, horizon)
+        Uf, Up = ordinate_sequence(u, horizon, horizon)
+        Zp = impile(Up, Yp)
+
+        expected_blocks = []
+        for i in range(horizon):
+            regressor = impile(Zp, Uf[: u.shape[0] * (i + 1)])
+            expected_blocks.append(
+                (Yf[y.shape[0] * i : y.shape[0] * (i + 1)] @ np.linalg.pinv(regressor))[
+                    :, : Zp.shape[0]
+                ]
+            )
+        expected = np.vstack(expected_blocks)
+
+        actual = parsim_core_module._build_parsim_p_gamma_l(
+            Yf, Uf, Zp, horizon, y.shape[0], u.shape[0]
+        )
+
+        np.testing.assert_allclose(actual, expected, rtol=1e-9, atol=1e-10)
+
+    def test_expanding_regressions_use_one_compact_factorization(
+        self, stable_mimo_system, monkeypatch
+    ):
+        y, u = stable_mimo_system
+        horizon = 8
+        Yf, Yp = ordinate_sequence(y, horizon, horizon)
+        Uf, Up = ordinate_sequence(u, horizon, horizon)
+        Zp = impile(Up, Yp)
+        factorization_calls = 0
+        pseudoinverse_shapes = []
+        original_qr = np.linalg.qr
+        original_pinv = np.linalg.pinv
+
+        def tracked_qr(*args, **kwargs):
+            nonlocal factorization_calls
+            factorization_calls += 1
+            return original_qr(*args, **kwargs)
+
+        def tracked_pinv(matrix, *args, **kwargs):
+            pseudoinverse_shapes.append(matrix.shape)
+            return original_pinv(matrix, *args, **kwargs)
+
+        monkeypatch.setattr(parsim_core_module.np.linalg, "qr", tracked_qr)
+        monkeypatch.setattr(parsim_core_module.np.linalg, "pinv", tracked_pinv)
+
+        parsim_core_module._build_parsim_p_gamma_l(
+            Yf, Uf, Zp, horizon, y.shape[0], u.shape[0]
+        )
+
+        assert factorization_calls == 1
+        assert all(max(shape) < Yf.shape[1] for shape in pseudoinverse_shapes)
 
     def test_parsim_p_basic_execution(self, simple_siso_system):
         """Test that PARSIM-P can execute without errors."""

@@ -2,6 +2,8 @@
 PARSIM algorithms core implementation.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 import scipy as sc
 
@@ -39,6 +41,85 @@ except ImportError:
     Z_dot_PIort_compiled = None
     matrix_operations_a_compiled = None
     NUMBA_AVAILABLE = False
+
+
+def _full_rank_from_diagonal(triangular, sample_count):
+    diagonal = np.abs(np.diag(triangular))
+    if diagonal.size == 0:
+        return False
+    scale = float(np.max(diagonal))
+    tolerance = max(sample_count, *triangular.shape) * np.finfo(np.float64).eps * scale
+    return scale > 0.0 and bool(np.all(diagonal > tolerance))
+
+
+@dataclass(frozen=True)
+class _ReusableRightLeastSquares:
+    regressor: np.ndarray
+    q: np.ndarray
+    r: np.ndarray
+    pivots: np.ndarray
+    full_rank: bool
+
+    @classmethod
+    def factor(cls, regressor):
+        q, r, pivots = sc.linalg.qr(
+            regressor.T,
+            mode="economic",
+            pivoting=True,
+            check_finite=False,
+        )
+        full_rank = r.shape[0] >= regressor.shape[0] and _full_rank_from_diagonal(
+            r[: regressor.shape[0]], regressor.shape[1]
+        )
+        return cls(regressor, q, r, pivots, full_rank)
+
+    def solve(self, target):
+        if not self.full_rank:
+            return target @ np.linalg.pinv(self.regressor)
+        row_count = self.regressor.shape[0]
+        transformed = self.q.T @ target.T
+        pivoted = sc.linalg.solve_triangular(
+            self.r[:row_count],
+            transformed[:row_count],
+            lower=False,
+            check_finite=False,
+        )
+        coefficients = np.empty_like(pivoted)
+        coefficients[self.pivots] = pivoted
+        return coefficients.T
+
+
+def _build_parsim_p_gamma_l(Yf, Uf, Zp, f, l_, m):
+    regressor_rows = Zp.shape[0] + Uf.shape[0]
+    stacked = np.vstack((Zp, Uf, Yf))
+    L = np.linalg.qr(stacked.T, mode="r").T
+    if L.shape[1] < regressor_rows:
+        raise ValueError(
+            "Not enough data columns for PARSIM-P LQ regression; "
+            f"need at least {regressor_rows}, got {L.shape[1]}"
+        )
+
+    output_start = regressor_rows
+    gamma_blocks = []
+    for i in range(f):
+        prefix_rows = Zp.shape[0] + m * (i + 1)
+        triangular = L[:prefix_rows, :prefix_rows]
+        output_block = L[
+            output_start + l_ * i : output_start + l_ * (i + 1),
+            :prefix_rows,
+        ]
+        if _full_rank_from_diagonal(triangular, stacked.shape[1]):
+            coefficients = sc.linalg.solve_triangular(
+                triangular.T,
+                output_block.T,
+                lower=False,
+                check_finite=False,
+            ).T
+        else:
+            regressor = impile(Zp, Uf[: m * (i + 1)])
+            coefficients = Yf[l_ * i : l_ * (i + 1)] @ np.linalg.pinv(regressor)
+        gamma_blocks.append(coefficients[:, : Zp.shape[0]])
+    return np.vstack(gamma_blocks)
 
 
 class ParsimCoreAlgorithm:
@@ -116,11 +197,10 @@ class ParsimCoreAlgorithm:
         Yf, Yp = ordinate_sequence(y, f, p)
         Uf, Up = ordinate_sequence(u, f, p)
         Zp = impile(Up, Yp)
-        M = np.dot(Yf[0:l_, :], np.linalg.pinv(impile(Zp, Uf[0:m, :])))
-        Matrix_pinv = (
-            pinv_compiled_svd(impile(Zp, impile(Uf[0:m, :], Yf[0:l_, :])))
-            if NUMBA_AVAILABLE
-            else np.linalg.pinv(impile(Zp, impile(Uf[0:m, :], Yf[0:l_, :])))
+        initial_solver = _ReusableRightLeastSquares.factor(impile(Zp, Uf[0:m, :]))
+        M = initial_solver.solve(Yf[0:l_, :])
+        iteration_solver = _ReusableRightLeastSquares.factor(
+            impile(Zp, impile(Uf[0:m, :], Yf[0:l_, :]))
         )
         Gamma_L = M[:, 0 : (m + l_) * f]
 
@@ -165,7 +245,7 @@ class ParsimCoreAlgorithm:
             else:
                 y_tilde = estimating_y(H_K, Uf, G_K, Yf, i, m, l_)
 
-            M = np.dot((Yf[l_ * i : l_ * (i + 1)] - y_tilde), Matrix_pinv)
+            M = iteration_solver.solve(Yf[l_ * i : l_ * (i + 1)] - y_tilde)
             H_K = impile(H_K, M[:, (m + l_) * f : (m + l_) * f + m])
             G_K = impile(G_K, M[:, (m + l_) * f + m :])
             Gamma_L = impile(Gamma_L, M[:, 0 : (m + l_) * f])
@@ -349,12 +429,8 @@ class ParsimCoreAlgorithm:
         Zp = impile(Up, Yp)
 
         # Initial matrices
-        Matrix_pinv = (
-            pinv_compiled_svd(impile(Zp, Uf[0:m, :]))
-            if NUMBA_AVAILABLE
-            else np.linalg.pinv(impile(Zp, Uf[0:m, :]))
-        )
-        M = np.dot(Yf[0:l_, :], Matrix_pinv)
+        regression_solver = _ReusableRightLeastSquares.factor(impile(Zp, Uf[0:m, :]))
+        M = regression_solver.solve(Yf[0:l_, :])
         Gamma_L = M[:, 0 : (m + l_) * f]
         H = M[:, (m + l_) * f :]
 
@@ -370,7 +446,7 @@ class ParsimCoreAlgorithm:
         # Build matrices for each horizon
         for i in range(1, f):
             y_tilde = estimating_y_S(H, Uf, Yf, i, m, l_)
-            M = np.dot((Yf[l_ * i : l_ * (i + 1)] - y_tilde), Matrix_pinv)
+            M = regression_solver.solve(Yf[l_ * i : l_ * (i + 1)] - y_tilde)
             Gamma_L = impile(Gamma_L, M[:, 0 : (m + l_) * f])
             H = impile(H, M[:, (m + l_) * f :])
 
@@ -497,30 +573,7 @@ class ParsimCoreAlgorithm:
         Uf, Up = ordinate_sequence(u, f, p)
         Zp = impile(Up, Yp)
 
-        # Initial projection with first block
-        # CRITICAL: This is where PARSIM-P differs from PARSIM-S
-        # Master lines 637-639
-        Matrix_pinv = (
-            pinv_compiled_svd(impile(Zp, Uf[0:m, :]))
-            if NUMBA_AVAILABLE
-            else np.linalg.pinv(impile(Zp, Uf[0:m, :]))
-        )
-        M = np.dot(Yf[0:l_, :], Matrix_pinv)
-        Gamma_L = M[:, 0 : (m + l_) * f]
-
-        # EXPANDING WINDOW: Key difference from PARSIM-S
-        # Master lines 640-643
-        # In each iteration, the Uf window grows: Uf[0:m*(i+1), :]
-        for i in range(1, f):
-            # Recompute Matrix_pinv with EXPANDING Uf window
-            # This is the critical line that makes PARSIM-P different!
-            Matrix_pinv = (
-                pinv_compiled_svd(impile(Zp, Uf[0 : m * (i + 1), :]))
-                if NUMBA_AVAILABLE
-                else np.linalg.pinv(impile(Zp, Uf[0 : m * (i + 1), :]))
-            )
-            M = np.dot(Yf[l_ * i : l_ * (i + 1), :], Matrix_pinv)
-            Gamma_L = impile(Gamma_L, M[:, 0 : (m + l_) * f])
+        Gamma_L = _build_parsim_p_gamma_l(Yf, Uf, Zp, f, l_, m)
 
         # SVD for order estimation - use PARSIM-K weighted SVD
         # Master line 644
