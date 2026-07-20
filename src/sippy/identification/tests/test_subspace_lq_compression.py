@@ -108,3 +108,29 @@ def test_subspace_compression_has_structural_performance_gate(monkeypatch):
     assert svd_shapes
     assert all(max(shape) <= stacked_row_count for shape in svd_shapes)
     assert projection.projector.shape[1] == horizon * (u.shape[0] + y.shape[0])
+
+
+def test_lq_compression_preserves_underdetermined_mimo_behavior():
+    rng = np.random.default_rng(122)
+    sample_count = 150
+    horizon = 20
+    u = rng.normal(size=(2, sample_count))
+    y = rng.normal(size=(2, sample_count))
+
+    _, singular_values, _, _, projection = SubspaceCoreAlgorithm.svd_weighted(
+        y, u, horizon, 2, "N4SID"
+    )
+    _, _, explicit_projection, _ = _explicit_projection(y, u, horizon)
+
+    np.testing.assert_allclose(
+        projection.materialize(),
+        explicit_projection,
+        rtol=2e-9,
+        atol=2e-10,
+    )
+    np.testing.assert_allclose(
+        singular_values,
+        np.linalg.svd(explicit_projection, compute_uv=False, full_matrices=False),
+        rtol=2e-9,
+        atol=2e-10,
+    )

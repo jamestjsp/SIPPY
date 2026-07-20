@@ -123,6 +123,28 @@ def _numerically_full_rank(triangular, sample_count):
     return scale > 0.0 and bool(np.all(diagonal > tolerance))
 
 
+def _explicit_subspace_projection(Uf, Zp, Yf):
+    if NUMBA_AVAILABLE and Z_dot_PIort_compiled is not None:
+        projected_outputs = Z_dot_PIort_compiled(Yf, Uf)
+        projected_past = Z_dot_PIort_compiled(Zp, Uf)
+    else:
+        projected_outputs = Z_dot_PIort(Yf, Uf)
+        projected_past = Z_dot_PIort(Zp, Uf)
+    if NUMBA_AVAILABLE and pinv_compiled_svd is not None:
+        projected_past_inverse = pinv_compiled_svd(projected_past)
+    else:
+        projected_past_inverse = pinv(projected_past)
+    projector = projected_outputs @ projected_past_inverse
+    projection = _LQProjection(projector, Zp, materialize_first=True)
+    materialized = projection.materialize()
+    return (
+        projection,
+        materialized,
+        Z_dot_PIort(materialized, Uf),
+        projected_outputs,
+    )
+
+
 def _lq_compress_subspace_data(Uf, Zp, Yf):
     input_rows = Uf.shape[0]
     past_rows = Zp.shape[0]
@@ -132,10 +154,7 @@ def _lq_compress_subspace_data(Uf, Zp, Yf):
     past_start = input_rows
     output_start = input_rows + past_rows
     if L.shape[1] < output_start:
-        raise ValueError(
-            "Not enough data columns for LQ subspace compression; "
-            f"need at least {output_start}, got {L.shape[1]}"
-        )
+        return _explicit_subspace_projection(Uf, Zp, Yf)
 
     L11 = L[:input_rows, :input_rows]
     L22 = L[past_start:output_start, input_rows:output_start]
@@ -143,24 +162,7 @@ def _lq_compress_subspace_data(Uf, Zp, Yf):
         _numerically_full_rank(L11, stacked.shape[1])
         and _numerically_full_rank(L22, stacked.shape[1])
     ):
-        if NUMBA_AVAILABLE and Z_dot_PIort_compiled is not None:
-            projected_outputs = Z_dot_PIort_compiled(Yf, Uf)
-            projected_past = Z_dot_PIort_compiled(Zp, Uf)
-        else:
-            projected_outputs = Z_dot_PIort(Yf, Uf)
-            projected_past = Z_dot_PIort(Zp, Uf)
-        if NUMBA_AVAILABLE and pinv_compiled_svd is not None:
-            projected_past_inverse = pinv_compiled_svd(projected_past)
-        else:
-            projected_past_inverse = pinv(projected_past)
-        projector = projected_outputs @ projected_past_inverse
-        projection = _LQProjection(projector, Zp, materialize_first=True)
-        return (
-            projection,
-            projection.materialize(),
-            Z_dot_PIort(projection.materialize(), Uf),
-            projected_outputs,
-        )
+        return _explicit_subspace_projection(Uf, Zp, Yf)
 
     L32 = L[output_start:, input_rows:output_start]
     projector = L32 @ pinv(L22)
