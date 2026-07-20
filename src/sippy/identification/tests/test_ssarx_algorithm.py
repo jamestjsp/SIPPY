@@ -1,3 +1,5 @@
+from itertools import permutations
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -8,7 +10,17 @@ from sippy.identification.algorithms.ssarx import _estimate_varx_predictor
 from sippy.identification.factory import AlgorithmFactory
 from sippy.identification.iddata import IDData
 
-from .simulation_scenarios import frequency_response_error, normalized_rmse
+from .simulation_scenarios import (
+    delayed_siso_plant,
+    frequency_response_error,
+    normalized_rmse,
+    simulate_closed_loop_scenario,
+    simulate_scenario,
+    stable_mimo_plant,
+    stable_siso_plant,
+    static_output_feedback_controller,
+    unstable_siso_plant,
+)
 
 
 def _simulate_innovations_model(A, B, C, D, K, inputs, innovations):
@@ -22,6 +34,48 @@ def _simulate_innovations_model(A, B, C, D, K, inputs, innovations):
 
 def _simulate_process(system, inputs):
     return control.forced_response(system, U=inputs, squeeze=False).outputs
+
+
+def _pole_error(reference, candidate):
+    expected = np.asarray(control.poles(reference), dtype=complex)
+    actual = np.asarray(control.poles(candidate), dtype=complex)
+    errors = [
+        np.linalg.norm(expected - actual[list(order)])
+        for order in permutations(range(actual.size))
+    ]
+    return float(min(errors) / max(np.linalg.norm(expected), np.finfo(float).tiny))
+
+
+def _markov_error(reference, candidate, count=16):
+    def parameters(system):
+        blocks = [np.asarray(system.D, dtype=float)]
+        state_power = np.eye(system.nstates)
+        for _ in range(1, count):
+            blocks.append(system.C @ state_power @ system.B)
+            state_power = state_power @ system.A
+        return np.stack(blocks)
+
+    expected = parameters(reference)
+    actual = parameters(candidate)
+    return float(
+        np.linalg.norm(expected - actual)
+        / max(np.linalg.norm(expected), np.finfo(float).tiny)
+    )
+
+
+def _identified_system(scenario, *, order, horizon, varx_order, direct=False):
+    model = sippy.identify(
+        scenario.output,
+        scenario.plant_input,
+        method="SSARX",
+        ss_f=horizon,
+        ss_p=varx_order,
+        ss_fixed_order=order,
+        ss_d_required=direct,
+        tsample=scenario.sample_time,
+    )
+    system = control.ss(model.A, model.B, model.C, model.D, dt=model.ts)
+    return model, system
 
 
 def test_varx_predictor_blocks_match_innovations_model_oracle():
@@ -154,3 +208,154 @@ def test_ssarx_factory_iddata_and_failure_contract():
             ss_p=8,
             ss_fixed_order=1,
         )
+
+
+@pytest.mark.parametrize(
+    "noise_scale,maximum_frequency_error",
+    [(0.015, 0.15), (0.12, 0.35)],
+)
+def test_ssarx_closed_loop_siso_reconstruction_across_noise_levels(
+    noise_scale,
+    maximum_frequency_error,
+):
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=5000,
+        n_validation=500,
+        noise_scale=noise_scale,
+        noise_color=0.65,
+        dither_scale=0.05,
+        seed=750 + int(1000 * noise_scale),
+    )
+
+    model, identified = _identified_system(
+        scenario,
+        order=plant.nstates,
+        horizon=12,
+        varx_order=24,
+    )
+    prediction = _simulate_process(identified, scenario.u_validation)
+
+    assert model.identification_info["estimator_route"] == "ssarx"
+    assert float(np.max(normalized_rmse(scenario.y_validation_clean, prediction))) < 0.3
+    assert frequency_response_error(plant, identified) < maximum_frequency_error
+    assert _pole_error(plant, identified) < 0.25
+    assert _markov_error(plant, identified) < maximum_frequency_error
+
+
+def test_ssarx_closed_loop_mimo_reconstructs_correlated_colored_record():
+    plant = stable_mimo_plant(direct_feedthrough=False)
+    controller = control.ss(
+        np.diag([0.4, 0.55]),
+        0.2 * np.eye(2),
+        0.15 * np.eye(2),
+        np.array([[0.45, 0.04], [-0.03, 0.38]]),
+        dt=plant.dt,
+    )
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        controller,
+        n_train=7000,
+        n_validation=600,
+        reference_correlation=0.7,
+        noise_scale=0.05,
+        noise_correlation=0.5,
+        noise_color=0.65,
+        dither_scale=0.08,
+        dither_correlation=0.3,
+        seed=760,
+    )
+
+    _, identified = _identified_system(
+        scenario,
+        order=plant.nstates,
+        horizon=12,
+        varx_order=24,
+    )
+    prediction = _simulate_process(identified, scenario.u_validation)
+
+    assert (
+        float(np.max(normalized_rmse(scenario.y_validation_clean, prediction))) < 0.35
+    )
+    assert frequency_response_error(plant, identified) < 0.35
+    assert _pole_error(plant, identified) < 0.3
+    assert _markov_error(plant, identified) < 0.35
+
+
+def test_ssarx_recovers_feedback_stabilized_unstable_plant():
+    plant = unstable_siso_plant()
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[2.0]], dt=plant.dt),
+        n_train=9000,
+        n_validation=700,
+        reference_kind="binary",
+        noise_scale=0.02,
+        noise_color=0.35,
+        dither_scale=0.04,
+        seed=770,
+    )
+
+    _, identified = _identified_system(
+        scenario,
+        order=plant.nstates,
+        horizon=14,
+        varx_order=30,
+    )
+
+    assert np.max(np.abs(control.poles(plant))) > 1.0
+    assert np.max(np.abs(control.poles(identified))) > 1.0
+    assert frequency_response_error(plant, identified) < 0.35
+    assert _pole_error(plant, identified) < 0.2
+    assert _markov_error(plant, identified) < 0.35
+
+
+@pytest.mark.parametrize(
+    "plant,order,horizon,varx_order,direct,maximum_error",
+    [
+        (stable_mimo_plant(direct_feedthrough=True), 3, 12, 24, True, 0.3),
+        (delayed_siso_plant(delay=3), 4, 10, 24, False, 0.35),
+    ],
+    ids=["mimo-direct-feedthrough", "siso-input-delay"],
+)
+def test_ssarx_open_loop_structural_cases(
+    plant,
+    order,
+    horizon,
+    varx_order,
+    direct,
+    maximum_error,
+):
+    scenario = simulate_scenario(
+        plant,
+        n_train=6000,
+        n_validation=600,
+        input_kind="white",
+        snr_db=32,
+        input_correlation=0.35 if plant.ninputs > 1 else 0.0,
+        noise_correlation=0.35 if plant.noutputs > 1 else 0.0,
+        noise_color=0.45,
+        seed=780 + order,
+    )
+    model = sippy.identify(
+        scenario.y_train,
+        scenario.u_train,
+        method="SSARX",
+        ss_f=horizon,
+        ss_p=varx_order,
+        ss_fixed_order=order,
+        ss_d_required=direct,
+        tsample=scenario.sample_time,
+    )
+    identified = control.ss(model.A, model.B, model.C, model.D, dt=model.ts)
+    prediction = _simulate_process(identified, scenario.u_validation)
+
+    assert (
+        float(np.max(normalized_rmse(scenario.y_validation_clean, prediction)))
+        < maximum_error
+    )
+    assert frequency_response_error(plant, identified) < maximum_error
+    assert _pole_error(plant, identified) < maximum_error
+    assert _markov_error(plant, identified) < maximum_error
