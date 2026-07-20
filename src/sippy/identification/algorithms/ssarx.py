@@ -189,20 +189,25 @@ def _selected_order(
     *,
     threshold: float,
     fixed_order: int | None,
-    future_horizon: int,
+    future_output_rows: int,
 ) -> int:
     if singular_values.size == 0 or singular_values[0] <= 0.0:
         raise ValueError("SSARX canonical correlation has no nonzero singular values")
     if fixed_order is not None:
         order = fixed_order
+        if order > singular_values.size:
+            raise ValueError(
+                f"SSARX fixed order {order} exceeds available canonical dimension "
+                f"{singular_values.size}"
+            )
     else:
         order = int(np.count_nonzero(singular_values >= threshold * singular_values[0]))
-    order = min(order, singular_values.size)
     if order < 1:
         raise ValueError("SSARX order selection produced an empty state space")
-    if order >= future_horizon:
+    if order >= future_output_rows:
         raise ValueError(
-            f"SSARX future horizon {future_horizon} must exceed selected order {order}"
+            f"SSARX future output block with {future_output_rows} rows must exceed "
+            f"selected order {order}"
         )
     return order
 
@@ -258,7 +263,7 @@ def identify_ssarx(
         singular_values,
         threshold=threshold,
         fixed_order=fixed_order,
-        future_horizon=future_horizon,
+        future_output_rows=data.future_outputs.shape[0],
     )
     state_map = right_vectors[:order] @ past_inverse
     states = state_map @ past
@@ -354,6 +359,11 @@ class SSARXAlgorithm(IdentificationAlgorithm):
         fixed_order = kwargs.get("ss_fixed_order")
         threshold = kwargs.get("ss_threshold", 0.1)
         direct_feedthrough = kwargs.get("ss_d_required", False)
+        if fixed_order is not None and fixed_order >= future_horizon * y.shape[0]:
+            raise ValueError(
+                "ss_f * output_count must exceed ss_fixed_order: "
+                f"{future_horizon} * {y.shape[0]} <= {fixed_order}"
+            )
         try:
             estimate = identify_ssarx(
                 y,
@@ -420,8 +430,6 @@ class SSARXAlgorithm(IdentificationAlgorithm):
                 or fixed_order < 1
             ):
                 raise ValueError("ss_fixed_order must be a positive integer or None")
-            if future_horizon <= fixed_order:
-                raise ValueError("ss_f must exceed ss_fixed_order")
         if not isinstance(threshold, (int, float, np.number)) or not 0 <= threshold < 1:
             raise ValueError("ss_threshold must be in [0, 1)")
         if fixed_order is None and threshold == 0:

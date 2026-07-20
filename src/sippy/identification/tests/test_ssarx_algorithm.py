@@ -9,6 +9,7 @@ from sippy import systems as control
 from sippy.identification.algorithms.ssarx import (
     SSARXAlgorithm,
     _estimate_varx_predictor,
+    _selected_order,
 )
 from sippy.identification.factory import AlgorithmFactory
 from sippy.identification.iddata import IDData
@@ -192,7 +193,10 @@ def test_ssarx_factory_iddata_and_failure_contract():
     assert model.x0.shape == (2, 1)
     assert model.identification_info["numerical_ranks"]["varx_regressor"] > 0
 
-    with pytest.raises(ValueError, match="ss_f must exceed ss_fixed_order"):
+    with pytest.raises(
+        ValueError,
+        match=r"ss_f \* output_count must exceed ss_fixed_order",
+    ):
         sippy.identify(
             outputs,
             inputs,
@@ -302,6 +306,50 @@ def test_ssarx_closed_loop_mimo_reconstructs_correlated_colored_record():
     assert frequency_response_error(plant, identified) < 0.35
     assert _pole_error(plant, identified) < 0.3
     assert _markov_error(plant, identified) < 0.35
+
+
+def test_ssarx_order_bound_uses_future_output_rows_for_mimo():
+    plant = stable_mimo_plant(direct_feedthrough=False)
+    scenario = simulate_scenario(
+        plant,
+        n_train=6000,
+        n_validation=500,
+        input_kind="white",
+        snr_db=40,
+        input_correlation=0.25,
+        noise_correlation=0.2,
+        noise_color=0.3,
+        seed=761,
+    )
+
+    model = sippy.identify(
+        scenario.y_train,
+        scenario.u_train,
+        method="SSARX",
+        ss_f=2,
+        ss_p=12,
+        ss_fixed_order=plant.nstates,
+        tsample=scenario.sample_time,
+    )
+    identified = control.ss(model.A, model.B, model.C, model.D, dt=model.ts)
+    prediction = _simulate_process(identified, scenario.u_validation)
+
+    assert plant.nstates >= 2
+    assert plant.nstates < 2 * plant.noutputs
+    assert model.identification_info["selected_order"] == plant.nstates
+    assert float(np.max(normalized_rmse(scenario.y_validation_clean, prediction))) < 0.3
+    assert frequency_response_error(plant, identified) < 0.3
+
+    with pytest.raises(
+        ValueError,
+        match="fixed order 3 exceeds available canonical dimension 2",
+    ):
+        _selected_order(
+            np.array([1.0, 0.5]),
+            threshold=0.1,
+            fixed_order=3,
+            future_output_rows=4,
+        )
 
 
 def test_ssarx_recovers_feedback_stabilized_unstable_plant():
