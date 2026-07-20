@@ -77,13 +77,13 @@ def _scale_channels(signal: np.ndarray, enabled: bool) -> tuple[np.ndarray, np.n
 def _numerical_rank(matrix: np.ndarray) -> int:
     if matrix.size == 0:
         return 0
-    gram = matrix @ matrix.T if matrix.shape[0] <= matrix.shape[1] else matrix.T @ matrix
+    gram = (
+        matrix @ matrix.T if matrix.shape[0] <= matrix.shape[1] else matrix.T @ matrix
+    )
     gram = 0.5 * (gram + gram.T)
     eigenvalues = np.linalg.eigvalsh(gram)
     largest_eigenvalue = max(float(eigenvalues[-1]), 0.0)
-    uncertainty = (
-        max(matrix.shape) * np.finfo(np.float64).eps * largest_eigenvalue
-    )
+    uncertainty = max(matrix.shape) * np.finfo(np.float64).eps * largest_eigenvalue
     if largest_eigenvalue > 0.0 and float(eigenvalues[0]) > uncertainty:
         return min(matrix.shape)
 

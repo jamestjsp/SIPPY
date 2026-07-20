@@ -1,5 +1,6 @@
 import argparse
 import gc
+import itertools
 import json
 import platform
 import statistics
@@ -20,11 +21,35 @@ class BenchmarkResult:
     peak_python_bytes: int
     selected_order: int
     estimator_route: str
+    refit_on_full_record: bool
+    held_out_nrmse: float
+    frequency_response_error: float
+    pole_error: float
+    markov_parameter_error: float
 
 
-def _simulate_dataset(
-    kind: str, sample_count: int
-) -> tuple[np.ndarray, np.ndarray, int]:
+@dataclass(frozen=True)
+class BenchmarkDataset:
+    outputs: np.ndarray
+    inputs: np.ndarray
+    validation_outputs: np.ndarray
+    validation_inputs: np.ndarray
+    A: np.ndarray
+    B: np.ndarray
+    C: np.ndarray
+    D: np.ndarray
+
+
+def _simulate_response(A, B, C, D, inputs):
+    outputs = np.zeros((C.shape[0], inputs.shape[1]))
+    state = np.zeros(A.shape[0])
+    for sample in range(inputs.shape[1]):
+        outputs[:, sample] = C @ state + D @ inputs[:, sample]
+        state = A @ state + B @ inputs[:, sample]
+    return outputs
+
+
+def _simulate_dataset(kind: str, sample_count: int) -> BenchmarkDataset:
     rng = np.random.default_rng(20260720 if kind == "siso" else 20260721)
     if kind == "siso":
         A = np.array([[0.72, 0.12], [-0.08, 0.84]])
@@ -40,14 +65,88 @@ def _simulate_dataset(
         )
         B = np.array([[0.35, 0.08], [0.12, 0.28], [0.18, -0.15]])
         C = np.array([[1.0, 0.2, -0.1], [0.15, -0.25, 0.9]])
+    D = np.zeros((C.shape[0], B.shape[1]))
     inputs = rng.normal(size=(B.shape[1], sample_count))
-    outputs = np.zeros((C.shape[0], sample_count))
-    state = np.zeros(A.shape[0])
-    for sample in range(sample_count):
-        outputs[:, sample] = C @ state
-        state = A @ state + B @ inputs[:, sample]
+    outputs = _simulate_response(A, B, C, D, inputs)
     outputs += rng.normal(scale=0.01, size=outputs.shape)
-    return outputs, inputs, A.shape[0]
+    validation_inputs = rng.normal(size=(B.shape[1], 400))
+    validation_outputs = _simulate_response(A, B, C, D, validation_inputs)
+    return BenchmarkDataset(
+        outputs=outputs,
+        inputs=inputs,
+        validation_outputs=validation_outputs,
+        validation_inputs=validation_inputs,
+        A=A,
+        B=B,
+        C=C,
+        D=D,
+    )
+
+
+def _relative_error(expected, actual):
+    scale = max(float(np.linalg.norm(expected)), np.finfo(np.float64).tiny)
+    return float(np.linalg.norm(expected - actual) / scale)
+
+
+def _frequency_response(A, B, C, D):
+    frequencies = np.linspace(0.0, np.pi, 128)
+    identity = np.eye(A.shape[0])
+    return np.stack(
+        [
+            C @ np.linalg.solve(np.exp(1j * omega) * identity - A, B) + D
+            for omega in frequencies
+        ]
+    )
+
+
+def _markov_parameters(A, B, C, D, count=12):
+    parameters = [D]
+    state_power = np.eye(A.shape[0])
+    for _ in range(1, count):
+        parameters.append(C @ state_power @ B)
+        state_power = state_power @ A
+    return np.stack(parameters)
+
+
+def _accuracy_metrics(dataset, model):
+    predicted = _simulate_response(
+        model.A,
+        model.B,
+        model.C,
+        model.D,
+        dataset.validation_inputs,
+    )
+    centered = dataset.validation_outputs - np.mean(
+        dataset.validation_outputs, axis=1, keepdims=True
+    )
+    output_errors = np.sqrt(
+        np.sum((dataset.validation_outputs - predicted) ** 2, axis=1)
+        / np.maximum(
+            np.sum(centered**2, axis=1),
+            np.finfo(np.float64).tiny,
+        )
+    )
+    expected_poles = np.linalg.eigvals(dataset.A)
+    actual_poles = np.linalg.eigvals(model.A)
+    if expected_poles.shape != actual_poles.shape:
+        pole_error = np.inf
+    else:
+        pole_error = min(
+            _relative_error(expected_poles, actual_poles[list(order)])
+            for order in itertools.permutations(range(actual_poles.size))
+        )
+    return {
+        "held_out_nrmse": float(np.max(output_errors)),
+        "frequency_response_error": _relative_error(
+            _frequency_response(dataset.A, dataset.B, dataset.C, dataset.D),
+            _frequency_response(model.A, model.B, model.C, model.D),
+        ),
+        "pole_error": pole_error,
+        "markov_parameter_error": _relative_error(
+            _markov_parameters(dataset.A, dataset.B, dataset.C, dataset.D),
+            _markov_parameters(model.A, model.B, model.C, model.D),
+        ),
+    }
 
 
 def _workload(method: str, y: np.ndarray, u: np.ndarray, order: int):
@@ -83,7 +182,10 @@ def main() -> None:
     structural_bounds = {}
 
     for dataset in ("siso", "mimo"):
-        y, u, order = _simulate_dataset(dataset, args.samples)
+        fixture = _simulate_dataset(dataset, args.samples)
+        y = fixture.outputs
+        u = fixture.inputs
+        order = fixture.A.shape[0]
         channel_count = y.shape[0] + u.shape[0]
         usable_columns = args.samples - 2 * horizon + 1
         compact_lq_rows = 2 * horizon * channel_count
@@ -98,6 +200,7 @@ def main() -> None:
             seconds, peak_bytes, model = _measure(
                 _workload(method, y, u, order), repeat
             )
+            accuracy = _accuracy_metrics(fixture, model)
             results.append(
                 BenchmarkResult(
                     dataset=dataset,
@@ -108,6 +211,10 @@ def main() -> None:
                     estimator_route=model.identification_info.get(
                         "estimator_route", "named"
                     ),
+                    refit_on_full_record=model.identification_info.get(
+                        "refit_on_full_record", False
+                    ),
+                    **accuracy,
                 )
             )
 

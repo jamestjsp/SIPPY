@@ -644,9 +644,7 @@ def test_predictor_selection_refits_selected_dimensions_on_the_full_record(monke
     y = np.zeros_like(u)
     for sample in range(1, sample_count):
         y[0, sample] = (
-            0.72 * y[0, sample - 1]
-            + 0.35 * u[0, sample - 1]
-            + 0.02 * rng.normal()
+            0.72 * y[0, sample - 1] + 0.35 * u[0, sample - 1] + 0.02 * rng.normal()
         )
 
     original_prepare = automatic_subspace_module._prepare_predictor_subspace
@@ -803,9 +801,7 @@ def test_predictor_candidate_enumeration_preserves_successful_alternatives(monke
     y = np.zeros_like(u)
     for sample in range(1, u.shape[1]):
         y[0, sample] = (
-            0.7 * y[0, sample - 1]
-            + 0.3 * u[0, sample - 1]
-            + 0.01 * rng.normal()
+            0.7 * y[0, sample - 1] + 0.3 * u[0, sample - 1] + 0.01 * rng.normal()
         )
 
     original_candidate = automatic_subspace_module._predictor_candidate
@@ -871,9 +867,7 @@ def test_predictor_candidate_failures_report_nonfinite_realization(monkeypatch):
     y = np.zeros_like(u)
     for sample in range(1, u.shape[1]):
         y[0, sample] = (
-            0.65 * y[0, sample - 1]
-            + 0.25 * u[0, sample - 1]
-            + 0.02 * rng.normal()
+            0.65 * y[0, sample - 1] + 0.25 * u[0, sample - 1] + 0.02 * rng.normal()
         )
 
     original_candidate = automatic_subspace_module._predictor_candidate
