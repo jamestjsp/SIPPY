@@ -21,6 +21,7 @@ from .simulation_scenarios import (
 
 ALGORITHM_NAMES = [
     "SUBSPACE",
+    "SSARX",
     "N4SID",
     "MOESP",
     "CVA",
@@ -41,6 +42,7 @@ ALGORITHM_NAMES = [
 
 SUBSPACE_NAMES = [
     "SUBSPACE",
+    "SSARX",
     "N4SID",
     "MOESP",
     "CVA",
@@ -50,6 +52,7 @@ SUBSPACE_NAMES = [
 ]
 CANONICAL_NAMES = [
     "SUBSPACE",
+    "SSARX",
     "N4SID",
     "MOESP",
     "CVA",
@@ -68,7 +71,7 @@ CANONICAL_NAMES = [
     "FD",
 ]
 STOCHASTIC_SUBSPACE_NAMES = ["N4SID", "MOESP", "CVA"]
-PREDICTOR_GAIN_NAMES = ["SUBSPACE", "PARSIM-K", "PARSIM-S", "PARSIM-P"]
+PREDICTOR_GAIN_NAMES = ["SUBSPACE", "SSARX", "PARSIM-K", "PARSIM-S", "PARSIM-P"]
 PARSIM_NAMES = ["PARSIM-K", "PARSIM-S", "PARSIM-P"]
 
 

@@ -17,9 +17,11 @@ from .oe import OEAlgorithm
 from .parsim_k import PARSIMKAlgorithm
 from .parsim_p import PARSIMPAlgorithm
 from .parsim_s import PARSIMSAlgorithm
+from .ssarx import SSARXAlgorithm
 from .subspace import SUBSPACEAlgorithm
 
 AlgorithmFactory.register("SUBSPACE", SUBSPACEAlgorithm)
+AlgorithmFactory.register("SSARX", SSARXAlgorithm)
 AlgorithmFactory.register("N4SID", N4SIDAlgorithm)
 AlgorithmFactory.register("MOESP", MOESPAlgorithm)
 AlgorithmFactory.register("CVA", CVAAlgorithm)
@@ -55,4 +57,5 @@ __all__ = [
     "PARSIMPAlgorithm",
     "PARSIMSAlgorithm",
     "SUBSPACEAlgorithm",
+    "SSARXAlgorithm",
 ]

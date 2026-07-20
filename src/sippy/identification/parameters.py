@@ -21,6 +21,13 @@ ALGORITHM_OPTIONS = {
         "criterion",
         "validation_fraction",
     },
+    "SSARX": {
+        "ss_f",
+        "ss_p",
+        "ss_threshold",
+        "ss_fixed_order",
+        "ss_d_required",
+    },
     "N4SID": {
         "ss_f",
         "ss_threshold",
