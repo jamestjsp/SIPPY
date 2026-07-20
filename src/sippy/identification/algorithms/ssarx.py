@@ -173,14 +173,20 @@ def _inverse_covariance_square_root(
     covariance = 0.5 * (covariance + covariance.T)
     eigenvalues, eigenvectors = np.linalg.eigh(covariance)
     largest = max(float(eigenvalues[-1]), 0.0)
-    tolerance = max(covariance.shape) * np.finfo(float).eps * largest
-    retained = eigenvalues > tolerance
-    rank = int(np.count_nonzero(retained))
+    if eigenvalues[0] > np.sqrt(np.finfo(float).eps) * largest:
+        inverse = (eigenvectors * (1.0 / np.sqrt(eigenvalues))) @ eigenvectors.T
+        return inverse, signal.shape[0]
+
+    scaled = signal / np.sqrt(signal.shape[1])
+    left_vectors, singular_values, _ = np.linalg.svd(scaled, full_matrices=False)
+    largest_singular_value = float(singular_values[0]) if singular_values.size else 0.0
+    tolerance = max(signal.shape) * np.finfo(float).eps * largest_singular_value
+    rank = int(np.count_nonzero(singular_values > tolerance))
     if rank < signal.shape[0]:
         raise ValueError(
             f"{name} covariance is rank deficient: rank {rank}, need {signal.shape[0]}"
         )
-    inverse = (eigenvectors * (1.0 / np.sqrt(eigenvalues))) @ eigenvectors.T
+    inverse = (left_vectors * (1.0 / singular_values)) @ left_vectors.T
     return inverse, rank
 
 

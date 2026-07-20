@@ -9,6 +9,7 @@ from sippy import systems as control
 from sippy.identification.algorithms.ssarx import (
     SSARXAlgorithm,
     _estimate_varx_predictor,
+    _inverse_covariance_square_root,
     _selected_order,
 )
 from sippy.identification.factory import AlgorithmFactory
@@ -118,6 +119,59 @@ def test_varx_predictor_blocks_match_innovations_model_oracle():
         estimate.output_blocks[:5], np.stack(expected_output), atol=0.012
     )
     assert estimate.regressor_rank == estimate.regressor_rows
+
+
+def test_ssarx_inverse_covariance_square_root_matches_covariance_oracle():
+    rng = np.random.default_rng(740)
+    signal = rng.normal(size=(6, 800))
+    covariance = signal @ signal.T / signal.shape[1]
+
+    inverse, rank = _inverse_covariance_square_root(signal, name="test signal")
+
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    expected = (eigenvectors * (1.0 / np.sqrt(eigenvalues))) @ eigenvectors.T
+    assert rank == signal.shape[0]
+    np.testing.assert_allclose(inverse, expected, rtol=2e-12, atol=2e-12)
+    np.testing.assert_allclose(
+        inverse @ covariance @ inverse.T,
+        np.eye(signal.shape[0]),
+        rtol=2e-12,
+        atol=2e-12,
+    )
+
+
+def test_ssarx_inverse_covariance_handles_ill_conditioned_full_rank_signal():
+    rng = np.random.default_rng(739)
+    sample_count = 800
+    orthogonal_samples, _ = np.linalg.qr(
+        rng.normal(size=(sample_count, 4)),
+        mode="reduced",
+    )
+    singular_values = np.array([1.0, 1e-3, 1e-6, 1e-8])
+    signal = np.diag(singular_values) @ orthogonal_samples.T * np.sqrt(sample_count)
+
+    inverse, rank = _inverse_covariance_square_root(signal, name="test signal")
+    whitened = inverse @ signal
+
+    assert rank == signal.shape[0]
+    np.testing.assert_allclose(
+        whitened @ whitened.T / sample_count,
+        np.eye(signal.shape[0]),
+        rtol=2e-8,
+        atol=2e-8,
+    )
+
+
+def test_ssarx_inverse_covariance_rejects_exact_rank_deficiency():
+    rng = np.random.default_rng(738)
+    signal = rng.normal(size=(3, 400))
+    signal = np.vstack((signal, signal[0] - 2.0 * signal[1]))
+
+    with pytest.raises(
+        ValueError,
+        match="test signal covariance is rank deficient: rank 3, need 4",
+    ):
+        _inverse_covariance_square_root(signal, name="test signal")
 
 
 def test_ssarx_reconstructs_canonical_closed_loop_example():
