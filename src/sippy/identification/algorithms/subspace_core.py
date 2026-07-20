@@ -5,6 +5,7 @@ Core subspace identification algorithms implementation.
 import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.linalg import pinv
@@ -98,6 +99,83 @@ def _innovation_information_criterion(errors, parameter_count, method):
     raise ValueError(f"Unknown method: {method}")
 
 
+@dataclass(frozen=True)
+class _LQProjection:
+    projector: np.ndarray
+    past_data: np.ndarray
+    materialize_first: bool = False
+
+    def materialize(self):
+        return self.projector @ self.past_data
+
+    def state_sequence(self, observability_inverse):
+        if self.materialize_first:
+            return observability_inverse @ self.materialize()
+        return (observability_inverse @ self.projector) @ self.past_data
+
+
+def _numerically_full_rank(triangular, sample_count):
+    diagonal = np.abs(np.diag(triangular))
+    if diagonal.size == 0:
+        return False
+    scale = float(np.max(diagonal))
+    tolerance = max(sample_count, *triangular.shape) * np.finfo(np.float64).eps * scale
+    return scale > 0.0 and bool(np.all(diagonal > tolerance))
+
+
+def _lq_compress_subspace_data(Uf, Zp, Yf):
+    input_rows = Uf.shape[0]
+    past_rows = Zp.shape[0]
+    stacked = np.vstack((Uf, Zp, Yf))
+    L = np.linalg.qr(stacked.T, mode="r").T
+
+    past_start = input_rows
+    output_start = input_rows + past_rows
+    if L.shape[1] < output_start:
+        raise ValueError(
+            "Not enough data columns for LQ subspace compression; "
+            f"need at least {output_start}, got {L.shape[1]}"
+        )
+
+    L11 = L[:input_rows, :input_rows]
+    L22 = L[past_start:output_start, input_rows:output_start]
+    if not (
+        _numerically_full_rank(L11, stacked.shape[1])
+        and _numerically_full_rank(L22, stacked.shape[1])
+    ):
+        if NUMBA_AVAILABLE and Z_dot_PIort_compiled is not None:
+            projected_outputs = Z_dot_PIort_compiled(Yf, Uf)
+            projected_past = Z_dot_PIort_compiled(Zp, Uf)
+        else:
+            projected_outputs = Z_dot_PIort(Yf, Uf)
+            projected_past = Z_dot_PIort(Zp, Uf)
+        if NUMBA_AVAILABLE and pinv_compiled_svd is not None:
+            projected_past_inverse = pinv_compiled_svd(projected_past)
+        else:
+            projected_past_inverse = pinv(projected_past)
+        projector = projected_outputs @ projected_past_inverse
+        projection = _LQProjection(projector, Zp, materialize_first=True)
+        return (
+            projection,
+            projection.materialize(),
+            Z_dot_PIort(projection.materialize(), Uf),
+            projected_outputs,
+        )
+
+    L32 = L[output_start:, input_rows:output_start]
+    projector = L32 @ pinv(L22)
+    compact_past = L[past_start:output_start, :output_start]
+    compact_projection = projector @ compact_past
+    compact_moesp = compact_projection[:, input_rows:]
+    compact_projected_outputs = L[output_start:, input_rows:]
+    return (
+        _LQProjection(projector, Zp),
+        compact_projection,
+        compact_moesp,
+        compact_projected_outputs,
+    )
+
+
 class SubspaceCoreAlgorithm:
     """Core subspace identification algorithms implementation."""
 
@@ -126,49 +204,26 @@ class SubspaceCoreAlgorithm:
         W1 : ndarray or None
             Square-root factor of the CVA output weighting (None means the
             weighting is the identity); the SVD is taken of ``W1^-1 O_i``.
-        O_i : ndarray
-            Extended observability matrix
+        projection : _LQProjection
+            Compact map used to reconstruct the selected-order state sequence.
         """
         Yf, Yp = ordinate_sequence(y, f, f)
         Uf, Up = ordinate_sequence(u, f, f)
         Zp = impile(Up, Yp)
 
-        # Use compiled Z_dot_PIort when available
-        if NUMBA_AVAILABLE and Z_dot_PIort_compiled is not None:
-            try:
-                YfdotPIort_Uf = Z_dot_PIort_compiled(Yf, Uf)
-                ZpdotPIort_Uf = Z_dot_PIort_compiled(Zp, Uf)
-            except Exception:
-                # Fallback to original
-                YfdotPIort_Uf = Z_dot_PIort(Yf, Uf)
-                ZpdotPIort_Uf = Z_dot_PIort(Zp, Uf)
-        else:
-            YfdotPIort_Uf = Z_dot_PIort(Yf, Uf)
-            ZpdotPIort_Uf = Z_dot_PIort(Zp, Uf)
-
-        # Use compiled pseudoinverse when available for performance
-        try:
-            if NUMBA_AVAILABLE and pinv_compiled_svd is not None:
-                Zpinv = pinv_compiled_svd(ZpdotPIort_Uf)
-            else:
-                Zpinv = pinv(ZpdotPIort_Uf)
-        except Exception:
-            Zpinv = pinv(ZpdotPIort_Uf)
-        O_i = np.dot(np.dot(YfdotPIort_Uf, Zpinv), Zp)
+        projection, compact_projection, compact_moesp, compact_projected_outputs = (
+            _lq_compress_subspace_data(Uf, Zp, Yf)
+        )
 
         if weights == "MOESP":
             W1 = None
-            if NUMBA_AVAILABLE and Z_dot_PIort_compiled is not None:
-                try:
-                    OidotPIort_Uf = Z_dot_PIort_compiled(O_i, Uf)
-                except Exception:
-                    OidotPIort_Uf = Z_dot_PIort(O_i, Uf)
-            else:
-                OidotPIort_Uf = Z_dot_PIort(O_i, Uf)
-            U_n, S_n, V_n = np.linalg.svd(OidotPIort_Uf, full_matrices=False)
+            U_n, S_n, V_n = np.linalg.svd(compact_moesp, full_matrices=False)
 
         elif weights == "CVA":
-            YfdotPIort_Uf_YfdotPIort_Uf_T = np.dot(YfdotPIort_Uf, YfdotPIort_Uf.T)
+            YfdotPIort_Uf_YfdotPIort_Uf_T = np.dot(
+                compact_projected_outputs,
+                compact_projected_outputs.T,
+            )
             covariance = 0.5 * (
                 YfdotPIort_Uf_YfdotPIort_Uf_T + YfdotPIort_Uf_YfdotPIort_Uf_T.T
             )
@@ -181,7 +236,7 @@ class SubspaceCoreAlgorithm:
             if not np.any(retained):
                 warnings.warn("CVA weighting failed, falling back to N4SID")
                 W1 = None
-                U_n, S_n, V_n = np.linalg.svd(O_i, full_matrices=False)
+                U_n, S_n, V_n = np.linalg.svd(compact_projection, full_matrices=False)
             else:
                 retained_vectors = eigenvectors[:, retained]
                 retained_eigenvalues = eigenvalues[retained]
@@ -190,29 +245,35 @@ class SubspaceCoreAlgorithm:
                 inverse_square_root = (
                     retained_vectors * (1.0 / square_roots)
                 ) @ retained_vectors.T
-                W1dotOi = inverse_square_root @ O_i
-                if NUMBA_AVAILABLE and Z_dot_PIort_compiled is not None:
-                    try:
-                        W1_dot_Oi_dot_PIort_Uf = Z_dot_PIort_compiled(W1dotOi, Uf)
-                    except Exception:
-                        W1_dot_Oi_dot_PIort_Uf = Z_dot_PIort(W1dotOi, Uf)
-                else:
-                    W1_dot_Oi_dot_PIort_Uf = Z_dot_PIort(W1dotOi, Uf)
+                W1_dot_Oi_dot_PIort_Uf = inverse_square_root @ compact_moesp
                 U_n, S_n, V_n = np.linalg.svd(
                     W1_dot_Oi_dot_PIort_Uf, full_matrices=False
                 )
 
         elif weights == "N4SID":
             W1 = None  # is identity
-            U_n, S_n, V_n = np.linalg.svd(O_i, full_matrices=False)
+            U_n, S_n, V_n = np.linalg.svd(compact_projection, full_matrices=False)
         else:
             raise ValueError(f"Unknown weighting method: {weights}")
 
-        return U_n, S_n, V_n, W1, O_i
+        return U_n, S_n, V_n, W1, projection
 
     @staticmethod
     def algorithm_1(
-        y, u, l, m, f, N, U_n, S_n, V_n, W1, O_i, threshold, max_order, D_required
+        y,
+        u,
+        l,
+        m,
+        f,
+        N,
+        U_n,
+        S_n,
+        V_n,
+        W1,
+        projection,
+        threshold,
+        max_order,
+        D_required,
     ):
         """
         Algorithm 1 from subspace identification literature.
@@ -229,8 +290,8 @@ class SubspaceCoreAlgorithm:
             SVD components
         W1 : ndarray or None
             Weighting matrix
-        O_i : ndarray
-            Extended observability matrix
+        projection : _LQProjection
+            Compact map from past data to the oblique projection.
         threshold : float
             Truncation threshold
         max_order : int
@@ -272,7 +333,7 @@ class SubspaceCoreAlgorithm:
             )
         except Exception:
             Ob_pinv = np.linalg.pinv(Ob)
-        X_fd = np.dot(Ob_pinv, O_i)
+        X_fd = projection.state_sequence(Ob_pinv)
         # Ensure contiguous memory for optimal performance with compiled functions
         X_fd_slice1 = np.ascontiguousarray(X_fd[:, 1:N])
         y_slice = np.ascontiguousarray(y[:, f : f + N - 1])
