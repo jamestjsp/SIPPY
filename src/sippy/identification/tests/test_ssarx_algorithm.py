@@ -6,7 +6,10 @@ import pytest
 
 import sippy
 from sippy import systems as control
-from sippy.identification.algorithms.ssarx import _estimate_varx_predictor
+from sippy.identification.algorithms.ssarx import (
+    SSARXAlgorithm,
+    _estimate_varx_predictor,
+)
 from sippy.identification.factory import AlgorithmFactory
 from sippy.identification.iddata import IDData
 
@@ -208,6 +211,23 @@ def test_ssarx_factory_iddata_and_failure_contract():
             ss_p=8,
             ss_fixed_order=1,
         )
+
+
+def test_ssarx_zero_threshold_requires_an_explicit_order():
+    with pytest.raises(
+        ValueError,
+        match="ss_threshold must be positive when ss_fixed_order is not provided",
+    ):
+        SSARXAlgorithm().identify(
+            np.zeros(32),
+            np.zeros(32),
+            ss_threshold=0,
+        )
+
+    assert SSARXAlgorithm().validate_parameters(
+        ss_threshold=0,
+        ss_fixed_order=1,
+    )
 
 
 @pytest.mark.parametrize(

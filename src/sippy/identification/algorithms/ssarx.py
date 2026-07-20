@@ -424,6 +424,10 @@ class SSARXAlgorithm(IdentificationAlgorithm):
                 raise ValueError("ss_f must exceed ss_fixed_order")
         if not isinstance(threshold, (int, float, np.number)) or not 0 <= threshold < 1:
             raise ValueError("ss_threshold must be in [0, 1)")
+        if fixed_order is None and threshold == 0:
+            raise ValueError(
+                "ss_threshold must be positive when ss_fixed_order is not provided"
+            )
         if not isinstance(kwargs.get("ss_d_required", False), (bool, np.bool_)):
             raise ValueError("ss_d_required must be boolean")
         return True
