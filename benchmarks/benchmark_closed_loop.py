@@ -50,6 +50,7 @@ class ClosedLoopDataset:
 @dataclass(frozen=True)
 class ClosedLoopBenchmarkResult:
     dataset: str
+    algorithm: str
     reference_mode: str
     estimator_route: str
     reference_status: str
@@ -303,13 +304,16 @@ def _pole_error(expected, actual):
     return _relative_error(expected, actual)
 
 
-def benchmark_dataset(dataset, *, use_reference, order, horizon, repeat):
+def benchmark_dataset(dataset, *, method, use_reference, order, horizon, repeat):
     options = {
+        "method": method,
         "ss_f": horizon,
         "ss_fixed_order": order,
         "tsample": dataset.sample_time,
     }
-    if use_reference:
+    if method == "SSARX":
+        options["ss_p"] = 2 * horizon
+    elif use_reference:
         options["reference"] = dataset.references
 
     def identify():
@@ -331,7 +335,10 @@ def benchmark_dataset(dataset, *, use_reference, order, horizon, repeat):
         initial_state=initial_state,
     )
     burn_in = min(max(2 * model.n, 10), prediction.shape[1] // 4)
-    reference_projection = model.identification_info["reference_projection"]
+    reference_projection = model.identification_info.get(
+        "reference_projection",
+        {"status": "not-applicable", "reason": None},
+    )
     frequency_error = None
     pole_error = None
     if dataset.reference_system is not None:
@@ -343,12 +350,17 @@ def benchmark_dataset(dataset, *, use_reference, order, horizon, repeat):
         pole_error = _pole_error(A, model.A)
     return ClosedLoopBenchmarkResult(
         dataset=dataset.name,
+        algorithm=model.method,
         reference_mode="measured" if use_reference else "unavailable",
         estimator_route=model.identification_info["estimator_route"],
         reference_status=reference_projection["status"],
         reference_reason=reference_projection["reason"],
         selected_order=model.n,
-        selected_horizon=model.identification_info["selected_horizon"],
+        selected_horizon=(
+            model.identification_info["selected_horizon"]
+            if "selected_horizon" in model.identification_info
+            else model.identification_info["future_horizon"]
+        ),
         stable=bool(np.all(np.abs(np.linalg.eigvals(model.A)) < 1.0)),
         median_seconds=float(statistics.median(timings)),
         comparison_target=dataset.comparison_target,
@@ -368,9 +380,10 @@ def run_synthetic_benchmark(sample_count=3000, repeat=3):
         mathworks_closed_loop_dataset(sample_count=sample_count),
         two_excitation_closed_loop_dataset(sample_count=sample_count),
     )
-    return [
+    subspace_results = [
         benchmark_dataset(
             dataset,
+            method="SUBSPACE",
             use_reference=use_reference,
             order=2,
             horizon=12,
@@ -379,11 +392,23 @@ def run_synthetic_benchmark(sample_count=3000, repeat=3):
         for dataset in datasets
         for use_reference in (False, True)
     ]
+    ssarx_results = [
+        benchmark_dataset(
+            dataset,
+            method="SSARX",
+            use_reference=False,
+            order=2,
+            horizon=12,
+            repeat=repeat,
+        )
+        for dataset in datasets
+    ]
+    return subspace_results + ssarx_results
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Benchmark SIPPY closed-loop SUBSPACE identification."
+        description="Benchmark SIPPY closed-loop SUBSPACE and SSARX identification."
     )
     parser.add_argument("--samples", type=int, default=3000)
     parser.add_argument("--repeat", type=int, default=3)
@@ -404,12 +429,23 @@ def main():
                 results.append(
                     benchmark_dataset(
                         motor,
+                        method="SUBSPACE",
                         use_reference=use_reference,
                         order=1,
                         horizon=8,
                         repeat=args.repeat,
                     )
                 )
+            results.append(
+                benchmark_dataset(
+                    motor,
+                    method="SSARX",
+                    use_reference=False,
+                    order=1,
+                    horizon=8,
+                    repeat=args.repeat,
+                )
+            )
     finally:
         if downloaded_archive and archive is not None:
             archive.unlink(missing_ok=True)

@@ -12,13 +12,13 @@ distributed under the LGPL license.
 
 ## Algorithms
 
-- State space: canonical SUBSPACE, N4SID, MOESP, CVA, PARSIM-K, PARSIM-S,
-  PARSIM-P
+- State space: canonical SUBSPACE, SSARX, N4SID, MOESP, CVA, PARSIM-K,
+  PARSIM-S, PARSIM-P
 - Input/output: ARX, ARMAX, ARARX, ARARMAX, FIR, OE, ARMA, BJ
 - Generalized polynomial model: GEN
 - Nonparametric frequency response: FD
 
-All 17 registered algorithm entries share the same parameterless factory and
+All 18 registered algorithm entries share the same parameterless factory and
 `identify(y=None, u=None, iddata=None, **options)` algorithm interface. The
 primary `sippy.identify(...)` function accepts raw arrays or `IDData` and
 returns an `IdentificationResult` (`StateSpaceModel` remains its compatibility
@@ -108,6 +108,28 @@ references safely leave the canonical estimator on its predictor route. See
 the predictor-form [PARSIM analysis](https://skoge.folk.ntnu.no/prost/proceedings/dycops-2010/Papers_DYCOPS2010/MoAT4-03.pdf)
 and Katayama and Tanaka's
 [two-stage ORT method](https://doi.org/10.1016/j.automatica.2007.02.011).
+
+Jansson's SSARX is also available as an explicit closed-loop estimator. It
+fits one high-order VARX predictor, uses its Markov parameters to remove future
+input and output terms, estimates the state sequence by canonical correlation,
+and recovers the innovations model by linear regression:
+
+```python
+model = sippy.identify(
+    y_closed,
+    u_closed,
+    method="SSARX",
+    ss_f=12,
+    ss_p=24,
+    ss_fixed_order=2,
+)
+```
+
+`ss_p` is the high-order VARX/past window and must be at least `ss_f - 1`.
+SSARX defaults to `D = 0`, the consistency condition used by Jansson for
+closed-loop data with instantaneous feedback. Set `ss_d_required=True` only
+when direct feedthrough is part of a well-posed experiment without an
+instantaneous feedback algebraic loop.
 
 The deterministic process model is available as `model.deterministic_model`;
 the innovations model, when identified, is `model.innovations_model`.

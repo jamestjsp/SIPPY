@@ -8,9 +8,9 @@ Run the closed-loop capability benchmark:
 uv run python benchmarks/benchmark_closed_loop.py
 ```
 
-The benchmark evaluates canonical `SUBSPACE` both without a measured reference
-(predictor route) and with one (two-stage ORT route). It uses two complementary
-records:
+The benchmark compares explicit `SSARX` with canonical `SUBSPACE`, both without
+a measured reference (predictor route) and with one (two-stage ORT route). It
+uses two complementary records:
 
 - the ground-truth closed-loop example from the
   [MathWorks `n4sid` SSARX documentation](https://www.mathworks.com/help/ident/ref/n4sid.html),
@@ -34,22 +34,28 @@ post-warmup repetitions. NRMSE is measured on held-out data; FRF and pole
 columns are relative errors against known ground truth or, for the motor, the
 published open-loop fit.
 
-| Dataset | Reference | Route | Median | NRMSE | FRF error | Pole error |
-|---|---|---|---:|---:|---:|---:|
-| MathWorks SSARX | unavailable | predictor | 14.0 ms | 1.588 | 1.367 | 1.194 |
-| MathWorks SSARX | measured | predictor fallback | 25.3 ms | 1.588 | 1.367 | 1.194 |
-| Two excitations | unavailable | predictor | 14.4 ms | 0.0188 | 0.0187 | 0.107 |
-| Two excitations | measured | two-stage ORT | 15.0 ms | 0.0334 | 0.0332 | 0.395 |
-| OpenMCT motor | unavailable | predictor | 5.6 ms | 0.0312 | 0.151 | 0.0938 |
-| OpenMCT motor | measured | predictor fallback | 10.0 ms | 0.0312 | 0.151 | 0.0938 |
+| Dataset | Method | Reference | Route | Median | NRMSE | FRF error | Pole error |
+|---|---|---|---|---:|---:|---:|---:|
+| MathWorks SSARX | SUBSPACE | unavailable | predictor | 13.7 ms | 1.588 | 1.367 | 1.194 |
+| MathWorks SSARX | SUBSPACE | measured | predictor fallback | 25.6 ms | 1.588 | 1.367 | 1.194 |
+| MathWorks SSARX | SSARX | not used | SSARX | 4.61 ms | 0.0161 | 0.0159 | 0.00263 |
+| Two excitations | SUBSPACE | unavailable | predictor | 13.8 ms | 0.0188 | 0.0187 | 0.107 |
+| Two excitations | SUBSPACE | measured | two-stage ORT | 14.9 ms | 0.0334 | 0.0332 | 0.395 |
+| Two excitations | SSARX | not used | SSARX | 4.42 ms | 0.0224 | 0.0223 | 0.189 |
+| OpenMCT motor | SUBSPACE | unavailable | predictor | 7.09 ms | 0.0312 | 0.151 | 0.0938 |
+| OpenMCT motor | SUBSPACE | measured | predictor fallback | 9.84 ms | 0.0312 | 0.151 | 0.0938 |
+| OpenMCT motor | SSARX | not used | SSARX | 2.30 ms | 0.0315 | 0.140 | 0.0875 |
 
 The single-excitation MathWorks record and the motor's step-reference record
 both trigger `reference_deterministic_regressor_rank_deficient`, so measured
 references fall back to the predictor estimator. The two-independent-
 excitation case proves that the ORT path is reachable and accurately recovers
-the plant response. The motor NRMSE is evaluated on a held-out closed-loop
-segment; its FRF and pole errors against the separately published open-loop fit
-are the stronger plant-recovery checks.
+the plant response. SSARX directly reconstructs the difficult single-excitation
+MathWorks plant without a measured-reference channel or fallback. The motor
+NRMSE is evaluated on a held-out closed-loop segment; its FRF and pole errors
+against the separately published open-loop fit are the stronger plant-recovery
+checks. The `MathWorks SSARX` dataset name records provenance and does not imply
+that a row used the SSARX method; the `Method` column states the estimator.
 
 ## Subspace identification
 

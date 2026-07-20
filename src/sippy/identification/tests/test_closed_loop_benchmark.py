@@ -23,11 +23,16 @@ def test_closed_loop_benchmark_exercises_predictor_and_reference_routes():
     )
     results = json.loads(completed.stdout)["results"]
     by_case = {
-        (result["dataset"], result["reference_mode"]): result for result in results
+        (result["dataset"], result["algorithm"], result["reference_mode"]): result
+        for result in results
     }
-    mathworks_reference = by_case[("mathworks-ssarx", "measured")]
-    predictor = by_case[("two-independent-excitations", "unavailable")]
-    ort = by_case[("two-independent-excitations", "measured")]
+    mathworks_reference = by_case[("mathworks-ssarx", "SUBSPACE", "measured")]
+    predictor = by_case[("two-independent-excitations", "SUBSPACE", "unavailable")]
+    ort = by_case[("two-independent-excitations", "SUBSPACE", "measured")]
+    mathworks_ssarx = by_case[("mathworks-ssarx", "SSARX", "unavailable")]
+    two_excitation_ssarx = by_case[
+        ("two-independent-excitations", "SSARX", "unavailable")
+    ]
 
     assert mathworks_reference["estimator_route"] == "predictor"
     assert mathworks_reference["reference_status"] == "fallback"
@@ -49,3 +54,12 @@ def test_closed_loop_benchmark_exercises_predictor_and_reference_routes():
     assert ort["pole_error"] < 0.5
     assert predictor["median_seconds"] > 0.0
     assert ort["median_seconds"] > 0.0
+    for result in (mathworks_ssarx, two_excitation_ssarx):
+        assert result["estimator_route"] == "ssarx"
+        assert result["reference_status"] == "not-applicable"
+        assert result["selected_order"] == 2
+        assert result["stable"]
+        assert result["validation_nrmse"] < 0.2
+        assert result["frequency_response_error"] < 0.2
+        assert result["pole_error"] < 0.3
+        assert 0.0 < result["median_seconds"] < 2.0
