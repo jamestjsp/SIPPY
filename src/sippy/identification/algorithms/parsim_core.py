@@ -14,16 +14,15 @@ try:
 except ImportError:
     JOBLIB_AVAILABLE = False
 
-from ...utils.signal_utils import rescale
 from ...utils.simulation_utils import (
     Vn_mat,
     check_inputs,
     check_types,
     impile,
-    ordinate_sequence,
     reducingOrder,
     simulate_ss_system,
 )
+from .subspace_data import prepare_subspace_data
 
 # Import compiled utilities for performance
 try:
@@ -186,17 +185,19 @@ class ParsimCoreAlgorithm:
 
         threshold, max_order = check_inputs(threshold, max_order, fixed_order, f)
 
-        # Standardize inputs and outputs
-        Ustd = np.zeros(m)
-        Ystd = np.zeros(l_)
-        for j in range(m):
-            Ustd[j], u[j] = rescale(u[j])
-        for j in range(l_):
-            Ystd[j], y[j] = rescale(y[j])
-
-        Yf, Yp = ordinate_sequence(y, f, p)
-        Uf, Up = ordinate_sequence(u, f, p)
-        Zp = impile(Up, Yp)
+        data = prepare_subspace_data(
+            y,
+            u,
+            future_horizon=f,
+            past_offset=p,
+        )
+        y = data.outputs
+        u = data.inputs
+        Ustd = data.input_scale
+        Ystd = data.output_scale
+        Yf = data.future_outputs
+        Uf = data.future_inputs
+        Zp = data.past_data
         initial_solver = _ReusableRightLeastSquares.factor(impile(Zp, Uf[0:m, :]))
         M = initial_solver.solve(Yf[0:l_, :])
         iteration_solver = _ReusableRightLeastSquares.factor(
@@ -415,18 +416,19 @@ class ParsimCoreAlgorithm:
 
         threshold, max_order = check_inputs(threshold, max_order, fixed_order, f)
 
-        # Standardize inputs and outputs
-        Ustd = np.zeros(m)
-        Ystd = np.zeros(l_)
-        for j in range(m):
-            Ustd[j], u[j] = rescale(u[j])
-        for j in range(l_):
-            Ystd[j], y[j] = rescale(y[j])
-
-        # Create data matrices
-        Yf, Yp = ordinate_sequence(y, f, p)
-        Uf, Up = ordinate_sequence(u, f, p)
-        Zp = impile(Up, Yp)
+        data = prepare_subspace_data(
+            y,
+            u,
+            future_horizon=f,
+            past_offset=p,
+        )
+        y = data.outputs
+        u = data.inputs
+        Ustd = data.input_scale
+        Ystd = data.output_scale
+        Yf = data.future_outputs
+        Uf = data.future_inputs
+        Zp = data.past_data
 
         # Initial matrices
         regression_solver = _ReusableRightLeastSquares.factor(impile(Zp, Uf[0:m, :]))
@@ -560,18 +562,19 @@ class ParsimCoreAlgorithm:
 
         threshold, max_order = check_inputs(threshold, max_order, fixed_order, f)
 
-        # Standardize inputs and outputs
-        Ustd = np.zeros(m)
-        Ystd = np.zeros(l_)
-        for j in range(m):
-            Ustd[j], u[j] = rescale(u[j])
-        for j in range(l_):
-            Ystd[j], y[j] = rescale(y[j])
-
-        # Create data matrices
-        Yf, Yp = ordinate_sequence(y, f, p)
-        Uf, Up = ordinate_sequence(u, f, p)
-        Zp = impile(Up, Yp)
+        data = prepare_subspace_data(
+            y,
+            u,
+            future_horizon=f,
+            past_offset=p,
+        )
+        y = data.outputs
+        u = data.inputs
+        Ustd = data.input_scale
+        Ystd = data.output_scale
+        Yf = data.future_outputs
+        Uf = data.future_inputs
+        Zp = data.past_data
 
         Gamma_L = _build_parsim_p_gamma_l(Yf, Uf, Zp, f, l_, m)
 

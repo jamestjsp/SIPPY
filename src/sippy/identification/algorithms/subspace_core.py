@@ -11,7 +11,6 @@ import numpy as np
 from numpy.linalg import pinv
 from scipy import signal
 
-from ...utils.signal_utils import rescale
 from ...utils.simulation_utils import (
     K_calc,
     Vn_mat,
@@ -19,11 +18,11 @@ from ...utils.simulation_utils import (
     check_inputs,
     check_types,
     impile,
-    ordinate_sequence,
     reducingOrder,
     simulate_ss_system,
     ss_lsim_predictor_form,
 )
+from .subspace_data import SubspaceData, prepare_subspace_data
 
 # Import compiled utilities for performance
 try:
@@ -32,14 +31,12 @@ try:
         Z_dot_PIort_compiled,
         covariance_symmetric_compiled,
         pinv_compiled_svd,
-        rescale_compiled,
         subspace_weighted_svd_compiled,
     )
 except ImportError:
     NUMBA_AVAILABLE = False
     Z_dot_PIort_compiled = None
     covariance_symmetric_compiled = None
-    rescale_compiled = None
     subspace_weighted_svd_compiled = None
 
 
@@ -182,7 +179,7 @@ class SubspaceCoreAlgorithm:
     """Core subspace identification algorithms implementation."""
 
     @staticmethod
-    def svd_weighted(y, u, f, l, weights="N4SID"):
+    def svd_weighted(y, u, f, l, weights="N4SID", data: SubspaceData | None = None):
         """
         Perform weighted SVD for subspace algorithms.
 
@@ -209,9 +206,17 @@ class SubspaceCoreAlgorithm:
         projection : _LQProjection
             Compact map used to reconstruct the selected-order state sequence.
         """
-        Yf, Yp = ordinate_sequence(y, f, f)
-        Uf, Up = ordinate_sequence(u, f, f)
-        Zp = impile(Up, Yp)
+        if data is None:
+            data = prepare_subspace_data(
+                y,
+                u,
+                future_horizon=f,
+                past_offset=f,
+                scale=False,
+            )
+        Yf = data.future_outputs
+        Uf = data.future_inputs
+        Zp = data.past_data
 
         projection, compact_projection, compact_moesp, compact_projected_outputs = (
             _lq_compress_subspace_data(Uf, Zp, Yf)
@@ -525,38 +530,28 @@ class SubspaceCoreAlgorithm:
         K : ndarray
             Kalman gain
         """
-        y = 1.0 * np.atleast_2d(y)
-        u = 1.0 * np.atleast_2d(u)
-        l, L = y.shape
-        m = u[:, 0].size
-
         if not check_types(threshold, max_order, fixed_order, f):
             raise ValueError("Invalid parameters for subspace identification")
 
         threshold, max_order = check_inputs(threshold, max_order, fixed_order, f)
-        N = L - 2 * f + 1
-
-        if N <= 0:
-            raise ValueError(
-                f"Not enough data points. Need at least {2 * f + 1} points, got {L}"
-            )
-
-        # Standardize inputs and outputs
-        Ustd = np.zeros(m)
-        Ystd = np.zeros(l)
-        for j in range(m):
-            if NUMBA_AVAILABLE and rescale_compiled is not None:
-                Ustd[j], u[j] = rescale_compiled(u[j])
-            else:
-                Ustd[j], u[j] = rescale(u[j])
-        for j in range(l):
-            if NUMBA_AVAILABLE and rescale_compiled is not None:
-                Ystd[j], y[j] = rescale_compiled(y[j])
-            else:
-                Ystd[j], y[j] = rescale(y[j])
+        data = prepare_subspace_data(
+            y,
+            u,
+            future_horizon=f,
+            past_offset=f,
+        )
+        y = data.outputs
+        u = data.inputs
+        l, L = y.shape
+        m = u.shape[0]
+        N = data.usable_columns
+        Ustd = data.input_scale
+        Ystd = data.output_scale
 
         # Perform weighted SVD
-        U_n, S_n, V_n, W1, O_i = SubspaceCoreAlgorithm.svd_weighted(y, u, f, l, weights)
+        U_n, S_n, V_n, W1, O_i = SubspaceCoreAlgorithm.svd_weighted(
+            y, u, f, l, weights, data=data
+        )
 
         # Algorithm 1: extract system matrices
         Ob, X_fd, M, n, residuals = SubspaceCoreAlgorithm.algorithm_1(
@@ -687,24 +682,22 @@ class SubspaceCoreAlgorithm:
             max_ord = f + 1
 
         IC_old = np.inf
-        N = L - 2 * f + 1
-
-        # Standardize data
-        Ustd = np.zeros(m)
-        Ystd = np.zeros(l)
-        for j in range(m):
-            if NUMBA_AVAILABLE and rescale_compiled is not None:
-                Ustd[j], u[j] = rescale_compiled(u[j])
-            else:
-                Ustd[j], u[j] = rescale(u[j])
-        for j in range(l):
-            if NUMBA_AVAILABLE and rescale_compiled is not None:
-                Ystd[j], y[j] = rescale_compiled(y[j])
-            else:
-                Ystd[j], y[j] = rescale(y[j])
+        data = prepare_subspace_data(
+            y,
+            u,
+            future_horizon=f,
+            past_offset=f,
+        )
+        y = data.outputs
+        u = data.inputs
+        N = data.usable_columns
+        Ustd = data.input_scale
+        Ystd = data.output_scale
 
         # Perform SVD
-        U_n, S_n, V_n, W1, O_i = SubspaceCoreAlgorithm.svd_weighted(y, u, f, l, weights)
+        U_n, S_n, V_n, W1, O_i = SubspaceCoreAlgorithm.svd_weighted(
+            y, u, f, l, weights, data=data
+        )
 
         if n_jobs != 1 and not (n_jobs == -1 or n_jobs > 0):
             raise ValueError(f"n_jobs must be -1 or positive integer, got {n_jobs}")
