@@ -102,6 +102,9 @@ class SUBSPACEAlgorithm(IdentificationAlgorithm):
             "numerical_ranks": ranks,
             "weighting": asdict(estimate.weighting),
             "fit_start": fit_start,
+            "selection_sample_count": estimate.selection_sample_count,
+            "fit_sample_count": estimate.fit_sample_count,
+            "refit_on_full_record": estimate.refit_on_full_record,
         }
         return StateSpaceModel(
             candidate.A,

@@ -28,6 +28,9 @@ class AutomaticDimensionEstimate:
     reference_projection_reason: str | None
     reference_diagnostics: object | None
     weighting: SubspaceWeightingDiagnostics
+    selection_sample_count: int
+    fit_sample_count: int
+    refit_on_full_record: bool
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,19 @@ def _predictor_candidate(prepared, order):
         K=K,
         parameter_count=parameter_count,
         initial_state=x0.reshape(-1),
+    )
+
+
+def _candidate_is_finite(candidate):
+    return all(
+        np.all(np.isfinite(matrix))
+        for matrix in (
+            candidate.A,
+            candidate.B,
+            candidate.C,
+            candidate.D,
+            candidate.K,
+        )
     )
 
 
@@ -209,16 +225,7 @@ def _build_predictor_candidates(
                     _predictor_failure(horizon, order, "realization", failure)
                 )
                 continue
-            if not all(
-                np.all(np.isfinite(matrix))
-                for matrix in (
-                    candidate.A,
-                    candidate.B,
-                    candidate.C,
-                    candidate.D,
-                    candidate.K,
-                )
-            ):
+            if not _candidate_is_finite(candidate):
                 failures.append(
                     _predictor_failure(
                         horizon,
@@ -234,6 +241,85 @@ def _build_predictor_candidates(
             candidates.append(candidate)
             weighting_by_dimension[(horizon, order)] = prepared.weighting_diagnostics
     return candidates, weighting_by_dimension, failures
+
+
+def _refit_selected_dimension(
+    selection,
+    route,
+    y,
+    u,
+    reference,
+    *,
+    weighting,
+    direct_feedthrough,
+):
+    selected = selection.candidate
+    reference_diagnostics = None
+    try:
+        if route == "two-stage-ort":
+            data = prepare_subspace_data(
+                y,
+                u,
+                future_horizon=selected.horizon,
+                past_offset=selected.horizon,
+                reference=reference,
+            )
+            prepared, reference_diagnostics = _prepare_ort_subspace(
+                data,
+                weights=weighting,
+                warn_on_fallback=False,
+            )
+            if prepared is None:
+                raise ValueError(
+                    "the measured reference became unusable for the selected ORT refit "
+                    f"({reference_diagnostics.reason})"
+                )
+            candidate = _realize_ort_dimension_candidate(prepared, selected.order)
+            final_weighting = prepared.ort.weighting
+        else:
+            prepared = _prepare_predictor_subspace(
+                y,
+                u,
+                future_horizon=selected.horizon,
+                past_horizon=selected.horizon,
+                direct_feedthrough=direct_feedthrough,
+                strict_identifiability=True,
+                weighting=weighting,
+            )
+            candidate = _predictor_candidate(prepared, selected.order)
+            final_weighting = prepared.weighting_diagnostics
+            if reference is not None:
+                reference_data = prepare_subspace_data(
+                    y,
+                    u,
+                    future_horizon=selected.horizon,
+                    past_offset=selected.horizon,
+                    reference=reference,
+                )
+                _, reference_diagnostics = _prepare_ort_subspace(
+                    reference_data,
+                    weights=weighting,
+                    warn_on_fallback=False,
+                )
+        if not _candidate_is_finite(candidate):
+            raise ValueError("the full-record realization contains non-finite values")
+    except (ValueError, np.linalg.LinAlgError, OverflowError) as failure:
+        raise ValueError(
+            f"selected {route} candidate (horizon={selected.horizon}, "
+            f"order={selected.order}) could not be refit on the full record: "
+            f"{type(failure).__name__}: {failure}"
+        ) from failure
+
+    return (
+        DimensionSelection(
+            candidate=candidate,
+            scores=selection.scores,
+            validation_start=selection.validation_start,
+            criterion=selection.criterion,
+        ),
+        final_weighting,
+        reference_diagnostics,
+    )
 
 
 def select_automatic_dimensions(
@@ -276,13 +362,12 @@ def select_automatic_dimensions(
     route = "predictor"
     projection_reason = "reference_missing"
     candidates = []
-    weighting_by_dimension = {}
     reference_diagnostics = None
     if training_reference is not None:
         (
             candidates,
-            weighting_by_dimension,
-            diagnostics_by_dimension,
+            _,
+            _,
             reasons,
             invalid_diagnostics,
         ) = _build_ort_candidates(
@@ -309,7 +394,7 @@ def select_automatic_dimensions(
             )
 
     if route == "predictor":
-        candidates, weighting_by_dimension, failures = _build_predictor_candidates(
+        candidates, _, failures = _build_predictor_candidates(
             training_y,
             training_u,
             horizons,
@@ -326,14 +411,25 @@ def select_automatic_dimensions(
         method=criterion,
         validation_fraction=validation_fraction,
     )
-    key = (selection.candidate.horizon, selection.candidate.order)
-    if route == "two-stage-ort":
-        reference_diagnostics = diagnostics_by_dimension[key]
+    selection, final_weighting, full_reference_diagnostics = _refit_selected_dimension(
+        selection,
+        route,
+        outputs,
+        inputs,
+        references,
+        weighting=weighting,
+        direct_feedthrough=direct_feedthrough,
+    )
+    if full_reference_diagnostics is not None:
+        reference_diagnostics = full_reference_diagnostics
     return AutomaticDimensionEstimate(
         selection=selection,
         route=route,
         horizon_candidates=horizons,
         reference_projection_reason=projection_reason,
         reference_diagnostics=reference_diagnostics,
-        weighting=weighting_by_dimension[key],
+        weighting=final_weighting,
+        selection_sample_count=training_count,
+        fit_sample_count=outputs.shape[1],
+        refit_on_full_record=True,
     )

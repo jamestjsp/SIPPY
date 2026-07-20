@@ -637,6 +637,138 @@ def test_automatic_dimensions_select_consistent_predictor_model_without_loop_fla
     )
 
 
+def test_predictor_selection_refits_selected_dimensions_on_the_full_record(monkeypatch):
+    rng = np.random.default_rng(100)
+    sample_count = 500
+    u = rng.normal(size=(1, sample_count))
+    y = np.zeros_like(u)
+    for sample in range(1, sample_count):
+        y[0, sample] = (
+            0.72 * y[0, sample - 1]
+            + 0.35 * u[0, sample - 1]
+            + 0.02 * rng.normal()
+        )
+
+    original_prepare = automatic_subspace_module._prepare_predictor_subspace
+    original_candidate = automatic_subspace_module._predictor_candidate
+    original_select = automatic_subspace_module._select_dimension_candidate
+    prepared_records = []
+    realized_candidates = []
+    scored_selection = None
+
+    def record_prepare(outputs, inputs, **kwargs):
+        prepared = original_prepare(outputs, inputs, **kwargs)
+        prepared_records.append((outputs.shape[1], prepared))
+        return prepared
+
+    def record_candidate(prepared, order):
+        candidate = original_candidate(prepared, order)
+        realized_candidates.append(candidate)
+        return candidate
+
+    def record_selection(*args, **kwargs):
+        nonlocal scored_selection
+        scored_selection = original_select(*args, **kwargs)
+        return scored_selection
+
+    monkeypatch.setattr(
+        automatic_subspace_module, "_prepare_predictor_subspace", record_prepare
+    )
+    monkeypatch.setattr(
+        automatic_subspace_module, "_predictor_candidate", record_candidate
+    )
+    monkeypatch.setattr(
+        automatic_subspace_module, "_select_dimension_candidate", record_selection
+    )
+
+    estimate = select_automatic_dimensions(
+        y,
+        u,
+        explicit_horizon=8,
+        explicit_order=1,
+    )
+
+    assert [count for count, _ in prepared_records] == [400, 500]
+    assert estimate.selection_sample_count == 400
+    assert estimate.fit_sample_count == 500
+    assert estimate.refit_on_full_record
+    assert estimate.selection.scores == scored_selection.scores
+    assert estimate.selection.validation_start == scored_selection.validation_start
+    assert estimate.selection.criterion == scored_selection.criterion
+    assert estimate.selection.candidate is realized_candidates[-1]
+    assert estimate.selection.candidate is not scored_selection.candidate
+    assert estimate.weighting is prepared_records[-1][1].weighting_diagnostics
+
+
+def test_ort_selection_refits_selected_dimensions_on_the_full_record(monkeypatch):
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=1000,
+        n_validation=120,
+        noise_scale=0.05,
+        noise_color=0.6,
+        dither_scale=0.08,
+        seed=101,
+    )
+    references = np.vstack((scenario.reference, scenario.dither))
+    original_prepare = automatic_subspace_module._prepare_ort_subspace
+    original_candidate = automatic_subspace_module._realize_ort_dimension_candidate
+    original_select = automatic_subspace_module._select_dimension_candidate
+    prepared_records = []
+    realized_candidates = []
+    scored_selection = None
+
+    def record_prepare(data, **kwargs):
+        result = original_prepare(data, **kwargs)
+        prepared_records.append((data.sample_count, result))
+        return result
+
+    def record_candidate(prepared, order):
+        candidate = original_candidate(prepared, order)
+        realized_candidates.append(candidate)
+        return candidate
+
+    def record_selection(*args, **kwargs):
+        nonlocal scored_selection
+        scored_selection = original_select(*args, **kwargs)
+        return scored_selection
+
+    monkeypatch.setattr(
+        automatic_subspace_module, "_prepare_ort_subspace", record_prepare
+    )
+    monkeypatch.setattr(
+        automatic_subspace_module,
+        "_realize_ort_dimension_candidate",
+        record_candidate,
+    )
+    monkeypatch.setattr(
+        automatic_subspace_module, "_select_dimension_candidate", record_selection
+    )
+
+    estimate = select_automatic_dimensions(
+        scenario.output,
+        scenario.plant_input,
+        reference=references,
+        explicit_horizon=10,
+        explicit_order=2,
+    )
+
+    assert [count for count, _ in prepared_records] == [800, 1000]
+    assert estimate.selection_sample_count == 800
+    assert estimate.fit_sample_count == 1000
+    assert estimate.refit_on_full_record
+    assert estimate.selection.scores == scored_selection.scores
+    assert estimate.selection.validation_start == scored_selection.validation_start
+    assert estimate.selection.criterion == scored_selection.criterion
+    assert estimate.selection.candidate is realized_candidates[-1]
+    assert estimate.selection.candidate is not scored_selection.candidate
+    full_prepared, full_diagnostics = prepared_records[-1][1]
+    assert estimate.reference_diagnostics is full_diagnostics
+    assert estimate.weighting is full_prepared.ort.weighting
+
+
 def test_automatic_dimensions_reports_all_predictor_candidate_failures(monkeypatch):
     rng = np.random.default_rng(96)
     u = rng.normal(size=(1, 300))
@@ -786,6 +918,9 @@ def test_canonical_subspace_automatically_uses_predictor_route_for_raw_data():
         "reason": "reference_missing",
     }
     assert model.identification_info["selected_order"] == 2
+    assert model.identification_info["selection_sample_count"] == 2400
+    assert model.identification_info["fit_sample_count"] == 3000
+    assert model.identification_info["refit_on_full_record"] is True
     identified = control.ss(model.A, model.B, model.C, model.D, dt=model.ts)
     _assert_plant_recovery(
         plant,
