@@ -63,6 +63,33 @@ def test_prepare_subspace_data_scales_copies_and_reconstructs_channels():
     np.testing.assert_allclose(np.std(data.inputs, axis=1), 1.0)
 
 
+def test_prepare_subspace_data_supports_a_distinct_predictor_past_depth():
+    signal = np.arange(80, dtype=float).reshape(2, 40)
+    data = prepare_subspace_data(
+        signal,
+        signal + 1.0,
+        future_horizon=4,
+        past_offset=7,
+        past_block_rows=7,
+        scale=False,
+    )
+
+    assert data.past_block_rows == 7
+    assert data.past_outputs.shape == (14, 30)
+    np.testing.assert_array_equal(data.past_outputs[:2], signal[:, :30])
+    np.testing.assert_array_equal(data.past_outputs[-2:], signal[:, 6:36])
+    np.testing.assert_array_equal(data.future_outputs[:2], signal[:, 7:37])
+
+    with pytest.raises(ValueError, match="cannot exceed"):
+        prepare_subspace_data(
+            signal,
+            signal,
+            future_horizon=4,
+            past_offset=3,
+            past_block_rows=4,
+        )
+
+
 def test_prepare_subspace_data_reports_rank_without_rejecting_legacy_path():
     samples = np.arange(60, dtype=float)
     u = np.vstack((samples, 2.0 * samples))

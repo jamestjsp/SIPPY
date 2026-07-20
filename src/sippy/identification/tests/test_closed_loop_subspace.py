@@ -2,16 +2,54 @@ import numpy as np
 import pytest
 
 from sippy import systems as control
+from sippy.identification.algorithms.parsim_k import PARSIMKAlgorithm
 
 from .simulation_scenarios import (
     frequency_response_error,
+    normalized_rmse,
     simulate_closed_loop,
     simulate_closed_loop_scenario,
+    simulate_scenario,
     stable_mimo_plant,
     stable_siso_plant,
     static_output_feedback_controller,
     unstable_siso_plant,
 )
+
+
+def _identify_with_parsim_k(y, u, *, order, future_horizon, past_horizon, dt):
+    model = PARSIMKAlgorithm().identify(
+        y=y,
+        u=u,
+        ss_f=future_horizon,
+        ss_p=past_horizon,
+        ss_fixed_order=order,
+        ss_d_required=False,
+        tsample=dt,
+    )
+    return model, control.ss(model.A, model.B, model.C, model.D, dt=model.ts)
+
+
+def _assert_plant_recovery(
+    plant,
+    identified,
+    u_validation,
+    y_validation,
+    *,
+    maximum_nrmse,
+    maximum_frequency_error,
+):
+    prediction = control.forced_response(
+        identified,
+        U=u_validation,
+        squeeze=False,
+    ).outputs
+    error = float(np.max(normalized_rmse(y_validation, prediction)))
+    frequency_error = frequency_response_error(plant, identified)
+    assert error < maximum_nrmse, f"validation NRMSE was {error:.4g}"
+    assert frequency_error < maximum_frequency_error, (
+        f"frequency-response error was {frequency_error:.4g}"
+    )
 
 
 def test_closed_loop_simulator_satisfies_plant_and_controller_equations():
@@ -188,3 +226,136 @@ def test_closed_loop_scenario_is_reproducible_and_exposes_plant_metrics():
         dt=plant.dt,
     )
     assert frequency_response_error(plant, perturbed) > 0.05
+
+
+def test_parsim_k_recovers_the_same_stable_plant_from_open_and_closed_loop_data():
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    open_loop = simulate_scenario(
+        plant,
+        n_train=3000,
+        n_validation=300,
+        input_kind="white",
+        snr_db=28.0,
+        noise_color=0.45,
+        seed=51,
+    )
+    closed_loop = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=3000,
+        n_validation=300,
+        noise_scale=0.035,
+        noise_color=0.45,
+        dither_scale=0.04,
+        seed=52,
+    )
+
+    open_model, open_system = _identify_with_parsim_k(
+        open_loop.y_train,
+        open_loop.u_train,
+        order=2,
+        future_horizon=12,
+        past_horizon=24,
+        dt=plant.dt,
+    )
+    closed_model, closed_system = _identify_with_parsim_k(
+        closed_loop.output,
+        closed_loop.plant_input,
+        order=2,
+        future_horizon=12,
+        past_horizon=24,
+        dt=plant.dt,
+    )
+
+    assert open_model.ts == pytest.approx(plant.dt)
+    assert closed_model.ts == pytest.approx(plant.dt)
+    _assert_plant_recovery(
+        plant,
+        open_system,
+        open_loop.u_validation,
+        open_loop.y_validation_clean,
+        maximum_nrmse=0.2,
+        maximum_frequency_error=0.2,
+    )
+    _assert_plant_recovery(
+        plant,
+        closed_system,
+        closed_loop.u_validation,
+        closed_loop.y_validation_clean,
+        maximum_nrmse=0.25,
+        maximum_frequency_error=0.25,
+    )
+
+
+def test_parsim_k_recovers_a_feedback_stabilized_unstable_plant():
+    plant = unstable_siso_plant()
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[2.0]], dt=plant.dt),
+        n_train=4500,
+        n_validation=160,
+        reference_kind="binary",
+        noise_scale=0.02,
+        dither_scale=0.03,
+        seed=61,
+    )
+
+    model, identified = _identify_with_parsim_k(
+        scenario.output,
+        scenario.plant_input,
+        order=2,
+        future_horizon=16,
+        past_horizon=30,
+        dt=plant.dt,
+    )
+
+    assert np.max(np.abs(np.linalg.eigvals(model.A))) > 1.0
+    _assert_plant_recovery(
+        plant,
+        identified,
+        scenario.u_validation,
+        scenario.y_validation_clean,
+        maximum_nrmse=0.35,
+        maximum_frequency_error=0.3,
+    )
+
+
+def test_parsim_k_recovers_mimo_plant_under_dynamic_feedback():
+    plant = stable_mimo_plant(direct_feedthrough=False)
+    controller = control.ss(
+        np.diag([0.45, 0.6]),
+        0.25 * np.eye(2),
+        0.2 * np.eye(2),
+        np.array([[0.35, 0.04], [-0.03, 0.3]]),
+        dt=plant.dt,
+    )
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        controller,
+        n_train=5000,
+        n_validation=300,
+        reference_correlation=0.45,
+        noise_scale=0.025,
+        noise_correlation=0.35,
+        noise_color=0.4,
+        dither_scale=0.05,
+        seed=71,
+    )
+
+    _, identified = _identify_with_parsim_k(
+        scenario.output,
+        scenario.plant_input,
+        order=3,
+        future_horizon=12,
+        past_horizon=24,
+        dt=plant.dt,
+    )
+
+    _assert_plant_recovery(
+        plant,
+        identified,
+        scenario.u_validation,
+        scenario.y_validation_clean,
+        maximum_nrmse=0.35,
+        maximum_frequency_error=0.3,
+    )

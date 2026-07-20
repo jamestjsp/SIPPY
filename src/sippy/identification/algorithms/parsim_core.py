@@ -30,12 +30,10 @@ try:
         NUMBA_AVAILABLE,
         Z_dot_PIort_compiled,
         matrix_operations_a_compiled,
-        parsim_y_tilde_estimation_compiled,
         pinv_compiled_svd,
         subspace_weighted_svd_compiled,
     )
 except ImportError:
-    parsim_y_tilde_estimation_compiled = None
     subspace_weighted_svd_compiled = None
     Z_dot_PIort_compiled = None
     matrix_operations_a_compiled = None
@@ -88,6 +86,107 @@ class _ReusableRightLeastSquares:
         return coefficients.T
 
 
+@dataclass(frozen=True)
+class PredictorMarkovEstimate:
+    gamma_blocks: np.ndarray
+    input_blocks: np.ndarray
+    output_blocks: np.ndarray
+    used_compatibility_fallback: bool
+
+    @property
+    def gamma_matrix(self) -> np.ndarray:
+        return self.gamma_blocks.reshape(
+            self.gamma_blocks.shape[0] * self.gamma_blocks.shape[1],
+            self.gamma_blocks.shape[2],
+        )
+
+
+def _estimate_predictor_markov_blocks(
+    Yf,
+    Uf,
+    Zp,
+    *,
+    output_count,
+    input_count,
+    future_horizon,
+    direct_feedthrough,
+    strict=False,
+):
+    column_count = Zp.shape[1]
+    expected_output_rows = output_count * future_horizon
+    expected_input_rows = input_count * future_horizon
+    if Yf.shape != (expected_output_rows, column_count):
+        raise ValueError("future output Hankel matrix has incompatible dimensions")
+    if Uf.shape != (expected_input_rows, column_count):
+        raise ValueError("future input Hankel matrix has incompatible dimensions")
+
+    gamma_blocks = np.empty((future_horizon, output_count, Zp.shape[0]), dtype=float)
+    input_blocks = np.zeros((future_horizon, output_count, input_count), dtype=float)
+    output_blocks = np.zeros((future_horizon, output_count, output_count), dtype=float)
+
+    initial_regressor = np.vstack((Zp, Uf[:input_count])) if direct_feedthrough else Zp
+    initial_solver = _ReusableRightLeastSquares.factor(initial_regressor)
+    initial_coefficients = initial_solver.solve(Yf[:output_count])
+    gamma_blocks[0] = initial_coefficients[:, : Zp.shape[0]]
+    if direct_feedthrough:
+        input_blocks[0] = initial_coefficients[:, Zp.shape[0] :]
+
+    iteration_solver = None
+    if future_horizon > 1:
+        iteration_solver = _ReusableRightLeastSquares.factor(
+            np.vstack((Zp, Uf[:input_count], Yf[:output_count]))
+        )
+        for row in range(1, future_horizon):
+            adjusted_output = Yf[output_count * row : output_count * (row + 1)].copy()
+            for lag in range(row):
+                input_start = input_count * (row - lag)
+                adjusted_output -= (
+                    input_blocks[lag] @ Uf[input_start : input_start + input_count]
+                )
+                if lag:
+                    output_start = output_count * (row - lag)
+                    adjusted_output -= (
+                        output_blocks[lag]
+                        @ Yf[output_start : output_start + output_count]
+                    )
+
+            coefficients = iteration_solver.solve(adjusted_output)
+            gamma_blocks[row] = coefficients[:, : Zp.shape[0]]
+            markov_start = Zp.shape[0]
+            input_blocks[row] = coefficients[
+                :, markov_start : markov_start + input_count
+            ]
+            output_blocks[row] = coefficients[:, markov_start + input_count :]
+
+    used_fallback = not initial_solver.full_rank or (
+        iteration_solver is not None and not iteration_solver.full_rank
+    )
+    if strict and used_fallback:
+        raise ValueError(
+            "predictor Markov regression is not identifiable from the supplied data"
+        )
+    return PredictorMarkovEstimate(
+        gamma_blocks=gamma_blocks,
+        input_blocks=input_blocks,
+        output_blocks=output_blocks,
+        used_compatibility_fallback=used_fallback,
+    )
+
+
+def _solve_predictor_parameters(design, outputs, *, strict=False):
+    target = np.asarray(outputs, dtype=float).reshape(1, -1)
+    if design.shape[0] != target.shape[1]:
+        raise ValueError(
+            "predictor design and output data have incompatible dimensions"
+        )
+    solver = _ReusableRightLeastSquares.factor(design.T)
+    if strict and not solver.full_rank:
+        raise ValueError(
+            "predictor parameter regression is not identifiable from the supplied data"
+        )
+    return solver.solve(target).T, not solver.full_rank
+
+
 def _build_parsim_p_gamma_l(Yf, Uf, Zp, f, l_, m):
     regressor_rows = Zp.shape[0] + Uf.shape[0]
     stacked = np.vstack((Zp, Uf, Yf))
@@ -135,6 +234,7 @@ class ParsimCoreAlgorithm:
         fixed_order=np.nan,
         D_required=False,
         B_recalc=False,
+        strict_identifiability=False,
     ):
         """
         PARSIM-K algorithm implementation.
@@ -159,6 +259,9 @@ class ParsimCoreAlgorithm:
             Whether D matrix is required
         B_recalc : bool
             Whether to recalculate B matrix
+        strict_identifiability : bool
+            Raise instead of using the explicit PARSIM-K compatibility fallback
+            when a required regression is rank deficient
 
         Returns:
         --------
@@ -190,6 +293,7 @@ class ParsimCoreAlgorithm:
             u,
             future_horizon=f,
             past_offset=p,
+            past_block_rows=p,
         )
         y = data.outputs
         u = data.inputs
@@ -198,58 +302,17 @@ class ParsimCoreAlgorithm:
         Yf = data.future_outputs
         Uf = data.future_inputs
         Zp = data.past_data
-        initial_solver = _ReusableRightLeastSquares.factor(impile(Zp, Uf[0:m, :]))
-        M = initial_solver.solve(Yf[0:l_, :])
-        iteration_solver = _ReusableRightLeastSquares.factor(
-            impile(Zp, impile(Uf[0:m, :], Yf[0:l_, :]))
+        markov_estimate = _estimate_predictor_markov_blocks(
+            Yf,
+            Uf,
+            Zp,
+            output_count=l_,
+            input_count=m,
+            future_horizon=f,
+            direct_feedthrough=D_required,
+            strict=strict_identifiability,
         )
-        Gamma_L = M[:, 0 : (m + l_) * f]
-
-        # Defensive check: If M doesn't have enough columns, initialize H_K appropriately
-        # H_K should capture residual dynamics not explained by Gamma_L
-        if M.shape[1] > (m + l_) * f:
-            H_K = M[:, (m + l_) * f :]
-        else:
-            # Initialize with zeros of appropriate size to maintain algorithm flow
-            # Size should be (l_, m) to match first iteration's expected dimensions
-            H_K = np.zeros((l_, m))
-
-        G_K = np.zeros((l_, l_))
-
-        # Helper function for y_tilde estimation
-        def estimating_y(H_K, Uf, G_K, Yf, i, m, l_):
-            y_tilde = np.dot(H_K[0:l_, :], Uf[m * i : m * (i + 1), :])
-            for j in range(1, i):
-                y_tilde = (
-                    y_tilde
-                    + np.dot(
-                        H_K[l_ * j : l_ * (j + 1), :],
-                        Uf[m * (i - j) : m * (i - j + 1), :],
-                    )
-                    + np.dot(
-                        G_K[l_ * j : l_ * (j + 1), :],
-                        Yf[l_ * (i - j) : l_ * (i - j + 1), :],
-                    )
-                )
-            return y_tilde
-
-        # Build matrices for each horizon - use compiled y_tilde when available
-        for i in range(1, f):
-            if NUMBA_AVAILABLE and parsim_y_tilde_estimation_compiled is not None:
-                try:
-                    y_tilde = parsim_y_tilde_estimation_compiled(
-                        H_K, Uf, G_K, Yf, i, m, l_, f
-                    )
-                except Exception:
-                    # Fallback to original implementation
-                    y_tilde = estimating_y(H_K, Uf, G_K, Yf, i, m, l_)
-            else:
-                y_tilde = estimating_y(H_K, Uf, G_K, Yf, i, m, l_)
-
-            M = iteration_solver.solve(Yf[l_ * i : l_ * (i + 1)] - y_tilde)
-            H_K = impile(H_K, M[:, (m + l_) * f : (m + l_) * f + m])
-            G_K = impile(G_K, M[:, (m + l_) * f + m :])
-            Gamma_L = impile(Gamma_L, M[:, 0 : (m + l_) * f])
+        Gamma_L = markov_estimate.gamma_matrix
 
         # CRITICAL FIX: Use PARSIM-K specific SVD with Gamma_L (not N4SID's svd_weighted)
         # Reference: master/sippy_unipi/Parsim_methods.py line 233
@@ -288,9 +351,10 @@ class ParsimCoreAlgorithm:
         )
 
         # Solve for parameters using least squares
-        vect = np.dot(
-            pinv_compiled_svd(y_sim) if NUMBA_AVAILABLE else np.linalg.pinv(y_sim),
-            y.reshape((L * l_, 1)),
+        vect, _ = _solve_predictor_parameters(
+            y_sim,
+            y,
+            strict=strict_identifiability,
         )
         Y_estimate = np.dot(y_sim, vect)
         Vn = Vn_mat(y.reshape((L * l_, 1)), Y_estimate)
@@ -334,9 +398,10 @@ class ParsimCoreAlgorithm:
                 return y_matrix
 
             y_sim = recalc_K(A, C, D, u)
-            vect = np.dot(
-                pinv_compiled_svd(y_sim) if NUMBA_AVAILABLE else np.linalg.pinv(y_sim),
-                y.reshape((L * l_, 1)),
+            vect, _ = _solve_predictor_parameters(
+                y_sim,
+                y,
+                strict=strict_identifiability,
             )
             Y_estimate = np.dot(y_sim, vect)
             Vn = Vn_mat(y.reshape((L * l_, 1)), Y_estimate)

@@ -8,7 +8,176 @@ the PARSIM-K algorithm matches the reference implementation.
 import numpy as np
 import pytest
 
-from sippy.identification.algorithms.parsim_core import ParsimCoreAlgorithm
+from sippy.identification.algorithms.parsim_core import (
+    ParsimCoreAlgorithm,
+    _estimate_predictor_markov_blocks,
+    _solve_predictor_parameters,
+)
+
+
+def _analytical_predictor_hankel(*, direct_feedthrough: bool):
+    rng = np.random.default_rng(410)
+    state_order = 2
+    outputs = 2
+    inputs = 2
+    horizon = 5
+    columns = 96
+    past_rows = horizon * (inputs + outputs)
+    A_K = np.array([[0.45, 0.12], [-0.08, 0.35]])
+    B_K = np.array([[0.3, -0.1], [0.08, 0.25]])
+    C = np.array([[1.0, -0.2], [0.15, 0.8]])
+    D = np.array([[0.06, 0.0], [-0.02, 0.04]])
+    if not direct_feedthrough:
+        D = np.zeros_like(D)
+    K = np.array([[0.18, -0.04], [0.03, 0.12]])
+    past_map = rng.standard_normal((state_order, past_rows))
+    Zp = rng.standard_normal((past_rows, columns))
+    Uf = rng.standard_normal((inputs * horizon, columns))
+
+    gamma_blocks = []
+    input_blocks = [D]
+    output_blocks = [np.zeros((outputs, outputs))]
+    power = np.eye(state_order)
+    for block in range(horizon):
+        gamma_blocks.append(C @ power @ past_map)
+        if block:
+            previous_power = np.linalg.matrix_power(A_K, block - 1)
+            input_blocks.append(C @ previous_power @ B_K)
+            output_blocks.append(C @ previous_power @ K)
+        power = power @ A_K
+
+    initial_regressor = np.vstack((Zp, Uf[:inputs])) if direct_feedthrough else Zp
+
+    def orthogonal_innovations(regressor):
+        draws = rng.standard_normal((outputs, columns))
+        return draws - (draws @ np.linalg.pinv(regressor)) @ regressor
+
+    first_output = gamma_blocks[0] @ Zp + input_blocks[0] @ Uf[:inputs]
+    first_output += orthogonal_innovations(initial_regressor)
+    future_outputs = [first_output]
+    iteration_regressor = np.vstack((Zp, Uf[:inputs], first_output))
+    for row in range(1, horizon):
+        value = gamma_blocks[row] @ Zp
+        for lag in range(row + 1):
+            input_slice = Uf[inputs * (row - lag) : inputs * (row - lag + 1)]
+            value = value + input_blocks[lag] @ input_slice
+            if lag:
+                output_slice = future_outputs[row - lag]
+                value = value + output_blocks[lag] @ output_slice
+        value += orthogonal_innovations(iteration_regressor)
+        future_outputs.append(value)
+
+    return (
+        np.vstack(future_outputs),
+        Uf,
+        Zp,
+        np.stack(gamma_blocks),
+        np.stack(input_blocks),
+        np.stack(output_blocks),
+    )
+
+
+@pytest.mark.parametrize("direct_feedthrough", [False, True])
+def test_predictor_markov_regression_recovers_analytical_toeplitz_blocks(
+    direct_feedthrough,
+):
+    Yf, Uf, Zp, gamma, input_blocks, output_blocks = _analytical_predictor_hankel(
+        direct_feedthrough=direct_feedthrough
+    )
+
+    estimate = _estimate_predictor_markov_blocks(
+        Yf,
+        Uf,
+        Zp,
+        output_count=2,
+        input_count=2,
+        future_horizon=5,
+        direct_feedthrough=direct_feedthrough,
+        strict=True,
+    )
+
+    np.testing.assert_allclose(estimate.gamma_blocks, gamma, rtol=2e-10, atol=2e-10)
+    np.testing.assert_allclose(
+        estimate.input_blocks,
+        input_blocks,
+        rtol=2e-10,
+        atol=2e-10,
+    )
+    np.testing.assert_allclose(
+        estimate.output_blocks,
+        output_blocks,
+        rtol=2e-10,
+        atol=2e-10,
+    )
+    assert not estimate.used_compatibility_fallback
+
+
+def test_predictor_markov_regression_reuses_two_factorizations(monkeypatch):
+    import sippy.identification.algorithms.parsim_core as parsim_core_module
+
+    Yf, Uf, Zp, *_ = _analytical_predictor_hankel(direct_feedthrough=False)
+    factorization_calls = 0
+    original_qr = parsim_core_module.sc.linalg.qr
+
+    def tracked_qr(*args, **kwargs):
+        nonlocal factorization_calls
+        factorization_calls += 1
+        return original_qr(*args, **kwargs)
+
+    monkeypatch.setattr(parsim_core_module.sc.linalg, "qr", tracked_qr)
+
+    _estimate_predictor_markov_blocks(
+        Yf,
+        Uf,
+        Zp,
+        output_count=2,
+        input_count=2,
+        future_horizon=5,
+        direct_feedthrough=False,
+    )
+
+    assert factorization_calls == 2
+
+
+def test_predictor_markov_regression_has_strict_identifiability_semantics():
+    Yf = np.ones((4, 30))
+    Uf = np.ones((4, 30))
+    Zp = np.ones((8, 30))
+
+    with pytest.raises(ValueError, match="not identifiable"):
+        _estimate_predictor_markov_blocks(
+            Yf,
+            Uf,
+            Zp,
+            output_count=1,
+            input_count=1,
+            future_horizon=4,
+            direct_feedthrough=False,
+            strict=True,
+        )
+
+    estimate = _estimate_predictor_markov_blocks(
+        Yf,
+        Uf,
+        Zp,
+        output_count=1,
+        input_count=1,
+        future_horizon=4,
+        direct_feedthrough=False,
+    )
+    assert estimate.used_compatibility_fallback
+
+
+def test_predictor_parameter_regression_has_strict_identifiability_semantics():
+    design = np.column_stack((np.ones(40), np.ones(40)))
+    outputs = np.linspace(-1.0, 1.0, 40).reshape(1, -1)
+
+    with pytest.raises(ValueError, match="not identifiable"):
+        _solve_predictor_parameters(design, outputs, strict=True)
+
+    coefficients, used_fallback = _solve_predictor_parameters(design, outputs)
+    assert coefficients.shape == (2, 1)
+    assert used_fallback
 
 
 class TestParsimKReimplementation:

@@ -40,6 +40,7 @@ class SubspaceData:
     past_data: np.ndarray
     future_horizon: int
     past_offset: int
+    past_block_rows: int
     sample_count: int
     usable_columns: int
     ranks: SubspaceRankDiagnostics
@@ -92,6 +93,7 @@ def prepare_subspace_data(
     *,
     future_horizon: int,
     past_offset: int,
+    past_block_rows: int | None = None,
     reference: object | None = None,
     scale: bool = True,
     require_persistent_excitation: bool = False,
@@ -109,6 +111,13 @@ def prepare_subspace_data(
 
     future = _positive_horizon(future_horizon, "future_horizon")
     past = _positive_horizon(past_offset, "past_offset")
+    retained_past_rows = (
+        future
+        if past_block_rows is None
+        else _positive_horizon(past_block_rows, "past_block_rows")
+    )
+    if past_block_rows is not None and retained_past_rows > past:
+        raise ValueError("past_block_rows cannot exceed past_offset")
     sample_count = outputs.shape[1]
     usable_columns = sample_count - past - future + 1
     if usable_columns <= 0:
@@ -125,8 +134,26 @@ def prepare_subspace_data(
     else:
         reference_scale, scaled_references = _scale_channels(references, scale)
 
-    future_outputs, past_outputs = ordinate_sequence(scaled_outputs, future, past)
-    future_inputs, past_inputs = ordinate_sequence(scaled_inputs, future, past)
+    future_outputs, legacy_past_outputs = ordinate_sequence(
+        scaled_outputs, future, past
+    )
+    future_inputs, legacy_past_inputs = ordinate_sequence(scaled_inputs, future, past)
+    if retained_past_rows == future:
+        past_outputs = legacy_past_outputs
+        past_inputs = legacy_past_inputs
+    else:
+        past_outputs = np.vstack(
+            [
+                scaled_outputs[:, offset : offset + usable_columns]
+                for offset in range(retained_past_rows)
+            ]
+        )
+        past_inputs = np.vstack(
+            [
+                scaled_inputs[:, offset : offset + usable_columns]
+                for offset in range(retained_past_rows)
+            ]
+        )
     past_data = np.vstack((past_inputs, past_outputs))
     input_hankel = np.vstack((past_inputs, future_inputs))
 
@@ -136,9 +163,18 @@ def prepare_subspace_data(
         reference_rank = 0
         reference_rows = 0
     else:
-        future_references, past_references = ordinate_sequence(
+        future_references, legacy_past_references = ordinate_sequence(
             scaled_references, future, past
         )
+        if retained_past_rows == future:
+            past_references = legacy_past_references
+        else:
+            past_references = np.vstack(
+                [
+                    scaled_references[:, offset : offset + usable_columns]
+                    for offset in range(retained_past_rows)
+                ]
+            )
         reference_hankel = np.vstack((past_references, future_references))
         reference_rank = _numerical_rank(reference_hankel)
         reference_rows = reference_hankel.shape[0]
@@ -173,6 +209,7 @@ def prepare_subspace_data(
         past_data=past_data,
         future_horizon=future,
         past_offset=past,
+        past_block_rows=retained_past_rows,
         sample_count=sample_count,
         usable_columns=usable_columns,
         ranks=ranks,

@@ -65,6 +65,9 @@ class PARSIMKAlgorithm(IdentificationAlgorithm):
 
         Note:
             Either (y, u) or iddata should be provided, but not both.
+            Rank-deficient regressions retain the historical pseudoinverse
+            fallback for explicit PARSIM-K calls. The canonical SUBSPACE
+            estimator uses strict identifiability checks instead.
         """
         y, u, tsample = resolve_identification_data(
             y, u, iddata, tsample=kwargs.get("tsample", 1.0)
