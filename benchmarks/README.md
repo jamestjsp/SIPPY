@@ -93,6 +93,49 @@ not a 2,471-by-2,471 sample-space projector. Persistent structural gates in
 `test_subspace_lq_compression.py` and the PARSIM reimplementation tests enforce
 these bounds and factorization reuse.
 
+Run the seven-method Monte Carlo reconstruction grid separately:
+
+```bash
+uv run python benchmarks/benchmark_subspace.py \
+  --scenario-grid --samples 2500 --seeds 5
+```
+
+Each seed creates independent training and validation records. All methods use
+the known plant order, a 12-row future horizon, and, where applicable, a
+24-row past horizon. The reported errors are medians across seeds and compare
+held-out output simulation, frequency response, poles, and Markov parameters,
+so they do not depend on the identified state coordinates.
+
+An arm64 macOS run on Python 3.13.5 and NumPy 2.3.5 completed all five seeds for
+all 28 method/scenario combinations. Median held-out NRMSE was:
+
+| Scenario | SSARX | N4SID | MOESP | CVA | PARSIM-K | PARSIM-S | PARSIM-P |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Open-loop SISO | 0.00100 | 0.00102 | 0.00102 | 0.00102 | 0.00105 | 0.109 | 0.0982 |
+| Open-loop MIMO | 0.00124 | 0.00118 | 0.00118 | 0.00118 | 0.00125 | 0.0203 | 0.0148 |
+| Closed-loop MathWorks | 0.0181 | 0.364 | 0.346 | 0.314 | 0.0217 | 0.699 | 0.555 |
+| Closed-loop two excitation | 0.0230 | 0.0212 | 0.0212 | 0.0212 | 0.0206 | 0.358 | 0.0533 |
+
+Median fit times on the open-loop records were:
+
+| Method | SISO | MIMO |
+|---|---:|---:|
+| SSARX | 4.77 ms | 12.63 ms |
+| N4SID | 446.86 ms | 409.43 ms |
+| MOESP | 443.03 ms | 407.52 ms |
+| CVA | 444.36 ms | 406.97 ms |
+| PARSIM-K | 11.88 ms | 31.15 ms |
+| PARSIM-S | 13.30 ms | 23.21 ms |
+| PARSIM-P | 8.51 ms | 18.32 ms |
+
+SSARX is the strongest estimator on the single-excitation MathWorks loop and
+matches the classical methods on the open-loop records while fitting much
+faster. It is not universally best: N4SID, MOESP, CVA, and PARSIM-K have a
+small accuracy advantage on the two-excitation closed-loop record, and the
+three classical methods have a small NRMSE advantage on the open-loop MIMO
+record. PARSIM-S and PARSIM-P are fast but substantially less reliable across
+this scenario set.
+
 ## Model operations
 
 Run the current ctrlsys-backed implementation:

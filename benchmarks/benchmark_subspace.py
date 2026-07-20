@@ -9,8 +9,22 @@ import tracemalloc
 from dataclasses import asdict, dataclass
 
 import numpy as np
+from benchmark_closed_loop import (
+    mathworks_closed_loop_dataset,
+    two_excitation_closed_loop_dataset,
+)
 
 from sippy.identification.factory import create_algorithm
+
+COMPARISON_METHODS = (
+    "SSARX",
+    "N4SID",
+    "MOESP",
+    "CVA",
+    "PARSIM-K",
+    "PARSIM-S",
+    "PARSIM-P",
+)
 
 
 @dataclass(frozen=True)
@@ -40,6 +54,18 @@ class BenchmarkDataset:
     D: np.ndarray
 
 
+@dataclass(frozen=True)
+class ScenarioBenchmarkResult:
+    scenario: str
+    method: str
+    successful_seeds: int
+    median_seconds: float
+    median_held_out_nrmse: float
+    median_frequency_response_error: float
+    median_pole_error: float
+    median_markov_parameter_error: float
+
+
 def _simulate_response(A, B, C, D, inputs):
     outputs = np.zeros((C.shape[0], inputs.shape[1]))
     state = np.zeros(A.shape[0])
@@ -49,8 +75,11 @@ def _simulate_response(A, B, C, D, inputs):
     return outputs
 
 
-def _simulate_dataset(kind: str, sample_count: int) -> BenchmarkDataset:
-    rng = np.random.default_rng(20260720 if kind == "siso" else 20260721)
+def _simulate_dataset(
+    kind: str, sample_count: int, seed: int | None = None
+) -> BenchmarkDataset:
+    default_seed = 20260720 if kind == "siso" else 20260721
+    rng = np.random.default_rng(default_seed if seed is None else seed)
     if kind == "siso":
         A = np.array([[0.72, 0.12], [-0.08, 0.84]])
         B = np.array([[0.35], [0.18]])
@@ -81,6 +110,42 @@ def _simulate_dataset(kind: str, sample_count: int) -> BenchmarkDataset:
         C=C,
         D=D,
     )
+
+
+def _closed_loop_fixture(kind: str, sample_count: int, seed: int) -> BenchmarkDataset:
+    if kind == "closed-loop-mathworks":
+        dataset = mathworks_closed_loop_dataset(
+            sample_count=sample_count,
+            seed=seed,
+        )
+    elif kind == "closed-loop-two-excitation":
+        dataset = two_excitation_closed_loop_dataset(
+            sample_count=sample_count,
+            seed=seed,
+        )
+    else:
+        raise ValueError(f"unknown closed-loop benchmark scenario: {kind}")
+    if dataset.reference_system is None:
+        raise ValueError(f"{kind} must provide a ground-truth state-space model")
+    A, B, C, D = dataset.reference_system
+    return BenchmarkDataset(
+        outputs=dataset.outputs,
+        inputs=dataset.inputs,
+        validation_outputs=dataset.validation_outputs,
+        validation_inputs=dataset.validation_inputs,
+        A=A,
+        B=B,
+        C=C,
+        D=D,
+    )
+
+
+def _scenario_fixture(kind: str, sample_count: int, seed: int) -> BenchmarkDataset:
+    if kind == "open-loop-siso":
+        return _simulate_dataset("siso", sample_count, seed)
+    if kind == "open-loop-mimo":
+        return _simulate_dataset("mimo", sample_count, seed)
+    return _closed_loop_fixture(kind, sample_count, seed)
 
 
 def _relative_error(expected, actual):
@@ -149,12 +214,26 @@ def _accuracy_metrics(dataset, model):
     }
 
 
-def _workload(method: str, y: np.ndarray, u: np.ndarray, order: int):
+def _workload(
+    method: str,
+    y: np.ndarray,
+    u: np.ndarray,
+    order: int,
+    *,
+    horizon: int = 15,
+    past_horizon: int | None = None,
+):
     options = {"tsample": 1.0}
-    if method == "N4SID":
-        options.update({"ss_f": 15, "ss_fixed_order": order})
-    elif method == "PARSIM-K":
-        options.update({"ss_f": 15, "ss_p": 15, "ss_fixed_order": order})
+    if method in {"N4SID", "MOESP", "CVA"}:
+        options.update({"ss_f": horizon, "ss_fixed_order": order})
+    elif method in {"SSARX", "PARSIM-K", "PARSIM-S", "PARSIM-P"}:
+        options.update(
+            {
+                "ss_f": horizon,
+                "ss_p": horizon if past_horizon is None else past_horizon,
+                "ss_fixed_order": order,
+            }
+        )
     return lambda: create_algorithm(method).identify(y=y, u=u, **options)
 
 
@@ -169,15 +248,121 @@ def _measure(workload, repeat: int) -> tuple[float, int, object]:
     return seconds, peak_bytes, model
 
 
+def _run_scenario_grid(
+    *,
+    sample_count: int,
+    seed_count: int,
+    horizon: int,
+    past_horizon: int,
+) -> list[ScenarioBenchmarkResult]:
+    scenarios = (
+        "open-loop-siso",
+        "open-loop-mimo",
+        "closed-loop-mathworks",
+        "closed-loop-two-excitation",
+    )
+    results = []
+    for scenario_index, scenario in enumerate(scenarios):
+        timings = {method: [] for method in COMPARISON_METHODS}
+        metrics = {method: [] for method in COMPARISON_METHODS}
+        for seed_index in range(seed_count):
+            seed = 20260720 + 100 * scenario_index + seed_index
+            fixture = _scenario_fixture(scenario, sample_count, seed)
+            order = fixture.A.shape[0]
+            for method in COMPARISON_METHODS:
+                workload = _workload(
+                    method,
+                    fixture.outputs,
+                    fixture.inputs,
+                    order,
+                    horizon=horizon,
+                    past_horizon=past_horizon,
+                )
+                start = timeit.default_timer()
+                model = workload()
+                timings[method].append(timeit.default_timer() - start)
+                metrics[method].append(_accuracy_metrics(fixture, model))
+
+        for method in COMPARISON_METHODS:
+            method_metrics = metrics[method]
+            results.append(
+                ScenarioBenchmarkResult(
+                    scenario=scenario,
+                    method=method,
+                    successful_seeds=len(method_metrics),
+                    median_seconds=float(statistics.median(timings[method])),
+                    median_held_out_nrmse=float(
+                        statistics.median(
+                            metric["held_out_nrmse"] for metric in method_metrics
+                        )
+                    ),
+                    median_frequency_response_error=float(
+                        statistics.median(
+                            metric["frequency_response_error"]
+                            for metric in method_metrics
+                        )
+                    ),
+                    median_pole_error=float(
+                        statistics.median(
+                            metric["pole_error"] for metric in method_metrics
+                        )
+                    ),
+                    median_markov_parameter_error=float(
+                        statistics.median(
+                            metric["markov_parameter_error"]
+                            for metric in method_metrics
+                        )
+                    ),
+                )
+            )
+    return results
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare canonical and named compact subspace estimators."
     )
     parser.add_argument("--samples", type=int, default=2500)
     parser.add_argument("--quick", action="store_true")
+    parser.add_argument("--scenario-grid", action="store_true")
+    parser.add_argument("--seeds", type=int, default=5)
     args = parser.parse_args()
+    if args.samples < 64:
+        parser.error("--samples must be at least 64")
+    if args.seeds < 1:
+        parser.error("--seeds must be positive")
     repeat = 2 if args.quick else 5
     horizon = 15
+    if args.scenario_grid:
+        grid_horizon = 12
+        grid_past_horizon = 24
+        grid_results = _run_scenario_grid(
+            sample_count=args.samples,
+            seed_count=args.seeds,
+            horizon=grid_horizon,
+            past_horizon=grid_past_horizon,
+        )
+        print(
+            json.dumps(
+                {
+                    "environment": {
+                        "python": platform.python_version(),
+                        "numpy": np.__version__,
+                        "platform": platform.platform(),
+                        "samples": args.samples,
+                        "seeds": args.seeds,
+                    },
+                    "configuration": {
+                        "fixed_true_order": True,
+                        "future_horizon": grid_horizon,
+                        "past_horizon": grid_past_horizon,
+                    },
+                    "results": [asdict(result) for result in grid_results],
+                },
+                indent=2,
+            )
+        )
+        return
     results = []
     structural_bounds = {}
 

@@ -350,7 +350,7 @@ class SSARXAlgorithm(IdentificationAlgorithm):
         )
         self.validate_parameters(**kwargs)
         future_horizon = kwargs.get("ss_f", 10)
-        varx_order = kwargs.get("ss_p", max(2 * future_horizon, future_horizon - 1))
+        varx_order = kwargs.get("ss_p", 2 * future_horizon)
         fixed_order = kwargs.get("ss_fixed_order")
         threshold = kwargs.get("ss_threshold", 0.1)
         direct_feedthrough = kwargs.get("ss_d_required", False)
@@ -401,7 +401,7 @@ class SSARXAlgorithm(IdentificationAlgorithm):
 
     def validate_parameters(self, **kwargs) -> bool:
         future_horizon = kwargs.get("ss_f", 10)
-        varx_order = kwargs.get("ss_p", max(2 * future_horizon, future_horizon - 1))
+        varx_order = kwargs.get("ss_p", 2 * future_horizon)
         fixed_order = kwargs.get("ss_fixed_order")
         threshold = kwargs.get("ss_threshold", 0.1)
         for name, value in (("ss_f", future_horizon), ("ss_p", varx_order)):
