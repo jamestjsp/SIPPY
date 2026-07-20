@@ -26,6 +26,7 @@ class AutomaticDimensionEstimate:
     route: str
     horizon_candidates: tuple[int, ...]
     reference_projection_reason: str | None
+    reference_diagnostics: object | None
     weighting: SubspaceWeightingDiagnostics
 
 
@@ -78,7 +79,9 @@ def _build_ort_candidates(
 ):
     candidates = []
     weighting_by_dimension = {}
+    diagnostics_by_dimension = {}
     reasons = []
+    invalid_diagnostics = []
     for horizon in horizons:
         data = prepare_subspace_data(
             y,
@@ -94,6 +97,7 @@ def _build_ort_candidates(
         )
         if prepared is None:
             reasons.append(diagnostics.reason)
+            invalid_diagnostics.append(diagnostics)
             continue
         orders, _ = _candidate_orders_from_singular_values(
             prepared.singular_values,
@@ -104,7 +108,14 @@ def _build_ort_candidates(
             candidate = _realize_ort_dimension_candidate(prepared, order)
             candidates.append(candidate)
             weighting_by_dimension[(horizon, order)] = prepared.ort.weighting
-    return candidates, weighting_by_dimension, reasons
+            diagnostics_by_dimension[(horizon, order)] = diagnostics
+    return (
+        candidates,
+        weighting_by_dimension,
+        diagnostics_by_dimension,
+        reasons,
+        invalid_diagnostics,
+    )
 
 
 def _build_predictor_candidates(
@@ -195,8 +206,15 @@ def select_automatic_dimensions(
     projection_reason = "reference_missing"
     candidates = []
     weighting_by_dimension = {}
+    reference_diagnostics = None
     if training_reference is not None:
-        candidates, weighting_by_dimension, reasons = _build_ort_candidates(
+        (
+            candidates,
+            weighting_by_dimension,
+            diagnostics_by_dimension,
+            reasons,
+            invalid_diagnostics,
+        ) = _build_ort_candidates(
             training_y,
             training_u,
             training_reference,
@@ -209,6 +227,9 @@ def select_automatic_dimensions(
             projection_reason = None
         else:
             projection_reason = reasons[0] if reasons else "reference_unusable"
+            reference_diagnostics = (
+                invalid_diagnostics[0] if invalid_diagnostics else None
+            )
             warnings.warn(
                 "Measured exogenous reference is unusable for two-stage ORT "
                 f"({projection_reason}); using the predictor-form estimator",
@@ -233,10 +254,13 @@ def select_automatic_dimensions(
         validation_fraction=validation_fraction,
     )
     key = (selection.candidate.horizon, selection.candidate.order)
+    if route == "two-stage-ort":
+        reference_diagnostics = diagnostics_by_dimension[key]
     return AutomaticDimensionEstimate(
         selection=selection,
         route=route,
         horizon_candidates=horizons,
         reference_projection_reason=projection_reason,
+        reference_diagnostics=reference_diagnostics,
         weighting=weighting_by_dimension[key],
     )

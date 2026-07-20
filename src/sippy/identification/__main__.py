@@ -37,6 +37,7 @@ class SystemIdentification:
         y: Optional[np.ndarray] = None,
         u: Optional[np.ndarray] = None,
         iddata: Optional["IDData"] = None,
+        reference: Optional[np.ndarray] = None,
         **kwargs,
     ) -> StateSpaceModel:
         """
@@ -58,6 +59,10 @@ class SystemIdentification:
         # Validate input arguments
         if iddata is not None and (y is not None or u is not None):
             raise ValueError("Provide either iddata or (y, u), but not both")
+        if iddata is not None and reference is not None:
+            raise ValueError(
+                "Provide references through IDData or reference=, not both"
+            )
 
         method_override = kwargs.pop("method", None)
         id_method = kwargs.pop("id_method", None)
@@ -81,12 +86,22 @@ class SystemIdentification:
         if iddata is not None:
             y = iddata.get_output_array()
             u = iddata.get_input_array()
+            reference = iddata.get_reference_array()
             kwargs["tsample"] = iddata.sample_time
+
+        if reference is not None:
+            reference = np.atleast_2d(np.asarray(reference, dtype=float)).copy()
+            if reference.shape[1] != np.atleast_2d(y).shape[1]:
+                raise ValueError(
+                    "Reference must share the input and output sample count"
+                )
 
         config_dict = self.config.__dict__.copy()
         config_dict.pop("method", None)
         centering = config_dict.pop("centering", "None")
-        config_dict.pop("ic", None)
+        criterion = config_dict.pop("ic", None)
+        if method == "SUBSPACE" and criterion not in (None, "None"):
+            config_dict["criterion"] = criterion
         config_dict = normalize_identification_options(
             method,
             config_dict,
@@ -100,6 +115,12 @@ class SystemIdentification:
 
         # Apply data centering if specified
         y_centered, u_centered = self._apply_centering(y, u, centering)
+        if reference is not None:
+            if centering == "InitVal":
+                reference -= reference[:, :1]
+            elif centering == "MeanVal":
+                reference -= np.mean(reference, axis=1, keepdims=True)
+            config_dict["reference"] = reference
 
         # Perform identification
         model = algorithm.identify(y_centered, u_centered, **config_dict)
@@ -144,7 +165,8 @@ def identify(
     *,
     data: Optional["IDData"] = None,
     iddata: Optional["IDData"] = None,
-    method: str = "N4SID",
+    reference: Optional[np.ndarray] = None,
+    method: str = "SUBSPACE",
     centering: str = "None",
     **options,
 ) -> StateSpaceModel:
@@ -155,7 +177,13 @@ def identify(
         SystemIdentificationConfig(method=method, centering=centering)
     )
     source = data if data is not None else iddata
-    return identifier.identify(y=y, u=u, iddata=source, **options)
+    return identifier.identify(
+        y=y,
+        u=u,
+        iddata=source,
+        reference=reference,
+        **options,
+    )
 
 
 # Convenience function for backward compatibility
@@ -163,7 +191,7 @@ def system_identification(
     y: Optional[np.ndarray] = None,
     u: Optional[np.ndarray] = None,
     iddata: Optional["IDData"] = None,
-    id_method: str = "N4SID",
+    id_method: str = "SUBSPACE",
     **kwargs,
 ) -> StateSpaceModel:
     """

@@ -25,13 +25,16 @@ class TestAlgorithmFactory:
         """Set up test fixtures."""
         # Save existing registrations to restore later
         self._original_algorithms = AlgorithmFactory._algorithms.copy()
+        self._original_initialized = AlgorithmFactory._initialized
         AlgorithmFactory._algorithms.clear()
+        AlgorithmFactory._initialized = True
 
     def teardown_method(self):
         """Clean up after tests."""
         # Restore original algorithms
         AlgorithmFactory._algorithms.clear()
         AlgorithmFactory._algorithms.update(self._original_algorithms)
+        AlgorithmFactory._initialized = self._original_initialized
 
     def test_register_algorithm(self):
         """Test registering an algorithm."""
@@ -87,13 +90,16 @@ class TestCreateAlgorithm:
         """Set up test fixtures."""
         # Save existing registrations to restore later
         self._original_algorithms = AlgorithmFactory._algorithms.copy()
+        self._original_initialized = AlgorithmFactory._initialized
         AlgorithmFactory._algorithms.clear()
+        AlgorithmFactory._initialized = True
 
     def teardown_method(self):
         """Clean up after tests."""
         # Restore original algorithms
         AlgorithmFactory._algorithms.clear()
         AlgorithmFactory._algorithms.update(self._original_algorithms)
+        AlgorithmFactory._initialized = self._original_initialized
 
     def test_create_algorithm_function(self):
         """Test the convenience create function."""

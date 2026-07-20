@@ -16,6 +16,8 @@ from .parameters import ALGORITHM_OPTIONS, normalize_identification_options
 if TYPE_CHECKING:
     from .iddata import IDData
 
+_METHOD_DEFAULT = object()
+
 
 def resolve_identification_data(
     y: Optional[np.ndarray],
@@ -83,6 +85,14 @@ class IdentificationAlgorithm(ABC):
                 if method_getter is not None
                 else self.__class__.__name__
             )
+            if method == "SUBSPACE" and iddata is not None:
+                data_reference = iddata.get_reference_array()
+                if data_reference is not None:
+                    if "reference" in options:
+                        raise ValueError(
+                            "Provide references through IDData or reference=, not both"
+                        )
+                    options["reference"] = data_reference
             config = options.pop("config", None)
             legacy_config = config is not None
             if hasattr(y, "get_output_array"):
@@ -199,13 +209,19 @@ class IdentificationAlgorithm(ABC):
             covariance_source = self.covariance_source
         if kalman_gain_source is None:
             kalman_gain_source = self.kalman_gain_source
+        result_options = dict(options or {})
+        reference = result_options.pop("reference", None)
+        if reference is not None:
+            result_options["reference_channels"] = int(
+                np.atleast_2d(reference).shape[0]
+            )
         return model.finalize_identification(
             method=method,
             input_data=u,
             output_data=y,
             covariance_source=covariance_source,
             kalman_gain_source=kalman_gain_source,
-            options=options,
+            options=result_options,
         )
 
 
@@ -964,15 +980,15 @@ class SystemIdentificationConfig:
 
     def __init__(
         self,
-        method: str = "N4SID",
+        method: str = "SUBSPACE",
         centering: str = "None",
         ic: str = "None",
         tsample: float = 1.0,
-        ss_f: int = 20,
-        ss_p: int = 20,
+        ss_f: Optional[int] | object = _METHOD_DEFAULT,
+        ss_p: Optional[int] | object = _METHOD_DEFAULT,
         ss_threshold: float = 0.1,
         ss_max_order: Optional[int] = None,
-        ss_fixed_order: Optional[int] = 1,  # Default to 1 to avoid issues
+        ss_fixed_order: Optional[int] | object = _METHOD_DEFAULT,
         ss_orders: Optional[List[int]] = None,
         ss_d_required: bool = False,
         ss_a_stability: bool = False,
@@ -996,14 +1012,23 @@ class SystemIdentificationConfig:
     ):
         # Subspace method parameters
         self.method = method
+        canonical_subspace = str(method).strip().upper() == "SUBSPACE"
         self.centering = centering
         self.ic = ic
         self.tsample = tsample
-        self.ss_f = ss_f
-        self.ss_p = ss_p
+        self.ss_f = (
+            (None if canonical_subspace else 20) if ss_f is _METHOD_DEFAULT else ss_f
+        )
+        self.ss_p = (
+            (None if canonical_subspace else 20) if ss_p is _METHOD_DEFAULT else ss_p
+        )
         self.ss_threshold = ss_threshold
         self.ss_max_order = ss_max_order
-        self.ss_fixed_order = ss_fixed_order
+        self.ss_fixed_order = (
+            (None if canonical_subspace else 1)
+            if ss_fixed_order is _METHOD_DEFAULT
+            else ss_fixed_order
+        )
         self.ss_orders = [1, 10] if ss_orders is None else list(ss_orders)
         self.ss_d_required = ss_d_required
         self.ss_a_stability = ss_a_stability

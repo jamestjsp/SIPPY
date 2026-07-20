@@ -220,13 +220,21 @@ class TestSystemIdentificationConfig:
     def test_default_config(self):
         """Test default configuration."""
         config = SystemIdentificationConfig()
-        assert config.method == "N4SID"
+        assert config.method == "SUBSPACE"
         assert config.centering == "None"
-        assert config.ss_f == 20
-        assert config.ss_p == 20
+        assert config.ss_f is None
+        assert config.ss_p is None
+        assert config.ss_fixed_order is None
         assert config.ss_threshold == 0.1
         assert not config.ss_d_required
         assert not config.ss_a_stability
+
+    def test_named_subspace_method_preserves_legacy_defaults(self):
+        config = SystemIdentificationConfig(method="N4SID")
+
+        assert config.ss_f == 20
+        assert config.ss_p == 20
+        assert config.ss_fixed_order == 1
 
     def test_orders_default_is_not_shared(self):
         first = SystemIdentificationConfig()

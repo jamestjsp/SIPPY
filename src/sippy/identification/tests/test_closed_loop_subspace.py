@@ -1,6 +1,8 @@
 import numpy as np
+import pandas as pd
 import pytest
 
+import sippy
 from sippy import systems as control
 from sippy.identification.algorithms.automatic_subspace import (
     select_automatic_dimensions,
@@ -8,6 +10,7 @@ from sippy.identification.algorithms.automatic_subspace import (
 from sippy.identification.algorithms.parsim_k import PARSIMKAlgorithm
 from sippy.identification.algorithms.subspace_core import SubspaceCoreAlgorithm
 from sippy.identification.algorithms.subspace_data import prepare_subspace_data
+from sippy.identification.iddata import IDData
 
 from .simulation_scenarios import (
     frequency_response_error,
@@ -504,6 +507,39 @@ def test_automatic_dimensions_select_consistent_predictor_model_without_loop_fla
     )
 
 
+def test_canonical_subspace_automatically_uses_predictor_route_for_raw_data():
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=3000,
+        n_validation=300,
+        noise_scale=0.035,
+        noise_color=0.45,
+        dither_scale=0.04,
+        seed=93,
+    )
+
+    model = sippy.identify(scenario.output, scenario.plant_input)
+
+    assert model.method == "SUBSPACE"
+    assert model.identification_info["estimator_route"] == "predictor"
+    assert model.identification_info["reference_projection"] == {
+        "status": "not-provided",
+        "reason": "reference_missing",
+    }
+    assert model.identification_info["selected_order"] == 2
+    identified = control.ss(model.A, model.B, model.C, model.D, dt=model.ts)
+    _assert_plant_recovery(
+        plant,
+        identified,
+        scenario.u_validation,
+        scenario.y_validation_clean,
+        maximum_nrmse=0.3,
+        maximum_frequency_error=0.3,
+    )
+
+
 def test_automatic_dimensions_use_valid_reference_and_honor_expert_overrides():
     plant = stable_siso_plant(direct_feedthrough=0.0)
     scenario = simulate_closed_loop_scenario(
@@ -541,6 +577,75 @@ def test_automatic_dimensions_use_valid_reference_and_honor_expert_overrides():
         )
     assert fallback.route == "predictor"
     assert fallback.reference_projection_reason == "reference_rank_deficient"
+
+
+def test_canonical_subspace_uses_iddata_references_without_algorithm_selection():
+    plant = stable_siso_plant(direct_feedthrough=0.0)
+    scenario = simulate_closed_loop_scenario(
+        plant,
+        static_output_feedback_controller([[1.1]], dt=plant.dt),
+        n_train=3000,
+        n_validation=300,
+        noise_scale=0.06,
+        noise_color=0.7,
+        dither_scale=0.1,
+        seed=94,
+    )
+    frame = pd.DataFrame(
+        {
+            "u": scenario.plant_input[0],
+            "y": scenario.output[0],
+            "reference": scenario.reference[0],
+            "dither": scenario.dither[0],
+        }
+    )
+    data = IDData(
+        frame,
+        inputs=["u"],
+        outputs=["y"],
+        references=["reference", "dither"],
+        tsample=plant.dt,
+    )
+
+    model = sippy.identify(data=data, ss_f=12, ss_fixed_order=2)
+
+    assert model.method == "SUBSPACE"
+    assert model.ts == pytest.approx(plant.dt)
+    assert model.identification_info["estimator_route"] == "two-stage-ort"
+    assert model.identification_info["reference_projection"] == {
+        "status": "used",
+        "reason": None,
+    }
+    assert model.identification_info["options"]["reference_channels"] == 2
+    assert "reference" not in model.identification_info["options"]
+    numerical_ranks = model.identification_info["numerical_ranks"]
+    assert numerical_ranks["reference_rank"] == numerical_ranks["reference_rows"]
+
+
+def test_canonical_subspace_records_invalid_reference_predictor_fallback():
+    rng = np.random.default_rng(95)
+    u = rng.normal(size=(1, 500))
+    y = np.zeros_like(u)
+    for sample in range(1, u.shape[1]):
+        y[0, sample] = (
+            0.7 * y[0, sample - 1] + 0.25 * u[0, sample - 1] + 0.01 * rng.normal()
+        )
+    duplicate_reference = np.vstack((u, u))
+
+    with pytest.warns(UserWarning, match="using the predictor-form estimator"):
+        model = sippy.identify(
+            y,
+            u,
+            reference=duplicate_reference,
+            ss_f=8,
+            ss_fixed_order=1,
+        )
+
+    assert model.identification_info["estimator_route"] == "predictor"
+    assert model.identification_info["reference_projection"] == {
+        "status": "fallback",
+        "reason": "reference_rank_deficient",
+    }
 
 
 def test_projected_cva_preserves_variance_and_closed_loop_bias_trend():

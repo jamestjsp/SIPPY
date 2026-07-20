@@ -158,6 +158,14 @@ class TestBackwardCompatibility:
         )
         assert model is not None
 
+    def test_deprecated_function_inherits_canonical_default(self, sample_data):
+        y, u = sample_data
+
+        with pytest.warns(DeprecationWarning, match="deprecated"):
+            model = system_identification(y=y, u=u, SS_fixed_order=2, SS_f=8)
+
+        assert model.method == "SUBSPACE"
+
 
 class TestMasterExamplesIntegration:
     """Test suite for master branch examples adapted to new API - integration tests."""

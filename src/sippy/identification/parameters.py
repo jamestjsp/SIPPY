@@ -12,6 +12,15 @@ METHOD_ALIASES = {"FREQUENCY_DOMAIN": "FD", "FREQ_DOMAIN": "FD"}
 
 COMMON_OPTIONS = {"tsample"}
 ALGORITHM_OPTIONS = {
+    "SUBSPACE": {
+        "reference",
+        "ss_f",
+        "ss_fixed_order",
+        "ss_d_required",
+        "ss_weighting",
+        "criterion",
+        "validation_fraction",
+    },
     "N4SID": {
         "ss_f",
         "ss_threshold",

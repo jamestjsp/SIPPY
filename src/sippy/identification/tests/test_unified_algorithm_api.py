@@ -20,6 +20,7 @@ from .simulation_scenarios import (
 )
 
 ALGORITHM_NAMES = [
+    "SUBSPACE",
     "N4SID",
     "MOESP",
     "CVA",
@@ -38,8 +39,17 @@ ALGORITHM_NAMES = [
     "FD",
 ]
 
-SUBSPACE_NAMES = ["N4SID", "MOESP", "CVA", "PARSIM-K", "PARSIM-S", "PARSIM-P"]
+SUBSPACE_NAMES = [
+    "SUBSPACE",
+    "N4SID",
+    "MOESP",
+    "CVA",
+    "PARSIM-K",
+    "PARSIM-S",
+    "PARSIM-P",
+]
 CANONICAL_NAMES = [
+    "SUBSPACE",
     "N4SID",
     "MOESP",
     "CVA",
@@ -58,6 +68,7 @@ CANONICAL_NAMES = [
     "FD",
 ]
 STOCHASTIC_SUBSPACE_NAMES = ["N4SID", "MOESP", "CVA"]
+PREDICTOR_GAIN_NAMES = ["SUBSPACE", "PARSIM-K", "PARSIM-S", "PARSIM-P"]
 PARSIM_NAMES = ["PARSIM-K", "PARSIM-S", "PARSIM-P"]
 
 
@@ -302,7 +313,7 @@ def test_every_identification_result_obeys_the_common_result_contract(
 
     if method in STOCHASTIC_SUBSPACE_NAMES:
         assert model.supports("stochastic_state_space")
-    elif method in PARSIM_NAMES:
+    elif method in PREDICTOR_GAIN_NAMES:
         assert model.K is not None
         assert model.Q is None and model.R is None and model.S is None
     else:
