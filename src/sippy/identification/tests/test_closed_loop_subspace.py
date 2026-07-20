@@ -1,3 +1,4 @@
+from dataclasses import replace
 from itertools import permutations
 
 import numpy as np
@@ -6,7 +7,11 @@ import pytest
 
 import sippy
 from sippy import systems as control
+from sippy.identification.algorithms import (
+    automatic_subspace as automatic_subspace_module,
+)
 from sippy.identification.algorithms.automatic_subspace import (
+    _build_predictor_candidates,
     select_automatic_dimensions,
 )
 from sippy.identification.algorithms.parsim_k import PARSIMKAlgorithm
@@ -630,6 +635,133 @@ def test_automatic_dimensions_select_consistent_predictor_model_without_loop_fla
         maximum_nrmse=0.3,
         maximum_frequency_error=0.3,
     )
+
+
+def test_automatic_dimensions_reports_all_predictor_candidate_failures(monkeypatch):
+    rng = np.random.default_rng(96)
+    u = rng.normal(size=(1, 300))
+    y = rng.normal(size=(1, 300))
+
+    def fail_realization(_prepared, _order):
+        raise np.linalg.LinAlgError("singular state regression")
+
+    monkeypatch.setattr(
+        automatic_subspace_module, "_predictor_candidate", fail_realization
+    )
+
+    with pytest.raises(ValueError) as caught:
+        select_automatic_dimensions(
+            y,
+            u,
+            explicit_horizon=8,
+            explicit_order=2,
+        )
+
+    message = str(caught.value)
+    assert "no valid predictor dimension candidate remains" in message
+    assert "horizon=8" in message
+    assert "order=2" in message
+    assert "stage=realization" in message
+    assert "LinAlgError: singular state regression" in message
+
+
+def test_predictor_candidate_enumeration_preserves_successful_alternatives(monkeypatch):
+    rng = np.random.default_rng(97)
+    u = rng.normal(size=(1, 400))
+    y = np.zeros_like(u)
+    for sample in range(1, u.shape[1]):
+        y[0, sample] = (
+            0.7 * y[0, sample - 1]
+            + 0.3 * u[0, sample - 1]
+            + 0.01 * rng.normal()
+        )
+
+    original_candidate = automatic_subspace_module._predictor_candidate
+
+    def candidate_with_one_failure(prepared, order):
+        if order == 1:
+            raise ValueError("first candidate rejected")
+        return original_candidate(prepared, order)
+
+    monkeypatch.setattr(
+        automatic_subspace_module,
+        "_candidate_orders_from_singular_values",
+        lambda *_args, **_kwargs: ((1, 2), 2),
+    )
+    monkeypatch.setattr(
+        automatic_subspace_module,
+        "_predictor_candidate",
+        candidate_with_one_failure,
+    )
+
+    candidates, _, failures = _build_predictor_candidates(
+        y,
+        u,
+        (8,),
+        explicit_order=None,
+        weighting="CVA",
+        direct_feedthrough=False,
+    )
+
+    assert [candidate.order for candidate in candidates] == [2]
+    assert len(failures) == 1
+    assert failures[0].horizon == 8
+    assert failures[0].order == 1
+    assert failures[0].stage == "realization"
+    assert failures[0].failure_type == "ValueError"
+
+
+def test_predictor_candidate_failures_include_preparation_context(monkeypatch):
+    rng = np.random.default_rng(98)
+    u = rng.normal(size=(1, 300))
+    y = rng.normal(size=(1, 300))
+
+    def fail_preparation(*_args, **_kwargs):
+        raise ValueError("predictor regression is not identifiable")
+
+    monkeypatch.setattr(
+        automatic_subspace_module,
+        "_prepare_predictor_subspace",
+        fail_preparation,
+    )
+
+    with pytest.raises(ValueError) as caught:
+        select_automatic_dimensions(y, u, explicit_horizon=8, explicit_order=2)
+
+    message = str(caught.value)
+    assert "horizon=8, stage=preparation" in message
+    assert "ValueError: predictor regression is not identifiable" in message
+
+
+def test_predictor_candidate_failures_report_nonfinite_realization(monkeypatch):
+    rng = np.random.default_rng(99)
+    u = rng.normal(size=(1, 400))
+    y = np.zeros_like(u)
+    for sample in range(1, u.shape[1]):
+        y[0, sample] = (
+            0.65 * y[0, sample - 1]
+            + 0.25 * u[0, sample - 1]
+            + 0.02 * rng.normal()
+        )
+
+    original_candidate = automatic_subspace_module._predictor_candidate
+
+    def nonfinite_candidate(prepared, order):
+        candidate = original_candidate(prepared, order)
+        return replace(candidate, A=np.full_like(candidate.A, np.nan))
+
+    monkeypatch.setattr(
+        automatic_subspace_module,
+        "_predictor_candidate",
+        nonfinite_candidate,
+    )
+
+    with pytest.raises(ValueError) as caught:
+        select_automatic_dimensions(y, u, explicit_horizon=8, explicit_order=2)
+
+    message = str(caught.value)
+    assert "horizon=8, order=2, stage=realization" in message
+    assert "NonFiniteRealization" in message
 
 
 def test_canonical_subspace_automatically_uses_predictor_route_for_raw_data():

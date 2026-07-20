@@ -30,6 +30,52 @@ class AutomaticDimensionEstimate:
     weighting: SubspaceWeightingDiagnostics
 
 
+@dataclass(frozen=True)
+class _PredictorCandidateFailure:
+    horizon: int
+    order: int | None
+    stage: str
+    failure_type: str
+    reason: str
+
+
+def _predictor_failure(horizon, order, stage, failure):
+    if isinstance(failure, BaseException):
+        failure_type = type(failure).__name__
+        reason = " ".join(str(failure).split()) or failure_type
+    else:
+        failure_type, reason = failure
+    if len(reason) > 240:
+        reason = f"{reason[:237]}..."
+    return _PredictorCandidateFailure(
+        horizon=horizon,
+        order=order,
+        stage=stage,
+        failure_type=failure_type,
+        reason=reason,
+    )
+
+
+def _predictor_failure_message(failures):
+    failures = tuple(failures)
+    details = []
+    for failure in failures[:8]:
+        context = f"horizon={failure.horizon}"
+        if failure.order is not None:
+            context += f", order={failure.order}"
+        details.append(
+            f"[{context}, stage={failure.stage}] "
+            f"{failure.failure_type}: {failure.reason}"
+        )
+    if len(failures) > len(details):
+        details.append(f"{len(failures) - len(details)} additional failures omitted")
+    summary = "; ".join(details) if details else "no failure reason was recorded"
+    return (
+        "no valid predictor dimension candidate remains after automatic selection: "
+        f"{summary}"
+    )
+
+
 def _singular_gap(values, order):
     if order >= values.size:
         return np.inf
@@ -129,25 +175,39 @@ def _build_predictor_candidates(
 ):
     candidates = []
     weighting_by_dimension = {}
+    failures = []
     for horizon in horizons:
-        prepared = _prepare_predictor_subspace(
-            y,
-            u,
-            future_horizon=horizon,
-            past_horizon=horizon,
-            direct_feedthrough=direct_feedthrough,
-            strict_identifiability=True,
-            weighting=weighting,
-        )
-        orders, _ = _candidate_orders_from_singular_values(
-            prepared.singular_values,
-            horizon,
-            explicit_order=explicit_order,
-        )
+        try:
+            prepared = _prepare_predictor_subspace(
+                y,
+                u,
+                future_horizon=horizon,
+                past_horizon=horizon,
+                direct_feedthrough=direct_feedthrough,
+                strict_identifiability=True,
+                weighting=weighting,
+            )
+        except (ValueError, np.linalg.LinAlgError, OverflowError) as failure:
+            failures.append(_predictor_failure(horizon, None, "preparation", failure))
+            continue
+        try:
+            orders, _ = _candidate_orders_from_singular_values(
+                prepared.singular_values,
+                horizon,
+                explicit_order=explicit_order,
+            )
+        except (ValueError, np.linalg.LinAlgError, OverflowError) as failure:
+            failures.append(
+                _predictor_failure(horizon, None, "order-selection", failure)
+            )
+            continue
         for order in orders:
             try:
                 candidate = _predictor_candidate(prepared, order)
-            except (ValueError, np.linalg.LinAlgError, OverflowError):
+            except (ValueError, np.linalg.LinAlgError, OverflowError) as failure:
+                failures.append(
+                    _predictor_failure(horizon, order, "realization", failure)
+                )
                 continue
             if not all(
                 np.all(np.isfinite(matrix))
@@ -159,10 +219,21 @@ def _build_predictor_candidates(
                     candidate.K,
                 )
             ):
+                failures.append(
+                    _predictor_failure(
+                        horizon,
+                        order,
+                        "realization",
+                        (
+                            "NonFiniteRealization",
+                            "state-space realization contains non-finite values",
+                        ),
+                    )
+                )
                 continue
             candidates.append(candidate)
             weighting_by_dimension[(horizon, order)] = prepared.weighting_diagnostics
-    return candidates, weighting_by_dimension
+    return candidates, weighting_by_dimension, failures
 
 
 def select_automatic_dimensions(
@@ -238,7 +309,7 @@ def select_automatic_dimensions(
             )
 
     if route == "predictor":
-        candidates, weighting_by_dimension = _build_predictor_candidates(
+        candidates, weighting_by_dimension, failures = _build_predictor_candidates(
             training_y,
             training_u,
             horizons,
@@ -246,6 +317,8 @@ def select_automatic_dimensions(
             weighting=weighting,
             direct_feedthrough=direct_feedthrough,
         )
+        if not candidates:
+            raise ValueError(_predictor_failure_message(failures))
     selection = _select_dimension_candidate(
         candidates,
         outputs,
