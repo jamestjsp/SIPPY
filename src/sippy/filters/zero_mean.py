@@ -45,7 +45,7 @@ class ZeroMeanFilter(IFilter):
         data : pd.DataFrame
             Input time series data to center around zero
         tss : float, optional
-            Time to steady state in seconds (not used in this filter)
+            Time to steady state in minutes (not used in this filter)
         multiplier : float, optional
             Multiplier parameter (not used in this filter)
         slices : dict, optional

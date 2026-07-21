@@ -1,9 +1,8 @@
-"""
-High-pass filter implementation for signal preprocessing.
-"""
+"""High-pass detrending filter for process data."""
 
 from typing import Any, Dict, Optional
 
+import numpy as np
 import pandas as pd
 from scipy.signal import filtfilt, firwin, kaiserord
 
@@ -14,10 +13,12 @@ class HighPassFilter(IFilter):
     """
     High-pass filter for removing low-frequency trends from time series data.
 
-    Uses FIR filter design with Kaiser window for optimal stopband attenuation.
-    Suitable for removing slow drift from process data while preserving
-    dynamic variations of interest.
+    A zero-phase Kaiser FIR estimates the slow low-pass trend. The returned
+    signal is the processed input minus that trend, matching the historical
+    SIPPY detrending contract.
     """
+
+    _MAX_AUTO_TAPS = 1001
 
     def __init__(self, config: Optional[FilterConfig] = None):
         """
@@ -30,9 +31,9 @@ class HighPassFilter(IFilter):
         """
         super().__init__(config)
 
-        # Filter-specific defaults
-        self._ripple_db = 65  # Stopband attenuation in dB
-        self._width_factor = 0.5  # Transition width factor relative to Nyquist
+        self._ripple_db = 65.0
+        self._width_factor = 0.5
+        self._last_design: dict[str, float | int] | None = None
 
     def apply_filter(
         self,
@@ -50,7 +51,7 @@ class HighPassFilter(IFilter):
         data : pd.DataFrame
             Input time series data to filter
         tss : float, optional
-            Time to steady state in seconds (overrides config)
+            Time to steady state in minutes (overrides config)
         multiplier : float, optional
             Filter timestep multiplier for filter cutoff calculation
             (overrides config)
@@ -69,70 +70,94 @@ class HighPassFilter(IFilter):
         ValueError
             If data validation or filtering parameters are invalid
         """
-        # Validate input
         self._validate_input(data)
-
-        # Process slices for bad data
         processed_data = self._process_slices(data, slices or self.config.slices)
+        sample_time = self._calculate_sampling_time(processed_data)
+        sampling_frequency = 1.0 / sample_time
+        nyquist_frequency = sampling_frequency / 2.0
+        mult_factor = self.config.multiplier if multiplier is None else multiplier
+        if (
+            isinstance(mult_factor, bool)
+            or not np.isfinite(mult_factor)
+            or mult_factor <= 0
+        ):
+            raise ValueError("Multiplier must be positive and finite")
 
-        # Get or sampling time
-        if tss is not None:
-            tss_seconds = tss * 60  # Convert minutes to seconds
-        elif self.config.tss is not None:
-            tss_seconds = self.config.tss * 60
-        else:
-            tss_seconds = 60  # Default 1 minute
+        tss_minutes = self.config.tss if tss is None else tss
+        if tss_minutes is None:
+            tss_minutes = 1.0
+        if (
+            isinstance(tss_minutes, bool)
+            or not np.isfinite(tss_minutes)
+            or tss_minutes <= 0
+        ):
+            raise ValueError("Time to steady state must be positive and finite")
 
-        # Get multiplier
-        if multiplier is not None:
-            mult_factor = multiplier
-        else:
-            mult_factor = self.config.multiplier
-
-        try:
-            # Calculate sampling time from data
-            sample_time = self._calculate_sampling_time(processed_data)
-        except ValueError as e:
-            raise ValueError(f"Cannot process data: {e}")
-
-        # Calculate filter parameters
-        filter_tss = tss_seconds * mult_factor
-        cutoff = 1 / (2 * filter_tss)
-        nyquist_rate = sample_time / 2.0
-        width = self._width_factor * cutoff  # Width as fraction of cutoff
-
-        # Validate filter parameters
-        if cutoff <= 0 or cutoff >= nyquist_rate:
+        cutoff = self.config.cutoff
+        if cutoff is None:
+            cutoff = 1.0 / (2.0 * float(tss_minutes) * 60.0 * float(mult_factor))
+        if not 0.0 < cutoff < nyquist_frequency:
             raise ValueError(
-                f"Invalid cutoff frequency {cutoff} Hz. Must be between 0 and {nyquist_rate:.2f} Hz"
+                f"Cutoff frequency must be between 0 and Nyquist "
+                f"({nyquist_frequency:g} Hz); got {cutoff:g} Hz"
             )
 
-        if width >= cutoff:
+        transition_width = min(
+            self._width_factor * cutoff,
+            self._width_factor * (nyquist_frequency - cutoff),
+        )
+        normalized_width = transition_width / nyquist_frequency
+        requested_taps, beta = kaiserord(self._ripple_db, normalized_width)
+        if self.config.order is None:
+            maximum_taps = min(
+                self._MAX_AUTO_TAPS,
+                max(3, (len(processed_data) - 1) // 2),
+            )
+            num_taps = min(requested_taps, maximum_taps)
+        else:
+            num_taps = self.config.order + 1
+        if len(processed_data) <= 2 * num_taps:
             raise ValueError(
-                f"Filter width {width:.4f} Hz too large for cutoff {cutoff:.4f} Hz"
+                f"High-pass filtering with {num_taps} taps requires more than "
+                f"{2 * num_taps} samples; got {len(processed_data)}"
             )
 
         try:
-            # Design FIR filter
-            num_taps, beta = kaiserord(self._ripple_db, width)
-            window = ("kaiser", beta)
-            coef = firwin(
+            coefficients = firwin(
                 numtaps=num_taps,
                 cutoff=cutoff,
-                window=window,
-                pass_zero=False,  # High-pass
-                fs=nyquist_rate,
+                window=("kaiser", beta),
+                pass_zero=True,
+                fs=sampling_frequency,
             )
-        except Exception as e:
-            raise ValueError(f"Failed to design high-pass filter: {e}")
-
-        # Apply filter
-        try:
-            trend = processed_data.copy(deep=True)
-            for column in processed_data.columns:
-                trend[column] = filtfilt(coef, 1.0, processed_data[column].values)
-        except Exception as e:
-            raise ValueError(f"Failed to apply filter: {e}")
+            pad_length = min(3 * (num_taps - 1), len(processed_data) - 1)
+            trend_values = filtfilt(
+                coefficients,
+                1.0,
+                processed_data.to_numpy(),
+                axis=0,
+                padlen=pad_length,
+            )
+        except Exception as error:
+            raise ValueError(
+                f"Failed to apply high-pass detrending filter: {error}"
+            ) from error
+        trend = pd.DataFrame(
+            trend_values,
+            index=processed_data.index,
+            columns=processed_data.columns,
+        )
+        self._last_design = {
+            "sample_time_seconds": sample_time,
+            "sampling_frequency_hz": sampling_frequency,
+            "nyquist_frequency_hz": nyquist_frequency,
+            "cutoff_frequency_hz": cutoff,
+            "transition_width_hz": transition_width,
+            "requested_taps": requested_taps,
+            "order": num_taps - 1,
+            "num_taps": num_taps,
+            "pad_length": pad_length,
+        }
 
         # Handle slices for trend restoration
         if slices or self.config.slices:
@@ -158,14 +183,11 @@ class HighPassFilter(IFilter):
                                     start:end, col_idx
                                 ]
 
-        # Store results for backward compatibility
         self.data_manager.add_data("input", data, type="original")
         self.data_manager.add_data("trend", trend, type="filtered_trend")
-        self.data_manager.add_data(
-            "output", processed_data - trend, type="highpass_output"
-        )
-
-        return processed_data - trend
+        output = processed_data - trend
+        self.data_manager.add_data("output", output, type="highpass_output")
+        return output
 
     def get_filter_info(self) -> dict:
         """
@@ -180,6 +202,7 @@ class HighPassFilter(IFilter):
             "type": "HighPassFilter",
             "ripple_db": self._ripple_db,
             "width_factor": self._width_factor,
-            "description": "High-pass FIR filter using Kaiser window design",
+            "description": "Zero-phase Kaiser FIR trend subtraction",
             "suitable_for": "Removing low-frequency drift from process data",
+            "design": None if self._last_design is None else self._last_design.copy(),
         }

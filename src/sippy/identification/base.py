@@ -914,17 +914,28 @@ class IdentificationResult:
         u: Optional[np.ndarray] = None,
         *,
         prediction: bool = False,
+        x0: Optional[np.ndarray] = None,
+        burn_in: int = 0,
     ) -> np.ndarray:
-        """Return stored identification residuals or residuals on new data."""
+        """Return stored or validation residuals after an excluded prefix."""
         if y is None:
             if self._residuals is None:
                 raise ValueError("No identification residuals are stored")
-            return self._residuals.copy()
-        outputs = np.atleast_2d(np.asarray(y, dtype=float))
-        estimate = self.predict(u=u, y=outputs if prediction else None)
-        if estimate.shape != outputs.shape:
-            raise ValueError("Predicted and measured output shapes differ")
-        return outputs - estimate
+            if x0 is not None:
+                raise ValueError("x0 applies only when validation outputs are provided")
+            errors = self._residuals
+        else:
+            outputs = np.atleast_2d(np.asarray(y, dtype=float))
+            estimate = self.predict(
+                u=u,
+                y=outputs if prediction else None,
+                x0=x0,
+            )
+            if estimate.shape != outputs.shape:
+                raise ValueError("Predicted and measured output shapes differ")
+            errors = outputs - estimate
+        start = self._validate_burn_in(burn_in, errors.shape[1])
+        return errors[:, start:].copy()
 
     def fit(
         self,
@@ -932,17 +943,34 @@ class IdentificationResult:
         u: Optional[np.ndarray] = None,
         *,
         prediction: bool = False,
+        x0: Optional[np.ndarray] = None,
+        burn_in: int = 0,
     ) -> dict[str, Union[float, np.ndarray]]:
         """Return per-output normalized-RMSE fit and its aggregate score."""
         if y is None:
             if self._identification_output is None:
                 raise ValueError("No identification output is stored")
-            outputs = self._identification_output
-            outputs = outputs[:, self.fit_start :]
-            errors = self.residuals()[:, self.fit_start :]
+            if self._residuals is None:
+                raise ValueError("No identification residuals are stored")
+            if x0 is not None:
+                raise ValueError("x0 applies only when validation outputs are provided")
+            requested_start = self._validate_burn_in(
+                burn_in, self._identification_output.shape[1]
+            )
+            start = max(self.fit_start, requested_start)
+            outputs = self._identification_output[:, start:]
+            errors = self._residuals[:, start:]
         else:
             outputs = np.atleast_2d(np.asarray(y, dtype=float))
-            errors = self.residuals(outputs, u, prediction=prediction)
+            start = self._validate_burn_in(burn_in, outputs.shape[1])
+            errors = self.residuals(
+                outputs,
+                u,
+                prediction=prediction,
+                x0=x0,
+                burn_in=start,
+            )
+            outputs = outputs[:, start:]
         rmse = np.sqrt(np.mean(errors**2, axis=1))
         centered = outputs - np.mean(outputs, axis=1, keepdims=True)
         scale = np.sqrt(np.mean(centered**2, axis=1))
@@ -955,6 +983,19 @@ class IdentificationResult:
         finite_nrmse = nrmse[np.isfinite(nrmse)]
         score = float(np.mean(finite_nrmse)) if finite_nrmse.size else np.nan
         return {"nrmse": nrmse, "score": score}
+
+    @staticmethod
+    def _validate_burn_in(burn_in: int, sample_count: int) -> int:
+        if (
+            isinstance(burn_in, bool)
+            or not isinstance(burn_in, (int, np.integer))
+            or burn_in < 0
+            or burn_in >= sample_count
+        ):
+            raise ValueError(
+                "burn_in must be a non-negative integer that leaves at least one sample"
+            )
+        return int(burn_in)
 
     def supports_optimization_methods(self) -> bool:
         """
