@@ -130,6 +130,130 @@ def test_fit_reports_per_output_nrmse_and_aggregate_score():
     assert np.all(fit["nrmse"] <= 1.0)
 
 
+@pytest.mark.parametrize("state_count", [1, 2])
+def test_validation_fit_uses_initial_state_and_excludes_burn_in(state_count):
+    sample_count = 80
+    A = np.diag(np.linspace(0.55, 0.75, state_count))
+    B = np.ones((state_count, 1)) * 0.2
+    C = np.vstack([np.ones(state_count), np.linspace(0.5, 1.0, state_count)])
+    D = np.zeros((2, 1))
+    model = _model(
+        A=A,
+        B=B,
+        C=C,
+        D=D,
+        K=np.zeros((state_count, 2)),
+        Q=np.eye(state_count),
+        R=np.eye(2),
+        S=np.zeros((state_count, 2)),
+    )
+    inputs = np.sin(np.linspace(0.0, 8.0, sample_count))[None, :]
+    initial_state = np.arange(1, state_count + 1, dtype=float)[:, None]
+    _, exact_outputs = model.simulate(inputs, x0=initial_state)
+    noise = np.vstack(
+        [
+            0.01 * np.sin(np.linspace(0.0, 15.0, sample_count)),
+            0.02 * np.cos(np.linspace(0.0, 12.0, sample_count)),
+        ]
+    )
+    measured = exact_outputs + noise
+    burn_in = 7
+
+    residuals = model.residuals(
+        measured,
+        inputs,
+        x0=initial_state,
+        burn_in=burn_in,
+    )
+    fit = model.fit(
+        measured,
+        inputs,
+        x0=initial_state,
+        burn_in=burn_in,
+    )
+
+    np.testing.assert_allclose(residuals, noise[:, burn_in:])
+    rmse = np.sqrt(np.mean(noise[:, burn_in:] ** 2, axis=1))
+    scored_outputs = measured[:, burn_in:]
+    scale = np.sqrt(
+        np.mean(
+            (scored_outputs - scored_outputs.mean(axis=1, keepdims=True)) ** 2,
+            axis=1,
+        )
+    )
+    expected_nrmse = 1.0 - rmse / scale
+    np.testing.assert_allclose(fit["nrmse"], expected_nrmse)
+    assert fit["score"] == pytest.approx(np.mean(expected_nrmse))
+
+
+def test_validation_one_step_fit_delegates_to_predictor_with_initial_state():
+    sample_count = 60
+    model = _model(K=np.array([[0.35]]))
+    inputs = np.cos(np.linspace(0.0, 6.0, sample_count))[None, :]
+    initial_state = np.array([[0.8]])
+    _, deterministic = model.simulate(inputs, x0=initial_state)
+    measured = (
+        deterministic + 0.03 * np.sin(np.linspace(0.0, 20.0, sample_count))[None, :]
+    )
+    burn_in = 5
+
+    prediction = model.predict(u=inputs, y=measured, x0=initial_state)
+    expected_errors = measured[:, burn_in:] - prediction[:, burn_in:]
+    residuals = model.residuals(
+        measured,
+        inputs,
+        prediction=True,
+        x0=initial_state,
+        burn_in=burn_in,
+    )
+    fit = model.fit(
+        measured,
+        inputs,
+        prediction=True,
+        x0=initial_state,
+        burn_in=burn_in,
+    )
+
+    np.testing.assert_allclose(residuals, expected_errors)
+    expected_rmse = np.sqrt(np.mean(expected_errors**2, axis=1))
+    scored_outputs = measured[:, burn_in:]
+    expected_scale = np.sqrt(
+        np.mean(
+            (scored_outputs - scored_outputs.mean(axis=1, keepdims=True)) ** 2,
+            axis=1,
+        )
+    )
+    np.testing.assert_allclose(fit["nrmse"], 1.0 - expected_rmse / expected_scale)
+
+
+@pytest.mark.parametrize("burn_in", [-1, True, 20, 1.5])
+def test_validation_analysis_rejects_invalid_burn_in(burn_in):
+    model = _model()
+    inputs = np.ones((1, 20))
+    _, outputs = model.simulate(inputs)
+
+    with pytest.raises(ValueError, match="burn_in"):
+        model.residuals(outputs, inputs, burn_in=burn_in)
+    with pytest.raises(ValueError, match="burn_in"):
+        model.fit(outputs, inputs, burn_in=burn_in)
+
+
+def test_stored_analysis_rejects_validation_initial_state():
+    model = _model(Yid=np.zeros((1, 10)))
+    model.finalize_identification(
+        method="FIR",
+        input_data=np.ones((1, 10)),
+        output_data=np.ones((1, 10)),
+        covariance_source=None,
+        kalman_gain_source=None,
+    )
+
+    with pytest.raises(ValueError, match="validation outputs"):
+        model.residuals(x0=np.zeros((1, 1)))
+    with pytest.raises(ValueError, match="validation outputs"):
+        model.fit(x0=np.zeros((1, 1)))
+
+
 def test_diagonal_innovations_model_supports_generic_one_step_prediction():
     process = control.tf([0.5], [1.0, -0.7], dt=1.0)
     innovations = control.tf([1.0, 0.25], [1.0, -0.2], dt=1.0)
