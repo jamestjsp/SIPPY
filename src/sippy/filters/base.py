@@ -34,25 +34,38 @@ class FilterConfig:
         cutoff : float, optional
             Filter cutoff frequency in Hz
         order : int, optional
-            Filter order (for FIR filters)
+            FIR order; the designed filter has ``order + 1`` taps
         tss : float, optional
-            Time to steady state in seconds
+            Time to steady state in minutes
         multiplier : float, default 3.0
             Multiplication factor for filter time to steady state
         slices : dict, optional
             Data slice definitions for processing
         """
-        self.cutoff = cutoff
-        self.order = order
-        self.tss = tss
-        self.multiplier = multiplier
-        self.slices = slices or {}
+        if cutoff is not None and (
+            isinstance(cutoff, bool) or not np.isfinite(cutoff) or cutoff <= 0
+        ):
+            raise ValueError("Cutoff frequency must be positive and finite")
+        if order is not None and (
+            isinstance(order, bool) or not isinstance(order, int) or order < 1
+        ):
+            raise ValueError("FIR order must be a positive integer")
+        if (
+            isinstance(multiplier, bool)
+            or not np.isfinite(multiplier)
+            or multiplier <= 0
+        ):
+            raise ValueError("Multiplier must be positive and finite")
+        if tss is not None and (
+            isinstance(tss, bool) or not np.isfinite(tss) or tss <= 0
+        ):
+            raise ValueError("Time to steady state must be positive and finite")
 
-        # Validate configuration
-        if multiplier <= 0:
-            raise ValueError("Multiplier must be positive")
-        if tss is not None and tss <= 0:
-            raise ValueError("Time to steady state must be positive")
+        self.cutoff = None if cutoff is None else float(cutoff)
+        self.order = order
+        self.tss = None if tss is None else float(tss)
+        self.multiplier = float(multiplier)
+        self.slices = slices or {}
 
 
 class FilterDataManager:
@@ -181,7 +194,7 @@ class IFilter(ABC):
         data : pd.DataFrame
             Input data to filter
         tss : float, optional
-            Time to steady state in seconds (overrides config)
+            Time to steady state in minutes (overrides config)
         multiplier : float, optional
             Filter timestep multiplier (overrides config)
         slices : dict, optional

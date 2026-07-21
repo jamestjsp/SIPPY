@@ -575,8 +575,7 @@ processed_data = iddata.handle_slices(
 ### Available Filters
 
 ```python
-from sippy.filters.factory import FilterFactory
-from sippy.filters.base import FilterConfig
+from sippy.filters import FilterConfig, FilterFactory
 
 # Create filters
 high_pass = FilterFactory.create('high_pass')
@@ -588,12 +587,12 @@ none_filter = FilterFactory.create('none')  # Pass-through
 ### Filter Configuration
 
 ```python
-from sippy.filters.base import FilterConfig
+from sippy.filters import FilterConfig
 
 config = FilterConfig(
     cutoff=0.1,               # Cutoff frequency (Hz)
-    order=4,                  # Filter order
-    tss=60.0,                 # Time to steady state (seconds)
+    order=100,                # FIR order (101 taps)
+    tss=60.0,                 # Process time to steady state (minutes)
     multiplier=3.0,           # TSS multiplier
     slices={                   # Data slices to process
         'input_1': 'slice(100,200)'
@@ -604,15 +603,19 @@ config = FilterConfig(
 ### Applying Filters
 
 ```python
-from sippy.filters.high_pass import HighPassFilter
+from sippy.filters import FilterConfig, FilterFactory
 
-# Create filter with configuration
-filter = HighPassFilter(FilterConfig(cutoff=0.1, order=4))
+# Estimate trends slower than three process settling times
+filter = FilterFactory.create(
+    'high_pass',
+    FilterConfig(tss=60.0, multiplier=3.0, order=100),
+)
 
 # Apply filter to DataFrame
-filtered_data = filter.apply_filter(data, tss=60.0)
+filtered_data = filter.apply_filter(data)
 
-# Access filtered data
+# Access the estimated trend and detrended output
+trend = filter.data_manager.get_data('trend')
 filtered_output = filter.data_manager.get_data('output')
 metadata = filter.data_manager.get_metadata('output')
 ```
@@ -805,7 +808,7 @@ plt.show()
 import pandas as pd
 import numpy as np
 from sippy.identification.iddata import IDData
-from sippy.filters.factory import FilterFactory
+from sippy.filters import FilterConfig, FilterFactory
 from sippy.identification import SystemIdentification, SystemIdentificationConfig
 
 # Create realistic industrial data
@@ -839,14 +842,16 @@ iddata = IDData(
     interpolate_method='linear'
 )
 
-# Apply preprocessing filters
-high_pass = FilterFactory.create('high_pass', 
-                                 FilterConfig(cutoff=1/60, order=4))  # 1/60 Hz = 1 min
-filtered_data = high_pass.apply_filter(iddata.input_data)
+# Apply the same preprocessing filter to inputs and outputs
+high_pass = FilterFactory.create(
+    'high_pass',
+    FilterConfig(tss=20.0, multiplier=3.0, order=100),
+)
+filtered_data = high_pass.apply_filter(data)
 
 # Create filtered IDData
 filtered_iddata = IDData(
-    data=pd.concat([filtered_data, iddata.output_data], axis=1),
+    data=filtered_data,
     inputs=['temperature', 'flow_rate'],
     outputs=['pressure'],
     tsample=60.0  # 1 minute
@@ -1130,18 +1135,21 @@ model = system_identification(y=y_proc, u=u_proc, id_method='N4SID')
 ```python
 # After: Modern pipeline
 from sippy.identification.iddata import IDData
-from sippy.filters.factory import FilterFactory
+from sippy.filters import FilterConfig, FilterFactory
 
 # Create data object with built-in preprocessing
 data = pd.DataFrame({'y': y[0], 'u': u[0]})
 iddata = IDData(data, inputs=['u'], outputs=['y']).remove_mean()
 
 # Apply filters
-high_pass = FilterFactory.create('high_pass')
-filtered_data = high_pass.apply_filter(iddata.input_data, tss=60.0)
+high_pass = FilterFactory.create(
+    'high_pass',
+    FilterConfig(tss=60.0, multiplier=3.0, order=100),
+)
+filtered_data = high_pass.apply_filter(data)
 
 filtered_iddata = IDData(
-    pd.concat([filtered_data, iddata.output_data], axis=1),
+    filtered_data,
     inputs=['u'],
     outputs=['y'],
     tsample=1.0
