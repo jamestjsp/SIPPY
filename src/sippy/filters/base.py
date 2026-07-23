@@ -245,6 +245,9 @@ class IFilter(ABC):
         )
         return processed
 
+    def _resolve_slices(self, slices: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        return self.config.slices if slices is None else slices
+
     def _calculate_sampling_time(self, data: pd.DataFrame) -> float:
         """
         Calculate sampling time from data index.

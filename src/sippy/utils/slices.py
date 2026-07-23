@@ -94,9 +94,9 @@ def process_slices(
 
     if bad_present and bad_strategy != "nan":
         if bad_strategy == "ffill":
-            processed = processed.ffill()
+            processed = processed.ffill().bfill()
         elif bad_strategy == "bfill":
-            processed = processed.bfill()
+            processed = processed.bfill().ffill()
         else:
             # Unknown strategy -> leave NaNs as-is
             pass

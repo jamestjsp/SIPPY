@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from ..iddata import IDData
 
@@ -52,6 +53,37 @@ def test_iddata_with_interpolate_slice():
 
     # interpolation should remove NaNs
     assert not idd.output_data.isna().any().any()
+
+
+@pytest.mark.parametrize(
+    ("bad_strategy", "start", "end", "source"),
+    [("ffill", 0, 3, 3), ("bfill", 17, 20, 16)],
+)
+def test_iddata_fills_bad_slices_at_record_edges(bad_strategy, start, end, source):
+    df = build_df(20)
+    slices = {
+        "edge": {
+            "type": "bad",
+            "isGlobal": False,
+            "start": start,
+            "end": end,
+            "tags": ["u"],
+        }
+    }
+
+    idd = IDData(
+        df,
+        ["u"],
+        ["y"],
+        slices=slices,
+        bad_strategy=bad_strategy,
+    )
+
+    assert not idd.input_data.isna().any().any()
+    np.testing.assert_allclose(
+        idd.input_data["u"].iloc[start:end],
+        df["u"].iloc[source],
+    )
 
 
 def test_drop_masked_any():

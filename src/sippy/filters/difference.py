@@ -87,7 +87,7 @@ class DifferenceFilter(IFilter):
         self._validate_input(data)
 
         # Process slices for bad data
-        processed_data = self._process_slices(data, slices or self.config.slices)
+        processed_data = self._process_slices(data, self._resolve_slices(slices))
 
         # Apply difference based on order
         try:

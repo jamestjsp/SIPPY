@@ -65,6 +65,17 @@ class TestFilterFactory:
         # Test creating with config (config should be passed through)
         assert highpass.config.multiplier == 2.5
 
+    def test_create_filter_validates_overrides_without_mutating_config(self):
+        config = FilterConfig(cutoff=1e-3, order=20)
+
+        highpass = FilterFactory.create("highpass", config=config, order=30)
+
+        assert highpass.config.order == 30
+        assert config.order == 20
+        with pytest.raises(ValueError, match="positive integer"):
+            FilterFactory.create("highpass", config=config, order=0)
+        assert config.order == 20
+
     def test_create_filter_invalid(self):
         """Test creating non-existent filter."""
         with pytest.raises(ValueError):

@@ -66,7 +66,7 @@ class NoneFilter(IFilter):
         self._validate_input(data)
 
         # Process slices for bad data if provided
-        processed_data = self._process_slices(data, slices or self.config.slices)
+        processed_data = self._process_slices(data, self._resolve_slices(slices))
 
         # Store results for backward compatibility
         self.data_manager.add_data("input", data, type="original")

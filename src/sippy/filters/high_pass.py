@@ -71,7 +71,8 @@ class HighPassFilter(IFilter):
             If data validation or filtering parameters are invalid
         """
         self._validate_input(data)
-        processed_data = self._process_slices(data, slices or self.config.slices)
+        selected_slices = self._resolve_slices(slices)
+        processed_data = self._process_slices(data, selected_slices)
         sample_time = self._calculate_sampling_time(processed_data)
         sampling_frequency = 1.0 / sample_time
         nyquist_frequency = sampling_frequency / 2.0
@@ -160,9 +161,8 @@ class HighPassFilter(IFilter):
         }
 
         # Handle slices for trend restoration
-        if slices or self.config.slices:
-            all_slices = slices or self.config.slices
-            for slice_info in all_slices.values():
+        if selected_slices:
+            for slice_info in selected_slices.values():
                 if slice_info["type"] == "bad":
                     if slice_info.get("isGlobal", False):
                         # Restore original data for bad slices (global)

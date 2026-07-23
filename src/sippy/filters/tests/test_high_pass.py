@@ -141,6 +141,68 @@ def test_high_pass_preserves_slice_alignment_and_zeros_bad_channel_span():
     assert np.any(np.abs(result["second"].iloc[100:110]) > 0.0)
 
 
+def test_high_pass_handles_bad_channel_span_at_start_of_record():
+    index = pd.date_range("2026-01-01", periods=800, freq="1min")
+    data = pd.DataFrame(
+        {
+            "first": np.sin(np.linspace(0.0, 20.0, len(index))),
+            "second": np.cos(np.linspace(0.0, 20.0, len(index))),
+        },
+        index=index,
+    )
+    slices = {
+        "startup": {
+            "type": "bad",
+            "isGlobal": False,
+            "start": 0,
+            "end": 10,
+            "tags": ["first"],
+        }
+    }
+    detrending_filter = FilterFactory.create(
+        "highpass",
+        FilterConfig(cutoff=5e-4, order=50, slices=slices),
+    )
+
+    result = detrending_filter.apply_filter(data)
+
+    assert np.isfinite(result.to_numpy()).all()
+    np.testing.assert_allclose(result["first"].iloc[:10], 0.0)
+    assert np.any(np.abs(result["first"].iloc[10:]) > 0.0)
+
+
+@pytest.mark.parametrize("filter_name", ["highpass", "difference", "zeromean", "none"])
+def test_explicit_empty_slices_override_configured_slices(filter_name):
+    index = pd.date_range("2026-01-01", periods=800, freq="1min")
+    data = pd.DataFrame(
+        {
+            "first": np.sin(np.linspace(0.0, 20.0, len(index))),
+            "second": np.cos(np.linspace(0.0, 20.0, len(index))),
+        },
+        index=index,
+    )
+    slices = {
+        "invalid": {
+            "type": "bad",
+            "isGlobal": False,
+            "start": 100,
+            "end": 110,
+            "tags": ["first"],
+        }
+    }
+    design = {"cutoff": 5e-4, "order": 50} if filter_name == "highpass" else {}
+    configured_filter = FilterFactory.create(
+        filter_name,
+        FilterConfig(slices=slices, **design),
+    )
+    baseline_filter = FilterFactory.create(filter_name, FilterConfig(**design))
+
+    result = configured_filter.apply_filter(data, slices={})
+    expected = baseline_filter.apply_filter(data)
+
+    pd.testing.assert_frame_equal(result, expected)
+
+
 @pytest.mark.parametrize(
     "configuration",
     [

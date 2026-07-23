@@ -128,11 +128,18 @@ class FilterFactory:
             filter_class = cls._filters[normalized_name]
 
             # Merge config with kwargs
-            if config:
-                # Update config with kwargs
-                for key, value in kwargs.items():
-                    setattr(config, key, value)
-                return filter_class(config)
+            if config is not None:
+                if not kwargs:
+                    return filter_class(config)
+                values = {
+                    "cutoff": config.cutoff,
+                    "order": config.order,
+                    "tss": config.tss,
+                    "multiplier": config.multiplier,
+                    "slices": config.slices,
+                }
+                values.update(kwargs)
+                return filter_class(FilterConfig(**values))
             else:
                 # Create config from kwargs
                 return (
